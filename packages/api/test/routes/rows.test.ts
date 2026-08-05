@@ -142,3 +142,84 @@ describe("POST /db/:database/:table", () => {
     expect(res.statusCode).toBe(201);
   });
 });
+
+describe("PATCH /db/:database/:table — toplu güncelleme", () => {
+  it("where filtresi olmadan 400 döner", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/db/project1/users",
+      headers: { Authorization: `Bearer ${dbToken}` },
+      payload: { name: "Updated" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/where filter required/i);
+  });
+
+  it("where filtresi ile 200 döner", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/db/project1/users?where=id.eq.1",
+      headers: { Authorization: `Bearer ${dbToken}` },
+      payload: { name: "Updated" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("token olmadan 401 döner", async () => {
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/db/project1/users?where=id.eq.1",
+      payload: { name: "x" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("DELETE /db/:database/:table — toplu silme", () => {
+  it("where filtresi olmadan 400 döner", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/users",
+      headers: { Authorization: `Bearer ${dbToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/where filter required/i);
+  });
+
+  it("where filtresi ile 200 döner", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/users?where=id.eq.1",
+      headers: { Authorization: `Bearer ${dbToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("delete scope olmadan 403 döner", async () => {
+    const jwtSvcDirect = new JwtService(JWT_SECRET);
+    const readOnlyToken = await jwtSvcDirect.signDbToken("project1", ["read"]);
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/users?where=id.eq.1",
+      headers: { Authorization: `Bearer ${readOnlyToken}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe("GET /db/:database/:table — read-only transaction", () => {
+  it("begin 'read only' transaction ile çağrılır", async () => {
+    const { default: postgres } = await import("postgres");
+    const ctor = postgres as ReturnType<typeof vi.fn>;
+    // Mock factory'nin döndürdüğü sql fn'ini bul
+    const sqlFn = ctor.mock.results[ctor.mock.results.length - 1]?.value;
+
+    await server.inject({
+      method: "GET",
+      url: "/db/project1/users",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(sqlFn?.begin).toHaveBeenCalledWith("read only", expect.any(Function));
+  });
+});

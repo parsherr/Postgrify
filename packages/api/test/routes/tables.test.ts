@@ -140,4 +140,108 @@ describe("POST /db/:database/tables", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it("geçersiz col.type injection reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "hacked",
+        columns: [{ name: "x", type: "TEXT; DROP TABLE users" }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("geçersiz col.type 'VOID' reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "hacked",
+        columns: [{ name: "x", type: "VOID" }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("'VARCHAR(255)' parantezli tip geçer — 201", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "products",
+        columns: [
+          { name: "id", type: "serial", primaryKey: true },
+          { name: "title", type: "VARCHAR(255)", nullable: false },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("col.default injection 'now()); DROP TABLE users; --' reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "evil",
+        columns: [
+          { name: "ts", type: "TIMESTAMPTZ", default: "now()); DROP TABLE users; --" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("col.default 'now()' geçer — 201", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "events",
+        columns: [
+          { name: "id", type: "serial", primaryKey: true },
+          { name: "created_at", type: "TIMESTAMPTZ", default: "now()" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("col.default \"'active'\" quoted string geçer — 201", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "items",
+        columns: [
+          { name: "id", type: "serial", primaryKey: true },
+          { name: "status", type: "TEXT", default: "'active'" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("col.default tırnak injection reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/tables",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: {
+        name: "evil2",
+        columns: [
+          { name: "x", type: "TEXT", default: "'; DROP TABLE users; --'" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });

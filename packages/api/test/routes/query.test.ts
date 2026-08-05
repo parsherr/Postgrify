@@ -137,4 +137,62 @@ describe("POST /db/:database/query", () => {
     // Admin tam SQL izni var, engellenmemeli
     expect(res.statusCode).toBe(200);
   });
+
+  it("writeable CTE bypass: WITH x AS (DELETE...) SELECT reddedilir — 403", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/query",
+      headers: { Authorization: `Bearer ${queryToken}` },
+      payload: { sql: "WITH x AS (DELETE FROM users WHERE id=1) SELECT 1" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toMatch(/Writable CTE/i);
+  });
+
+  it("writeable CTE bypass: WITH x AS (INSERT...) SELECT reddedilir — 403", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/query",
+      headers: { Authorization: `Bearer ${queryToken}` },
+      payload: { sql: "WITH x AS (INSERT INTO users VALUES(1)) SELECT 1" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("writeable CTE bypass: WITH x AS (UPDATE...) SELECT reddedilir — 403", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/query",
+      headers: { Authorization: `Bearer ${queryToken}` },
+      payload: { sql: "WITH x AS (UPDATE users SET name='x') SELECT 1" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("read-only CTE WITH x AS (SELECT...) SELECT geçer — 200", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/query",
+      headers: { Authorization: `Bearer ${queryToken}` },
+      payload: { sql: "WITH x AS (SELECT 1 AS n) SELECT * FROM x" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("SELECT-only modda begin 'read only' transaction kullanılır", async () => {
+    const { default: postgres } = await import("postgres");
+    const sqlFn = (postgres as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+
+    await server.inject({
+      method: "POST",
+      url: "/db/project1/query",
+      headers: { Authorization: `Bearer ${queryToken}` },
+      payload: { sql: "SELECT 1" },
+    });
+
+    expect(sqlFn?.begin).toHaveBeenCalledWith(
+      "read only",
+      expect.any(Function)
+    );
+  });
 });

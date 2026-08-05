@@ -58,16 +58,17 @@ export async function queryRoute(server: FastifyInstance) {
           });
         }
 
-        if (BLOCKED_KEYWORDS.test(rawSql)) {
-          return reply.status(403).send({
-            error: "Query contains blocked keywords",
-          });
-        }
-
         // Writeable CTE bypass koruması: WITH ... (INSERT|UPDATE|DELETE|...) SELECT
+        // BLOCKED_KEYWORDS'den önce kontrol edilmeli — daha spesifik hata mesajı döner
         if (WRITABLE_CTE_PATTERN.test(rawSql)) {
           return reply.status(403).send({
             error: "Writable CTEs are not allowed in SELECT-only mode",
+          });
+        }
+
+        if (BLOCKED_KEYWORDS.test(rawSql)) {
+          return reply.status(403).send({
+            error: "Query contains blocked keywords",
           });
         }
       }

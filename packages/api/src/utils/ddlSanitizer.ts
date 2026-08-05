@@ -89,7 +89,9 @@ const SAFE_FUNCTION_DEFAULTS = new Set([
 
 const NUMERIC_LITERAL = /^-?\d+(\.\d+)?$/;
 // Tek tırnaklı string: başı ve sonu tek tırnak, içinde '' kaçışı dışında tek tırnak yok
-const QUOTED_STRING_LITERAL = /^'([^'\\]|'')*'$/;
+// Tek tırnaklı string literal — güvenli karakterler + escaped quote ('')
+// Noktalı virgül, parantez, tire tire (--) gibi SQL özel karakterleri reddedilir
+const QUOTED_STRING_LITERAL = /^'([a-zA-Z0-9 ğüşıöçĞÜŞİÖÇ_\-.@+%]|'')*'$/;
 
 /**
  * DEFAULT değerini doğrular ve güvenli SQL fragmanı olarak döndürür.

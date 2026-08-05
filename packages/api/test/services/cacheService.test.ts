@@ -2,7 +2,7 @@
  * CacheService unit testleri — in-memory LRU modu (Redis gerekmez).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { CacheService } from "../../src/services/cacheService.js";
 
 let cache: CacheService;
@@ -60,5 +60,73 @@ describe("CacheService (in-memory)", () => {
     await cache.set("test:json", JSON.stringify(data), 60);
     const raw = await cache.get("test:json");
     expect(JSON.parse(raw!)).toEqual(data);
+  });
+});
+
+describe("CacheService (Redis mock)", () => {
+  it("invalidatePattern KEYS değil scanIterator kullanır", async () => {
+    const keysInRedis = ["postgrify:db1:rows:a", "postgrify:db1:rows:b"];
+
+    // Async iterator döndüren scanIterator mock'u
+    const scanIteratorMock = vi.fn().mockReturnValue(
+      (async function* () {
+        for (const k of keysInRedis) yield k;
+      })()
+    );
+    const delMock = vi.fn().mockResolvedValue(2);
+    const keysMock = vi.fn(); // çağrılmamalı
+
+    const fakeRedis = {
+      scanIterator: scanIteratorMock,
+      del: delMock,
+      keys: keysMock,
+    };
+
+    // CacheService'in private redis alanını doğrudan inject et
+    const svc = new CacheService("redis://fake");
+    // @ts-expect-error private erişim test için
+    svc.redis = fakeRedis;
+
+    await svc.invalidatePattern("postgrify:db1:rows:*");
+
+    expect(scanIteratorMock).toHaveBeenCalledWith({
+      MATCH: "postgrify:db1:rows:*",
+      COUNT: 100,
+    });
+    expect(delMock).toHaveBeenCalledWith(keysInRedis);
+    expect(keysMock).not.toHaveBeenCalled();
+  });
+
+  it("scanIterator 0 sonuç döndürünce del çağrılmaz", async () => {
+    const scanIteratorMock = vi.fn().mockReturnValue(
+      (async function* () {})()
+    );
+    const delMock = vi.fn();
+
+    const svc = new CacheService("redis://fake");
+    // @ts-expect-error private erişim test için
+    svc.redis = { scanIterator: scanIteratorMock, del: delMock };
+
+    await svc.invalidatePattern("postgrify:empty:*");
+
+    expect(delMock).not.toHaveBeenCalled();
+  });
+
+  it("scanIterator birden fazla key döndürünce del tümünü siler", async () => {
+    const keys = ["k1", "k2", "k3", "k4", "k5"];
+    const scanIteratorMock = vi.fn().mockReturnValue(
+      (async function* () {
+        for (const k of keys) yield k;
+      })()
+    );
+    const delMock = vi.fn().mockResolvedValue(keys.length);
+
+    const svc = new CacheService("redis://fake");
+    // @ts-expect-error private erişim test için
+    svc.redis = { scanIterator: scanIteratorMock, del: delMock };
+
+    await svc.invalidatePattern("k*");
+
+    expect(delMock).toHaveBeenCalledWith(keys);
   });
 });

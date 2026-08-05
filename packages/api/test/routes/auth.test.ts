@@ -105,4 +105,83 @@ describe("POST /auth/token", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("expiresIn '169h' ile 400 döner (max 168h aşıldı)", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token",
+      payload: { database: "project1", secret: TEST_ADMIN_SECRET, expiresIn: "169h" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/168h/);
+  });
+
+  it("expiresIn '168h' ile 200 döner (sınırda geçmeli)", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token",
+      payload: { database: "project1", secret: TEST_ADMIN_SECRET, expiresIn: "168h" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("expiresIn '2d' ile 200 döner (48h, sınır dahilinde)", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token",
+      payload: { database: "project1", secret: TEST_ADMIN_SECRET, expiresIn: "2d" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("expiresIn 'geçersiz' format ile 400 döner", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token",
+      payload: { database: "project1", secret: TEST_ADMIN_SECRET, expiresIn: "onehour" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/Invalid expiresIn/);
+  });
+});
+
+describe("POST /auth/token/admin — expiresIn sınırları", () => {
+  it("expiresIn '25h' ile 400 döner (max 24h aşıldı)", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token/admin",
+      payload: { adminSecret: TEST_ADMIN_SECRET, expiresIn: "25h" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/24h/);
+  });
+
+  it("expiresIn '24h' ile 200 döner (sınırda geçmeli)", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token/admin",
+      payload: { adminSecret: TEST_ADMIN_SECRET, expiresIn: "24h" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("expiresIn 'abc' geçersiz format ile 400 döner", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token/admin",
+      payload: { adminSecret: TEST_ADMIN_SECRET, expiresIn: "abc" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/Invalid expiresIn/);
+  });
+
+  it("yanlış admin secret timing-safe şekilde 401 döner", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/auth/token/admin",
+      payload: { adminSecret: "completely-wrong-secret-123456" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe("Invalid admin secret");
+  });
 });
