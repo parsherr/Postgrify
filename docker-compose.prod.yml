@@ -1,0 +1,20 @@
+version: "3.9"
+
+# Postgrify — production override
+# Kullanım: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    ports: []  # production'da DB portunu dışa açma
+
+  redis:
+    ports: []  # production'da Redis portunu dışa açma
+
+  api:
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+
+  gui:
+    environment:
+      NODE_ENV: production

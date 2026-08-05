@@ -1,0 +1,19 @@
+{
+  "name": "postgrify",
+  "version": "0.1.0",
+  "description": "Multi-database PostgreSQL REST gateway",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=packages/api",
+    "dev:gui": "npm run dev --workspace=packages/gui",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
