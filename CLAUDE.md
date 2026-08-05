@@ -93,15 +93,24 @@ Tests use Vitest. `test/setup.ts` overrides all env vars (including `NODE_ENV=te
 
 ## Environment variables
 
-`packages/.env` is required to run via Docker Compose. See `exampleenv.md` at the repo root for all variables with descriptions. Mandatory ones: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars). In Docker, `PG_HOST` must be `postgres` (container name), not `localhost`.
+`packages/.env` is required to run via Docker Compose. `packages/.env.example` is the template — copy and fill in secrets. Mandatory: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars).
+
+**Docker Compose setup:** `PG_HOST=host.docker.internal` — the API container connects to the host machine's PostgreSQL (not a Docker-managed postgres container). `REDIS_URL=redis://redis:6379` (the Redis service name). There is no `postgres` service in docker-compose.yml; the host's PostgreSQL is used directly so data is never tied to Docker volumes.
+
+Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAME>=<secret>` in the environment (e.g. `DB_SECRET_PROJECT1=my-secret`).
 
 ## Port map (Docker)
 
-| Service  | Host port | Container port |
-|----------|-----------|----------------|
-| GUI      | 5173      | 80             |
-| API      | 3000      | 3000           |
-| Postgres | 5433      | 5432           |
-| Redis    | 6379      | 6379           |
+| Service  | Host port | Notes |
+|----------|-----------|-------|
+| GUI      | 5173      | nginx serving React build; proxies `/api/*` → API |
+| API      | 3000      | Fastify |
+| Redis    | 6379      | |
+| PostgreSQL | 5432    | **Host machine's PostgreSQL** — not a Docker container |
 
-Postgres is on host port **5433** (not 5432) because a local PostgreSQL instance typically occupies 5432.
+GUI's nginx proxies `/api/` to `http://api:3000/` so `VITE_API_URL=/api` works regardless of the host IP. No `localhost:3000` hardcoded in the browser.
+
+### Host PostgreSQL prerequisites
+The host's PostgreSQL must accept connections from Docker's network range:
+- `postgresql.conf`: `listen_addresses = '*'`
+- `pg_hba.conf`: `host all all 172.16.0.0/12 scram-sha-256`
