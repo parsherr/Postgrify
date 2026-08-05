@@ -20,16 +20,104 @@ git clone https://github.com/yourname/postgrify
 cd postgrify
 
 # 2. Ortam değişkenlerini ayarla
-cp exampleenv.md .env
-# .env içindeki başlık/yorum satırlarını sil, sadece KEY=VALUE satırları kalsın
-# PG_PASSWORD, JWT_SECRET, ADMIN_SECRET değerlerini doldur
+cp packages/.env.example packages/.env
+# packages/.env içinde şu üç değeri mutlaka doldur:
+#   PG_PASSWORD   — PostgreSQL şifresi
+#   JWT_SECRET    — en az 32 karakter  →  openssl rand -hex 32
+#   ADMIN_SECRET  — en az 16 karakter  →  openssl rand -base64 18
+# Ayrıca POSTGRES_PASSWORD değerini PG_PASSWORD ile aynı yap.
 
 # 3. Başlat
+cd packages
+docker compose up -d --build
+```
+
+Servisler ayağa kalktıktan sonra:
+
+| Servis   | URL                              |
+|----------|----------------------------------|
+| GUI      | http://localhost:5173            |
+| API      | http://localhost:3000            |
+| API Docs | http://localhost:3000/api-docs   |
+
+---
+
+## Docker ile Yönetim
+
+### Başlatma
+
+```bash
+cd packages
+
+# İlk kurulum veya Dockerfile değiştikten sonra (image yeniden build eder)
+docker compose up -d --build
+
+# Sadece durmuş servisleri başlat (build etmez, hızlı)
 docker compose up -d
 
-# API: http://localhost:3000
-# GUI: http://localhost:80
-# API Docs: http://localhost:3000/api-docs
+# Tek bir servisi yeniden build edip başlat
+docker compose up -d --build api
+docker compose up -d --build gui
+```
+
+### Durdurma
+
+```bash
+# Servisleri durdur, volume'lar korunur (veriler silinmez)
+docker compose down
+
+# Servisleri durdur VE volume'ları sil (postgres + redis verileri tamamen silinir)
+docker compose down -v
+```
+
+### Yeniden Deploy (kod değişikliği sonrası)
+
+```bash
+cd packages
+
+# Tüm stack'i yeniden build edip ayağa kaldır
+docker compose up -d --build
+
+# Sadece API değiştiyse
+docker compose up -d --build api
+
+# Sadece GUI değiştiyse
+docker compose up -d --build gui
+```
+
+### Loglar
+
+```bash
+# Tüm servislerin loglarını canlı takip et
+docker compose logs -f
+
+# Sadece API logları
+docker compose logs -f api
+
+# Sadece son 50 satır
+docker compose logs --tail=50 api
+```
+
+### Durum kontrolü
+
+```bash
+# Tüm servislerin durumunu gör (Up / healthy / starting)
+docker compose ps
+
+# Belirli bir servisin health durumu
+docker inspect packages-api-1 --format='{{.State.Health.Status}}'
+```
+
+### Temiz yeniden kurulum
+
+```bash
+cd packages
+
+# Her şeyi sil: container, image, volume, network
+docker compose down -v --rmi all
+
+# Sıfırdan build et ve başlat
+docker compose up -d --build
 ```
 
 ## API Kullanımı
@@ -96,19 +184,21 @@ X-Database: project1
 GET /db/users?database=project1
 ```
 
-## Geliştirme
+## Yerel Geliştirme (Docker olmadan)
 
 ```bash
-# API (hot-reload)
+# API (hot-reload, http://localhost:3000)
 cd packages/api
 npm install
 npm run dev
 
-# GUI (hot-reload)
+# GUI (hot-reload, http://localhost:5173)
 cd packages/gui
 npm install
 npm run dev
 ```
+
+> Yerel geliştirmede `packages/.env` içinde `PG_HOST=localhost` ve `REDIS_URL=redis://localhost:6379` olmalı (Docker Compose'da `PG_HOST=postgres`).
 
 ## Ortam Değişkenleri
 
