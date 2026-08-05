@@ -48,7 +48,7 @@ const envSchema = z.object({
   ALLOW_RAW_SQL_ADMIN: z
     .string()
     .transform((v) => v === "true")
-    .default("true"),
+    .default("false"),
   QUERY_LOG_ENABLED: z
     .string()
     .transform((v) => v === "true")

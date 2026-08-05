@@ -16,6 +16,9 @@ import { config } from "../../config/env.js";
 
 const BLOCKED_KEYWORDS = /\b(DROP|TRUNCATE|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY)\b/i;
 
+// WITH ... (INSERT|UPDATE|DELETE|...) SELECT şeklindeki writeable CTE'leri yakalar
+const WRITABLE_CTE_PATTERN = /\bWITH\b[\s\S]*?\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER|CREATE)\b/i;
+
 export async function queryRoute(server: FastifyInstance) {
   server.post(
     "/:database/query",

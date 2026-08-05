@@ -6,10 +6,21 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { JwtService } from "../../services/jwtService.js";
 import { config } from "../../config/env.js";
 import { isValidIdentifier } from "../../utils/identifier.js";
 import type { TokenScope } from "../../types/auth.js";
+
+function assertExpiresIn(value: string, maxHours: number): void {
+  const match = value.match(/^(\d+)(s|m|h|d)$/);
+  if (!match) throw new Error(`Invalid expiresIn format: '${value}'. Use e.g. '1h', '30m'.`);
+  const [, num, unit] = match;
+  const hours = { s: 1 / 3600, m: 1 / 60, h: 1, d: 24 }[unit as "s" | "m" | "h" | "d"]!;
+  if (Number(num) * hours > maxHours) {
+    throw new Error(`expiresIn '${value}' exceeds maximum allowed ${maxHours}h`);
+  }
+}
 
 // Her DB için ayrı secret tanımlanabilir.
 // Yoksa global ADMIN_SECRET'a fallback yapar (geliştirme kolaylığı için).
@@ -62,14 +73,30 @@ export async function tokenRoute(server: FastifyInstance) {
       }
 
       const expected = getDbSecret(database);
-      if (secret !== expected) {
+
+      // Timing-safe karşılaştırma
+      const providedBuf = Buffer.from(secret);
+      const expectedBuf = Buffer.from(expected);
+      const valid =
+        providedBuf.length === expectedBuf.length &&
+        timingSafeEqual(providedBuf, expectedBuf);
+
+      if (!valid) {
         return reply.status(401).send({ error: "Invalid secret" });
+      }
+
+      // DB token max 168 saat (1 hafta)
+      const expiry = expiresIn ?? "24h";
+      try {
+        assertExpiresIn(expiry, 168);
+      } catch (err) {
+        return reply.status(400).send({ error: (err as Error).message });
       }
 
       const token = await jwtService.signDbToken(
         database,
         scope ?? ["read", "write"],
-        expiresIn ?? "24h"
+        expiry
       );
 
       return reply.send({ token, database, scope: scope ?? ["read", "write"] });

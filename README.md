@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/big-logo.png" alt="Postgrify" width="400"/>
+</p>
+
 # Postgrify
 
 Tek bir PostgreSQL sunucusu üzerinde birden fazla veritabanını tek bir HTTP/REST API üzerinden yöneten servis. Her proje kendi izole veritabanını kullanır; doğrudan PostgreSQL bağlantısı gerekmez.
