@@ -1,193 +1,225 @@
 /**
- * Veritabanları listesi sayfası — oluştur, sil, boyut görüntüle.
+ * DatabasesPage — tüm veritabanları listesi + yeni DB oluşturma.
  */
 
-import { useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
-import { Plus, Database, Trash2, AlertCircle } from "lucide-react";
+import { Database, Plus, Trash2, HardDrive, Table2, Loader2 } from "lucide-react";
+import { useDatabases, useCreateDatabase, useDeleteDatabase } from "@/hooks/useDatabases";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  useDatabases,
-  useCreateDatabase,
-  useDeleteDatabase,
-} from "../hooks/useDatabases.js";
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { formatBytes } from "@/lib/utils";
 
 export default function DatabasesPage() {
   const { data: databases, isLoading } = useDatabases();
-  const createDb = useCreateDatabase();
-  const deleteDb = useDeleteDatabase();
+  const { mutateAsync: createDb, isPending: creating } = useCreateDatabase();
+  const { mutateAsync: deleteDb, isPending: deleting } = useDeleteDatabase();
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [newDbName, setNewDbName] = useState("");
-  const [createError, setCreateError] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [newDbName, setNewDbName] = React.useState("");
+  const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
+  const [createError, setCreateError] = React.useState<string | null>(null);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    setCreateError("");
+    if (!newDbName.trim()) return;
+    setCreateError(null);
     try {
-      await createDb.mutateAsync(newDbName.trim());
+      await createDb(newDbName.trim());
       setNewDbName("");
-      setShowCreate(false);
-      setCreateError("");
+      setCreateOpen(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Oluşturulamadı");
     }
-  };
+  }
 
-  const handleDelete = async (name: string) => {
-    if (confirmDelete !== name) {
-      setConfirmDelete(name);
-      return;
-    }
-    try {
-      await deleteDb.mutateAsync(name);
-      setConfirmDelete(null);
-    } catch {
-      setConfirmDelete(null);
-    }
-  };
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    await deleteDb(deleteTarget);
+    setDeleteTarget(null);
+  }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
+      {/* Başlık */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900">Veritabanları</h1>
-        <button
-          onClick={() => setShowCreate((v) => !v)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
+        <div>
+          <h1 className="text-base font-semibold text-foreground">Databases</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Bağlı PostgreSQL veritabanları
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+          <Plus className="h-3.5 w-3.5" />
           Yeni Veritabanı
-        </button>
+        </Button>
       </div>
 
-      {/* Oluşturma formu */}
-      {showCreate && (
-        <form
-          onSubmit={handleCreate}
-          className="border border-blue-200 rounded-xl p-4 bg-blue-50 flex gap-3 items-start"
-        >
-          <div className="flex-1">
-            <input
-              autoFocus
-              value={newDbName}
-              onChange={(e) => setNewDbName(e.target.value)}
-              placeholder="veritabani_adi"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {createError && (
-              <p className="text-xs text-red-600 mt-1">{createError}</p>
+      {/* Liste */}
+      <div className="rounded border border-border">
+        {/* Tablo başlığı */}
+        <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 border-b border-border px-4 py-2">
+          <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">
+            Veritabanı
+          </span>
+          <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-24 text-right">
+            Tablolar
+          </span>
+          <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-24 text-right">
+            Boyut
+          </span>
+          <span className="w-8" />
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-px p-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : (
+          <div>
+            {databases?.map((db) => (
+              <div
+                key={db.name}
+                className="group grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-accent/10"
+              >
+                <Link
+                  to={`/databases/${db.name}`}
+                  className="flex items-center gap-2.5"
+                >
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-background">
+                    <Database className="h-3 w-3 text-muted-foreground" />
+                  </div>
+                  <span className="font-mono text-sm text-foreground hover:underline">
+                    {db.name}
+                  </span>
+                </Link>
+
+                <span className="flex w-24 items-center justify-end gap-1 font-mono text-xs text-muted-foreground">
+                  <Table2 className="h-3 w-3" />
+                  {db.table_count}
+                </span>
+                <span className="flex w-24 items-center justify-end gap-1 font-mono text-xs text-muted-foreground">
+                  <HardDrive className="h-3 w-3" />
+                  {formatBytes(db.size_bytes ?? 0)}
+                </span>
+
+                <button
+                  onClick={() => setDeleteTarget(db.name)}
+                  className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-950/50 hover:text-red-400"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+
+            {databases?.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-16 text-center">
+                <Database className="h-8 w-8 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground">Veritabanı yok</p>
+                <Button
+                  size="sm"
+                  onClick={() => setCreateOpen(true)}
+                  className="gap-1.5"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  İlk Veritabanını Ekle
+                </Button>
+              </div>
             )}
           </div>
-          <button
-            type="submit"
-            disabled={!newDbName.trim() || createDb.isPending}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {createDb.isPending ? "Oluşturuluyor..." : "Oluştur"}
-          </button>
-          <button
-            type="button"
-            onClick={() => { setShowCreate(false); setNewDbName(""); setCreateError(""); }}
-            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-          >
-            İptal
-          </button>
-        </form>
-      )}
+        )}
+      </div>
 
-      {/* Silme onay uyarısı */}
-      {confirmDelete && (
-        <div className="flex items-start gap-3 border border-red-200 rounded-xl p-4 bg-red-50">
-          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-red-800">
-              <strong>{confirmDelete}</strong> veritabanını silmek istediğinden emin misin?
-            </p>
-            <p className="text-xs text-red-600 mt-0.5">
-              Bu işlem geri alınamaz. Tüm tablolar ve veriler silinir.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleDelete(confirmDelete)}
-              disabled={deleteDb.isPending}
-              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 disabled:opacity-50"
-            >
-              {deleteDb.isPending ? "Siliniyor..." : "Evet, Sil"}
-            </button>
-            <button
-              onClick={() => setConfirmDelete(null)}
-              className="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs hover:bg-gray-50"
-            >
+      {/* Yeni DB dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Yeni Veritabanı</DialogTitle>
+            <DialogDescription>
+              PostgreSQL'de yeni bir veritabanı oluşturur.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="dbName">Veritabanı Adı</Label>
+              <Input
+                id="dbName"
+                value={newDbName}
+                onChange={(e) => setNewDbName(e.target.value)}
+                placeholder="myapp_prod"
+                autoFocus
+                className="font-mono"
+              />
+              <p className="text-2xs text-muted-foreground">
+                Harf, rakam ve alt çizgi içerebilir
+              </p>
+            </div>
+            {createError && (
+              <div className="rounded border border-red-900/50 bg-red-950/30 px-3 py-2">
+                <p className="text-xs text-red-400">{createError}</p>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCreateOpen(false)}
+              >
+                İptal
+              </Button>
+              <Button type="submit" disabled={creating || !newDbName.trim()}>
+                {creating ? (
+                  <>
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    Oluşturuluyor…
+                  </>
+                ) : (
+                  "Oluştur"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Silme onayı */}
+      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Veritabanını Sil</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono font-medium text-foreground">
+                {deleteTarget}
+              </span>{" "}
+              veritabanı ve tüm tabloları kalıcı olarak silinecek.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
               İptal
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Liste */}
-      {isLoading ? (
-        <p className="text-sm text-gray-400">Yükleniyor...</p>
-      ) : (
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Veritabanı</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Tablolar</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Boyut</th>
-                <th className="px-4 py-3 w-12" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {databases?.map((db) => (
-                <tr key={db.name} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/databases/${db.name}`}
-                      className="flex items-center gap-2 font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      <Database className="w-4 h-4" />
-                      {db.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">
-                    {db.table_count}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">
-                    {formatBytes(db.size_bytes)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDelete(db.name)}
-                      className={`p-1.5 rounded transition-colors ${
-                        confirmDelete === db.name
-                          ? "bg-red-100 text-red-600"
-                          : "text-gray-400 hover:text-red-500"
-                      }`}
-                      title="Sil"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {databases?.length === 0 && (
-            <p className="text-center text-sm text-gray-400 py-8">
-              Henüz veritabanı yok. Yeni bir tane oluşturun.
-            </p>
-          )}
-        </div>
-      )}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Siliniyor…" : "Sil"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

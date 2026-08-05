@@ -1,0 +1,4 @@
+/**
+ * API yanıt tipleri.
+ */
+export {};

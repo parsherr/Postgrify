@@ -1,118 +1,272 @@
 /**
- * Tek bir veritabanının tablo listesi — tablo oluştur, sil, boyut gör.
+ * DatabasePage — seçili DB'nin tablo listesi.
+ * TanStack Table + sağda schema viewer paneli.
  */
 
-import { useState } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { Plus, Table2, Trash2, ArrowLeft } from "lucide-react";
-import { useTables, useDropTable } from "../hooks/useTables.js";
-import { ConfirmDialog } from "../components/ui/ConfirmDialog.js";
+import React from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { Table2, Plus, Trash2, ChevronRight, Database as DatabaseIcon } from "lucide-react";
+import { useTables, useDropTable, useTableSchema } from "@/hooks/useTables";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import type { TableInfo } from "@/types/index";
 
 export default function DatabasePage() {
-  const { db } = useParams<{ db: string }>();
+  const { db = "" } = useParams<{ db: string }>();
   const navigate = useNavigate();
-  const { data: tables, isLoading } = useTables(db!);
-  const dropTable = useDropTable();
+  const { data: tables, isLoading } = useTables(db);
+  const { mutateAsync: dropTable, isPending: dropping } = useDropTable();
 
-  const [confirmTable, setConfirmTable] = useState<string | null>(null);
+  const [selectedTable, setSelectedTable] = React.useState<string>("");
+  const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
 
-  const handleDropConfirm = async () => {
-    if (!confirmTable) return;
-    try {
-      await dropTable.mutateAsync({ db: db!, table: confirmTable });
-    } finally {
-      setConfirmTable(null);
-    }
-  };
+  const { data: schema, isLoading: schemaLoading } = useTableSchema(
+    db,
+    selectedTable
+  );
+
+  async function handleDrop() {
+    if (!deleteTarget) return;
+    await dropTable({ db, table: deleteTarget });
+    if (selectedTable === deleteTarget) setSelectedTable("");
+    setDeleteTarget(null);
+  }
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/databases")}
-            className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <h1 className="text-xl font-semibold text-gray-900">{db}</h1>
-        </div>
-        <Link
-          to={`/databases/${db}/new-table`}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Başlık */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2.5">
+        <nav className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Link to="/databases" className="hover:text-foreground transition-colors">
+            Databases
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <span className="flex items-center gap-1.5 font-mono text-foreground font-medium">
+            <DatabaseIcon className="h-3.5 w-3.5" />
+            {db}
+          </span>
+        </nav>
+        <div className="flex-1" />
+        <Button
+          size="sm"
+          onClick={() => navigate(`/databases/${db}/new-table`)}
+          className="gap-1.5"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="h-3.5 w-3.5" />
           Yeni Tablo
-        </Link>
+        </Button>
       </div>
 
-      {isLoading ? (
-        <p className="text-sm text-gray-400">Yükleniyor...</p>
-      ) : (
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Tablo</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Tahmini Satır</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Boyut</th>
-                <th className="px-4 py-3 w-12" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {tables?.map((t) => (
-                <tr key={t.name} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/databases/${db}/tables/${t.name}`}
-                      className="flex items-center gap-2 font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      <Table2 className="w-4 h-4" />
-                      {t.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">
-                    {t.estimated_row_count.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">{t.size}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setConfirmTable(t.name)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                      title="Tabloyu sil"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {tables?.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-              <Table2 className="w-8 h-8 mb-2" />
-              <p className="text-sm">Henüz tablo yok</p>
-              <Link
-                to={`/databases/${db}/new-table`}
-                className="mt-3 flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700"
-              >
-                <Plus className="w-4 h-4" />
-                Tablo oluştur
-              </Link>
-            </div>
-          )}
-        </div>
-      )}
+      {/* İçerik: Tablo listesi + Schema viewer */}
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        {/* Tablo listesi */}
+        <ResizablePanel defaultSize={60} minSize={35}>
+          <div className="h-full overflow-y-auto">
+            {isLoading ? (
+              <div className="space-y-1 p-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Tablo başlığı */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-4 border-b border-border px-4 py-2">
+                  <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">
+                    Tablo Adı
+                  </span>
+                  <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-20 text-right">
+                    Satırlar
+                  </span>
+                  <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-20 text-right">
+                    Boyut
+                  </span>
+                  <span className="w-8" />
+                </div>
 
-      <ConfirmDialog
-        open={!!confirmTable}
-        title={`"${confirmTable}" tablosunu sil`}
-        description="Bu işlem geri alınamaz. Tablodaki tüm veriler kalıcı olarak silinir."
-        confirmLabel="Evet, Sil"
-        onConfirm={handleDropConfirm}
-        onCancel={() => setConfirmTable(null)}
-        danger
-      />
+                {tables?.map((tbl: TableInfo) => (
+                  <TableRow
+                    key={tbl.name}
+                    tbl={tbl}
+                    db={db}
+                    isSelected={selectedTable === tbl.name}
+                    onSelect={() =>
+                      setSelectedTable((p) => (p === tbl.name ? "" : tbl.name))
+                    }
+                    onDelete={() => setDeleteTarget(tbl.name)}
+                  />
+                ))}
+
+                {tables?.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <Table2 className="h-8 w-8 text-muted-foreground/30" />
+                    <p className="text-xs text-muted-foreground">Bu veritabanında tablo yok</p>
+                    <Button
+                      size="sm"
+                      onClick={() => navigate(`/databases/${db}/new-table`)}
+                      className="gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Tablo Oluştur
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle />
+
+        {/* Schema viewer */}
+        <ResizablePanel defaultSize={40} minSize={25}>
+          <div className="flex h-full flex-col border-l border-border">
+            <div className="flex h-8 shrink-0 items-center border-b border-border px-3">
+              <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                Schema
+              </span>
+              {selectedTable && (
+                <span className="ml-2 font-mono text-2xs text-muted-foreground">
+                  {selectedTable}
+                </span>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {!selectedTable ? (
+                <div className="flex h-full items-center justify-center">
+                  <p className="text-xs text-muted-foreground/50">
+                    Tablo seçin
+                  </p>
+                </div>
+              ) : schemaLoading ? (
+                <div className="space-y-1 p-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-7 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-border/40">
+                  {schema?.columns.map((col) => (
+                    <div
+                      key={col.name}
+                      className="flex items-center gap-3 px-3 py-2"
+                    >
+                      <span className="flex-1 truncate font-mono text-xs text-foreground/80">
+                        {col.name}
+                      </span>
+                      <span className="font-mono text-2xs text-muted-foreground/60">
+                        {col.type}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {col.primary_key && (
+                          <Badge variant="warning" className="text-2xs">PK</Badge>
+                        )}
+                        {col.nullable === "NO" && !col.primary_key && (
+                          <Badge variant="outline" className="text-2xs">NOT NULL</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tablo istatistikleri */}
+            {selectedTable && !schemaLoading && (
+              <div className="border-t border-border px-3 py-2">
+                <p className="text-2xs text-muted-foreground/50">
+                  {schema?.columns.length ?? 0} kolon
+                </p>
+              </div>
+            )}
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {/* Silme onayı dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tabloyu Sil</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono font-medium text-foreground">
+                {deleteTarget}
+              </span>{" "}
+              tablosu ve tüm verileri kalıcı olarak silinecek. Bu işlem geri alınamaz.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              İptal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDrop}
+              disabled={dropping}
+            >
+              {dropping ? "Siliniyor…" : "Sil"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function TableRow({
+  tbl,
+  db,
+  isSelected,
+  onSelect,
+  onDelete,
+}: {
+  tbl: TableInfo;
+  db: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={`group grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 border-b border-border/40 px-4 py-2.5 transition-colors ${
+        isSelected ? "bg-accent/20" : "hover:bg-accent/10"
+      }`}
+    >
+      <button
+        onClick={onSelect}
+        className="flex items-center gap-2 text-left"
+      >
+        <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        <span className="font-mono text-sm text-foreground hover:underline">
+          {tbl.name}
+        </span>
+      </button>
+
+      <span className="w-20 text-right font-mono text-xs text-muted-foreground">
+        {tbl.estimated_row_count.toLocaleString()}
+      </span>
+      <span className="w-20 text-right font-mono text-xs text-muted-foreground">
+        {tbl.size}
+      </span>
+
+      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <Link
+          to={`/databases/${db}/tables/${tbl.name}`}
+          className="rounded px-2 py-1 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          Aç
+        </Link>
+        <button
+          onClick={onDelete}
+          className="rounded p-1 text-muted-foreground/50 transition-colors hover:bg-red-950/50 hover:text-red-400"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,159 +1,162 @@
 /**
- * Tablo veri görüntüleme ve düzenleme sayfası.
- * Sayfalı grid, satır silme, şema kolonları.
+ * TablePage — veri tablosu görünümü.
+ * DataGrid bileşeni ile TanStack Table + virtual scroll + inline edit.
  */
 
-import { useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
-import { useRows, useDeleteRow } from "../hooks/useRows.js";
-import { useTableSchema } from "../hooks/useTables.js";
-import { ConfirmDialog } from "../components/ui/ConfirmDialog.js";
+import React from "react";
+import { useParams, Link } from "react-router-dom";
+import { ChevronRight, TableIcon } from "lucide-react";
+import { useTableSchema } from "@/hooks/useTables";
+import { useRows } from "@/hooks/useRows";
+import { api } from "@/lib/api";
+import { DataGrid, type DataGridColumn } from "@/components/data-grid/DataGrid";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { Column } from "@/types/index";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE_DEFAULT = 50;
 
 export default function TablePage() {
-  const { db, table } = useParams<{ db: string; table: string }>();
-  const navigate = useNavigate();
+  const { db = "", table = "" } = useParams<{ db: string; table: string }>();
+  const [page, setPage] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState(PAGE_SIZE_DEFAULT);
 
-  const [offset, setOffset] = useState(0);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const { data: schema, isLoading: schemaLoading } = useTableSchema(db, table);
+  const {
+    data: rowsData,
+    isLoading: rowsLoading,
+    refetch,
+  } = useRows(db, table, { limit: pageSize, offset: page * pageSize });
 
-  const { data: result, isLoading } = useRows(db!, table!, {
-    limit: PAGE_SIZE,
-    offset,
-  });
-  const { data: schema } = useTableSchema(db!, table!);
-  const deleteRow = useDeleteRow();
+  // Sayfa değiştiğinde en üste scroll
+  React.useEffect(() => {
+    setPage(0);
+  }, [table, db]);
 
-  const columns = schema?.columns.map((c) => c.name) ?? (
-    result?.rows[0] ? Object.keys(result.rows[0]) : []
-  );
+  const gridColumns: DataGridColumn[] = React.useMemo(() => {
+    if (!schema?.columns) return [];
+    return schema.columns.map((col: Column) => ({
+      key: col.name,
+      label: col.name,
+      type: col.type,
+      primaryKey: col.primary_key,
+      nullable: col.nullable === "YES",
+    }));
+  }, [schema]);
 
-  const total = result?.total ?? 0;
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  async function handleCellEdit(
+    row: Record<string, unknown>,
+    colKey: string,
+    value: unknown
+  ) {
+    // PK'yı bul — API'ye hangi satırı güncellediğimizi söylemek için
+    const pkCol = schema?.columns.find((c) => c.primary_key);
+    if (!pkCol) {
+      throw new Error("Bu tablo için birincil anahtar bulunamadı");
+    }
+    const pkValue = row[pkCol.name];
+    await api.patch(`/db/${db}/tables/${table}/rows/${pkValue}`, {
+      [colKey]: value,
+    });
+    refetch();
+  }
 
-  const handleDelete = async () => {
-    if (!confirmId) return;
-    await deleteRow.mutateAsync({ db: db!, table: table!, id: confirmId });
-    setConfirmId(null);
-  };
+  async function handleDeleteRows(rows: Record<string, unknown>[]) {
+    const pkCol = schema?.columns.find((c) => c.primary_key);
+    if (!pkCol) return;
+    for (const row of rows) {
+      const pkValue = row[pkCol.name];
+      await api.delete(`/db/${db}/tables/${table}/rows/${pkValue}`);
+    }
+    refetch();
+  }
+
+  const isLoading = schemaLoading || rowsLoading;
 
   return (
-    <div className="p-6 flex flex-col gap-4 h-full">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Başlık */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`/databases/${db}`)}
-            className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <p className="text-xs text-gray-400">{db}</p>
-            <h1 className="text-xl font-semibold text-gray-900 leading-tight">{table}</h1>
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+        <nav className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Link to="/databases" className="hover:text-foreground transition-colors">
+            Databases
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <Link to={`/databases/${db}`} className="hover:text-foreground transition-colors">
+            {db}
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <span className="flex items-center gap-1.5 font-mono text-foreground font-medium">
+            <TableIcon className="h-3.5 w-3.5" />
+            {table}
+          </span>
+        </nav>
+
+        <div className="flex-1" />
+
+        {/* Kolon meta bilgileri */}
+        {schema && !schemaLoading && (
+          <div className="flex items-center gap-2">
+            <span className="text-2xs text-muted-foreground">
+              {schema.columns.length} kolon
+            </span>
+            <div className="flex items-center gap-1">
+              {schema.columns
+                .filter((c: Column) => c.primary_key)
+                .map((c: Column) => (
+                  <Badge key={c.name} variant="outline" className="text-2xs">
+                    PK: {c.name}
+                  </Badge>
+                ))}
+            </div>
           </div>
-        </div>
-        <Link
-          to={`/query`}
-          className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          SQL ile ekle
-        </Link>
+        )}
       </div>
 
-      {/* Tablo */}
-      {isLoading ? (
-        <p className="text-sm text-gray-400">Yükleniyor...</p>
-      ) : (
-        <div className="flex-1 overflow-auto border border-gray-200 rounded-xl">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
-              <tr>
-                {columns.map((col) => (
-                  <th
-                    key={col}
-                    className="text-left px-4 py-2.5 font-medium text-gray-600 whitespace-nowrap"
-                  >
-                    {col}
-                  </th>
-                ))}
-                <th className="px-4 py-2.5 w-12" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {result?.rows.map((row, i) => (
-                <tr key={i} className="hover:bg-gray-50">
-                  {columns.map((col) => (
-                    <td
-                      key={col}
-                      className="px-4 py-2 text-gray-700 max-w-xs truncate font-mono text-xs"
-                    >
-                      {row[col] == null ? (
-                        <span className="text-gray-300 italic font-sans">null</span>
-                      ) : (
-                        String(row[col])
-                      )}
-                    </td>
-                  ))}
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => setConfirmId(String(row["id"] ?? i))}
-                      className="p-1 text-gray-300 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {result?.rows.length === 0 && (
-            <p className="text-center text-sm text-gray-400 py-8">Tablo boş</p>
-          )}
+      {/* Kolon şeması — ince bilgi çubuğu */}
+      {!schemaLoading && schema && (
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border/50 bg-card/50 px-4 py-1.5">
+          {schema.columns.map((col: Column) => (
+            <div
+              key={col.name}
+              className="flex shrink-0 items-center gap-1 rounded-sm border border-border/60 bg-background px-1.5 py-0.5"
+            >
+              <span className="font-mono text-2xs text-foreground/80">{col.name}</span>
+              <span className="font-mono text-2xs text-muted-foreground/60">{col.type}</span>
+              {col.primary_key && (
+                <span className="text-2xs text-amber-500/70">PK</span>
+              )}
+              {col.nullable === "NO" && !col.primary_key && (
+                <span className="text-2xs text-red-500/50">!</span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Sayfalama */}
-      {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
-          <span>
-            {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} / {total} satır
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              disabled={offset === 0}
-              className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="px-2">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-              disabled={offset + PAGE_SIZE >= total}
-              className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-colors"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+      {/* Ana grid */}
+      <div className="flex-1 overflow-hidden">
+        {isLoading ? (
+          <div className="flex flex-col gap-1.5 p-3">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
           </div>
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={!!confirmId}
-        title="Satırı sil"
-        description={`ID: ${confirmId} — Bu işlem geri alınamaz.`}
-        confirmLabel="Sil"
-        onConfirm={handleDelete}
-        onCancel={() => setConfirmId(null)}
-        danger
-      />
+        ) : (
+          <DataGrid
+            columns={gridColumns}
+            data={rowsData?.rows ?? []}
+            total={rowsData?.total ?? 0}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+            onRefresh={() => refetch()}
+            onCellEdit={schema?.columns.some((c: Column) => c.primary_key) ? handleCellEdit : undefined}
+            onDelete={schema?.columns.some((c: Column) => c.primary_key) ? handleDeleteRows : undefined}
+          />
+        )}
+      </div>
     </div>
   );
 }

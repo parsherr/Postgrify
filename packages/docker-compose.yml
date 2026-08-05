@@ -35,8 +35,9 @@ services:
 
   gui:
     build:
-      context: ./gui
-      dockerfile: Dockerfile
+      # Context: monorepo root (package-lock.json buradadir)
+      context: ..
+      dockerfile: packages/gui/Dockerfile.monorepo
       args:
         VITE_API_URL: /api
     ports:

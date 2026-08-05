@@ -1,0 +1,44 @@
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+/**
+ * DatabasesPage — tüm veritabanları listesi + yeni DB oluşturma.
+ */
+import React from "react";
+import { Link } from "react-router-dom";
+import { Database, Plus, Trash2, HardDrive, Table2, Loader2 } from "lucide-react";
+import { useDatabases, useCreateDatabase, useDeleteDatabase } from "@/hooks/useDatabases";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, } from "@/components/ui/dialog";
+import { formatBytes } from "@/lib/utils";
+export default function DatabasesPage() {
+    const { data: databases, isLoading } = useDatabases();
+    const { mutateAsync: createDb, isPending: creating } = useCreateDatabase();
+    const { mutateAsync: deleteDb, isPending: deleting } = useDeleteDatabase();
+    const [createOpen, setCreateOpen] = React.useState(false);
+    const [newDbName, setNewDbName] = React.useState("");
+    const [deleteTarget, setDeleteTarget] = React.useState(null);
+    const [createError, setCreateError] = React.useState(null);
+    async function handleCreate(e) {
+        e.preventDefault();
+        if (!newDbName.trim())
+            return;
+        setCreateError(null);
+        try {
+            await createDb(newDbName.trim());
+            setNewDbName("");
+            setCreateOpen(false);
+        }
+        catch (err) {
+            setCreateError(err instanceof Error ? err.message : "Oluşturulamadı");
+        }
+    }
+    async function handleDelete() {
+        if (!deleteTarget)
+            return;
+        await deleteDb(deleteTarget);
+        setDeleteTarget(null);
+    }
+    return (_jsxs("div", { className: "flex h-full flex-col gap-6 overflow-y-auto p-6", children: [_jsxs("div", { className: "flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-base font-semibold text-foreground", children: "Databases" }), _jsx("p", { className: "mt-0.5 text-xs text-muted-foreground", children: "Ba\u011Fl\u0131 PostgreSQL veritabanlar\u0131" })] }), _jsxs(Button, { size: "sm", onClick: () => setCreateOpen(true), className: "gap-1.5", children: [_jsx(Plus, { className: "h-3.5 w-3.5" }), "Yeni Veritaban\u0131"] })] }), _jsxs("div", { className: "rounded border border-border", children: [_jsxs("div", { className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 border-b border-border px-4 py-2", children: [_jsx("span", { className: "text-2xs font-medium uppercase tracking-wider text-muted-foreground/60", children: "Veritaban\u0131" }), _jsx("span", { className: "text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-24 text-right", children: "Tablolar" }), _jsx("span", { className: "text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 w-24 text-right", children: "Boyut" }), _jsx("span", { className: "w-8" })] }), isLoading ? (_jsx("div", { className: "space-y-px p-2", children: Array.from({ length: 4 }).map((_, i) => (_jsx(Skeleton, { className: "h-12 w-full" }, i))) })) : (_jsxs("div", { children: [databases?.map((db) => (_jsxs("div", { className: "group grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-accent/10", children: [_jsxs(Link, { to: `/databases/${db.name}`, className: "flex items-center gap-2.5", children: [_jsx("div", { className: "flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-background", children: _jsx(Database, { className: "h-3 w-3 text-muted-foreground" }) }), _jsx("span", { className: "font-mono text-sm text-foreground hover:underline", children: db.name })] }), _jsxs("span", { className: "flex w-24 items-center justify-end gap-1 font-mono text-xs text-muted-foreground", children: [_jsx(Table2, { className: "h-3 w-3" }), db.table_count] }), _jsxs("span", { className: "flex w-24 items-center justify-end gap-1 font-mono text-xs text-muted-foreground", children: [_jsx(HardDrive, { className: "h-3 w-3" }), formatBytes(db.size_bytes ?? 0)] }), _jsx("button", { onClick: () => setDeleteTarget(db.name), className: "flex h-6 w-6 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-950/50 hover:text-red-400", children: _jsx(Trash2, { className: "h-3.5 w-3.5" }) })] }, db.name))), databases?.length === 0 && (_jsxs("div", { className: "flex flex-col items-center gap-3 py-16 text-center", children: [_jsx(Database, { className: "h-8 w-8 text-muted-foreground/30" }), _jsx("p", { className: "text-xs text-muted-foreground", children: "Veritaban\u0131 yok" }), _jsxs(Button, { size: "sm", onClick: () => setCreateOpen(true), className: "gap-1.5", children: [_jsx(Plus, { className: "h-3.5 w-3.5" }), "\u0130lk Veritaban\u0131n\u0131 Ekle"] })] }))] }))] }), _jsx(Dialog, { open: createOpen, onOpenChange: setCreateOpen, children: _jsxs(DialogContent, { className: "max-w-sm", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Yeni Veritaban\u0131" }), _jsx(DialogDescription, { children: "PostgreSQL'de yeni bir veritaban\u0131 olu\u015Fturur." })] }), _jsxs("form", { onSubmit: handleCreate, className: "space-y-4", children: [_jsxs("div", { className: "space-y-1.5", children: [_jsx(Label, { htmlFor: "dbName", children: "Veritaban\u0131 Ad\u0131" }), _jsx(Input, { id: "dbName", value: newDbName, onChange: (e) => setNewDbName(e.target.value), placeholder: "myapp_prod", autoFocus: true, className: "font-mono" }), _jsx("p", { className: "text-2xs text-muted-foreground", children: "Harf, rakam ve alt \u00E7izgi i\u00E7erebilir" })] }), createError && (_jsx("div", { className: "rounded border border-red-900/50 bg-red-950/30 px-3 py-2", children: _jsx("p", { className: "text-xs text-red-400", children: createError }) })), _jsxs(DialogFooter, { children: [_jsx(Button, { type: "button", variant: "ghost", onClick: () => setCreateOpen(false), children: "\u0130ptal" }), _jsx(Button, { type: "submit", disabled: creating || !newDbName.trim(), children: creating ? (_jsxs(_Fragment, { children: [_jsx(Loader2, { className: "mr-2 h-3.5 w-3.5 animate-spin" }), "Olu\u015Fturuluyor\u2026"] })) : ("Oluştur") })] })] })] }) }), _jsx(Dialog, { open: !!deleteTarget, onOpenChange: () => setDeleteTarget(null), children: _jsxs(DialogContent, { className: "max-w-sm", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Veritaban\u0131n\u0131 Sil" }), _jsxs(DialogDescription, { children: [_jsx("span", { className: "font-mono font-medium text-foreground", children: deleteTarget }), " ", "veritaban\u0131 ve t\u00FCm tablolar\u0131 kal\u0131c\u0131 olarak silinecek."] })] }), _jsxs(DialogFooter, { children: [_jsx(Button, { variant: "ghost", onClick: () => setDeleteTarget(null), children: "\u0130ptal" }), _jsx(Button, { variant: "destructive", onClick: handleDelete, disabled: deleting, children: deleting ? "Siliniyor…" : "Sil" })] })] }) })] }));
+}

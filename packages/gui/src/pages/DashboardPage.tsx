@@ -1,114 +1,187 @@
 /**
- * Dashboard — istatistik kartları ve hızlı erişim linkleri.
+ * DashboardPage — stat tiles, DB listesi, quick actions.
  */
 
-import { Link } from "react-router-dom";
-import { Database, Layers, Activity, Plus } from "lucide-react";
-import { useDatabases, useAdminStats } from "../hooks/useDatabases.js";
-import type { Database as DbInfo } from "../types/index.js";
+import { Link, useNavigate } from "react-router-dom";
+import { Database, Table2, HardDrive, Terminal, Plus, Activity, Cpu } from "lucide-react";
+import { useDatabases, useAdminStats } from "@/hooks/useDatabases";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatBytes } from "@/lib/utils";
 
-function formatBytes(bytes: number): string {
-  if (!bytes) return "0 B";
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
-
-function StatCard({
-  icon: Icon,
+function StatTile({
   label,
   value,
-  color,
+  icon: Icon,
+  sub,
 }: {
-  icon: React.ElementType;
   label: string;
   value: string | number;
-  color: string;
+  icon: React.ElementType;
+  sub?: string;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-5">
-      <div className={`inline-flex p-2.5 rounded-xl ${color} mb-3`}>
-        <Icon className="w-5 h-5" />
+    <div className="flex flex-col gap-3 rounded border border-border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <Icon className="h-4 w-4 text-muted-foreground/50" />
       </div>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
-      <p className="text-sm text-gray-500 mt-0.5">{label}</p>
+      <div>
+        <span className="font-mono text-2xl font-semibold tracking-tight text-foreground">
+          {value}
+        </span>
+        {sub && (
+          <span className="ml-1.5 text-xs text-muted-foreground">{sub}</span>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const { data: databases, isLoading } = useDatabases();
-  const { data: stats } = useAdminStats();
+  const navigate = useNavigate();
+  const { data: databases, isLoading: dbLoading } = useDatabases();
+  const { data: stats, isLoading: statsLoading } = useAdminStats();
+
+  const totalSize = databases?.reduce((sum, db) => sum + (db.size_bytes ?? 0), 0) ?? 0;
+  const totalTables = databases?.reduce((sum, db) => sum + db.table_count, 0) ?? 0;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
+      {/* Başlık + Quick actions */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <Link
-          to="/databases"
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Yeni Veritabanı
-        </Link>
+        <div>
+          <h1 className="text-base font-semibold text-foreground">Dashboard</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Postgrify Gateway — genel bakış
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/query")}
+            className="gap-1.5"
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            SQL Editörü
+          </Button>
+          <Button size="sm" onClick={() => navigate("/databases")} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Yeni DB
+          </Button>
+        </div>
       </div>
 
-      {/* İstatistik kartları */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          icon={Database}
-          label="Veritabanı"
-          value={databases?.length ?? "—"}
-          color="bg-blue-50 text-blue-600"
-        />
-        <StatCard
-          icon={Activity}
-          label="Aktif Bağlantı"
-          value={stats?.activePools ?? "—"}
-          color="bg-green-50 text-green-600"
-        />
-        <StatCard
-          icon={Layers}
-          label="Toplam Boyut"
-          value={stats?.totalSizeBytes ? formatBytes(stats.totalSizeBytes) : "—"}
-          color="bg-purple-50 text-purple-600"
-        />
+      {/* Stat tiles */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {statsLoading || dbLoading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))
+        ) : (
+          <>
+            <StatTile
+              label="Veritabanı"
+              value={databases?.length ?? 0}
+              icon={Database}
+            />
+            <StatTile
+              label="Toplam Tablo"
+              value={totalTables}
+              icon={Table2}
+            />
+            <StatTile
+              label="Toplam Boyut"
+              value={formatBytes(totalSize)}
+              icon={HardDrive}
+            />
+            <StatTile
+              label="Aktif Pool"
+              value={stats?.activePools ?? 0}
+              icon={Activity}
+              sub={`/ ${databases?.length ?? 0} toplam`}
+            />
+          </>
+        )}
       </div>
 
       {/* DB listesi */}
-      <div>
-        <h2 className="text-base font-semibold text-gray-800 mb-3">Veritabanları</h2>
-        {isLoading ? (
-          <p className="text-sm text-gray-400">Yükleniyor...</p>
+      <div className="rounded border border-border">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <span className="text-xs font-medium text-foreground">Veritabanları</span>
+          <Link
+            to="/databases"
+            className="text-2xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Tümünü gör →
+          </Link>
+        </div>
+
+        {dbLoading ? (
+          <div className="space-y-px p-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {databases?.map((db: DbInfo) => (
+          <div className="divide-y divide-border/50">
+            {databases?.map((db) => (
               <Link
                 key={db.name}
                 to={`/databases/${db.name}`}
-                className="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all"
+                className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-accent/20"
               >
-                <Database className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{db.name}</p>
-                  <p className="text-xs text-gray-400">
-                    {db.table_count} tablo · {formatBytes(db.size_bytes)}
-                  </p>
+                <div className="flex h-6 w-6 items-center justify-center rounded border border-border bg-background">
+                  <Database className="h-3 w-3 text-muted-foreground" />
                 </div>
+                <div className="flex-1">
+                  <span className="font-mono text-sm text-foreground">{db.name}</span>
+                </div>
+                <div className="flex items-center gap-6 text-2xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Table2 className="h-3 w-3" />
+                    {db.table_count} tablo
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <HardDrive className="h-3 w-3" />
+                    {formatBytes(db.size_bytes ?? 0)}
+                  </span>
+                </div>
+                <span className="text-2xs text-muted-foreground/50">→</span>
               </Link>
             ))}
             {databases?.length === 0 && (
-              <Link
-                to="/databases"
-                className="flex items-center gap-2 p-4 border-2 border-dashed border-gray-200 rounded-xl text-sm text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                İlk veritabanını oluştur
-              </Link>
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <Database className="h-8 w-8 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground">Henüz veritabanı yok</p>
+                <Button size="sm" onClick={() => navigate("/databases")} className="gap-1.5">
+                  <Plus className="h-3.5 w-3.5" />
+                  Veritabanı Ekle
+                </Button>
+              </div>
             )}
           </div>
         )}
       </div>
+
+      {/* Stats alt bilgi */}
+      {stats && (
+        <div className="flex items-center gap-4 text-2xs text-muted-foreground/50">
+          <span className="flex items-center gap-1">
+            <Cpu className="h-3 w-3" />
+            Node {stats.nodeVersion}
+          </span>
+          <span>
+            Uptime: {Math.floor(stats.uptime / 3600)}sa {Math.floor((stats.uptime % 3600) / 60)}dk
+          </span>
+          {stats.activePoolNames.length > 0 && (
+            <span>
+              Aktif: {stats.activePoolNames.join(", ")}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
