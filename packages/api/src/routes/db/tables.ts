@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
+import { assertColumnType, assertColumnDefault } from "../../utils/ddlSanitizer.js";
 import { TTL } from "../../services/cacheService.js";
 
 export async function tablesRoute(server: FastifyInstance) {

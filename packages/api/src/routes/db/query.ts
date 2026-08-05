@@ -63,12 +63,28 @@ export async function queryRoute(server: FastifyInstance) {
             error: "Query contains blocked keywords",
           });
         }
+
+        // Writeable CTE bypass koruması: WITH ... (INSERT|UPDATE|DELETE|...) SELECT
+        if (WRITABLE_CTE_PATTERN.test(rawSql)) {
+          return reply.status(403).send({
+            error: "Writable CTEs are not allowed in SELECT-only mode",
+          });
+        }
       }
 
       const sql = server.poolManager.getPool(dbName);
-      const rows = await sql.unsafe(rawSql, params as never[]);
 
-      return reply.send({ rows, count: rows.length });
+      // SELECT-only modda read-only transaction içinde çalıştır
+      let rows: unknown[];
+      if (!(isAdmin && adminFullSqlEnabled)) {
+        rows = await sql.begin("read only", async (tx) => {
+          return tx.unsafe(rawSql, params as never[]);
+        });
+      } else {
+        rows = await sql.unsafe(rawSql, params as never[]);
+      }
+
+      return reply.send({ rows: rows as Record<string, unknown>[], count: (rows as unknown[]).length });
     })
   );
 }
