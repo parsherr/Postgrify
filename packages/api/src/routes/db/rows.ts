@@ -94,14 +94,17 @@ export async function rowsRoute(server: FastifyInstance) {
         LIMIT $${whereValues.length + 1}
         OFFSET $${whereValues.length + 2}
       `;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows = await sql.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
-
-      // Toplam satır sayısı için count
       const countSql = `SELECT count(*) AS total FROM "${table}" ${whereSql}`;
+
+      // Rows + count aynı read-only transaction içinde — tutarlı snapshot garantisi
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [countResult] = await sql.unsafe(countSql, whereValues as any[]);
+      const { rows, countResult } = await sql.begin("read only", async (tx) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rows = await tx.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const [countResult] = await tx.unsafe(countSql, whereValues as any[]);
+        return { rows, countResult };
+      });
 
       const result = {
         rows,

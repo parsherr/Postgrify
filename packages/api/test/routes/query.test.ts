@@ -18,6 +18,10 @@ vi.mock("postgres", () => {
   const sqlFn = vi.fn().mockResolvedValue([{ count: 42 }]) as unknown as Record<string, unknown>;
   sqlFn.unsafe = vi.fn().mockResolvedValue([{ count: 42 }]);
   sqlFn.end = vi.fn().mockResolvedValue(undefined);
+  // begin("read only", cb) — cb'yi mock sql ile çağırır
+  sqlFn.begin = vi.fn().mockImplementation((_mode: string, cb: (sql: unknown) => unknown) => {
+    return cb(sqlFn);
+  });
   const ctor = vi.fn(() => sqlFn);
   return { default: ctor };
 });

@@ -64,8 +64,12 @@ export class CacheService {
    */
   async invalidatePattern(pattern: string): Promise<void> {
     if (this.redis) {
-      const keys = await this.redis.keys(pattern);
-      if (keys.length > 0) await this.redis.del(keys);
+      // KEYS yerine SCAN kullan — production Redis'te KEYS blocking'dir
+      const keysToDelete: string[] = [];
+      for await (const key of this.redis.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+        keysToDelete.push(key);
+      }
+      if (keysToDelete.length > 0) await this.redis.del(keysToDelete);
     } else if (this.lru) {
       const prefix = pattern.replace(/\*/g, "");
       for (const key of this.lru.keys()) {

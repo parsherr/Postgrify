@@ -26,6 +26,14 @@ vi.mock("postgres", () => {
     const fn = vi.fn().mockResolvedValue(MOCK_ROWS) as unknown as Record<string, unknown>;
     fn.unsafe = vi.fn().mockResolvedValue(MOCK_ROWS);
     fn.end = vi.fn().mockResolvedValue(undefined);
+    // begin("read only", cb) — rows GET handler'ı count+rows için kullanıyor
+    fn.begin = vi.fn().mockImplementation((_mode: string, cb: (sql: unknown) => unknown) => {
+      const txFn = vi.fn().mockResolvedValue(MOCK_ROWS) as unknown as Record<string, unknown>;
+      txFn.unsafe = vi.fn()
+        .mockResolvedValueOnce(MOCK_ROWS)           // rows
+        .mockResolvedValueOnce([{ total: "2" }]);   // count
+      return cb(txFn);
+    });
     return fn;
   });
   return { default: sqlMock };

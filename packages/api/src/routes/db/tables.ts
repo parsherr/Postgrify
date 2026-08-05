@@ -40,6 +40,7 @@ export async function tablesRoute(server: FastifyInstance) {
           pg_size_pretty(pg_total_relation_size(pg_class.oid)) AS size
         FROM information_schema.tables t
         JOIN pg_class ON pg_class.relname = t.table_name
+          AND pg_class.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
         WHERE t.table_schema = 'public'
           AND t.table_type = 'BASE TABLE'
         ORDER BY t.table_name
@@ -101,11 +102,15 @@ export async function tablesRoute(server: FastifyInstance) {
 
       const colDefs = columns.map((col) => {
         assertIdentifier(col.name, "column");
-        const parts: string[] = [`"${col.name}" ${col.type.toUpperCase()}`];
+        const safeType = assertColumnType(col.type, col.name);
+        const parts: string[] = [`"${col.name}" ${safeType}`];
         if (col.primaryKey) parts.push("PRIMARY KEY");
         if (!col.nullable && !col.primaryKey) parts.push("NOT NULL");
         if (col.unique) parts.push("UNIQUE");
-        if (col.default) parts.push(`DEFAULT ${col.default}`);
+        if (col.default) {
+          const safeDefault = assertColumnDefault(col.default, col.name);
+          parts.push(`DEFAULT ${safeDefault}`);
+        }
         return parts.join(" ");
       });
 
