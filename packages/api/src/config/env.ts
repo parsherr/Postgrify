@@ -26,6 +26,12 @@ const envSchema = z.object({
   ADMIN_SECRET: z.string().min(16, "ADMIN_SECRET must be at least 16 chars"),
   JWT_EXPIRY: z.string().default("24h"),
 
+  // Admin kullanıcı kimlik bilgileri (GUI login için)
+  ADMIN_EMAIL: z.string().email("ADMIN_EMAIL must be a valid email").optional(),
+  ADMIN_PASSWORD_HASH: z.string().optional(), // argon2id hash — scripts/hash-password.ts ile üret
+  ACCESS_TOKEN_EXPIRY: z.string().default("15m"),
+  REFRESH_TOKEN_EXPIRY: z.string().default("7d"),
+
   // Rate limiting
   RATE_LIMIT_GLOBAL: z.coerce.number().default(1000),
   RATE_LIMIT_DB: z.coerce.number().default(500),

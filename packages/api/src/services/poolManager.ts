@@ -22,6 +22,7 @@ interface PoolManagerConfig {
 interface PoolEntry {
   sql: postgres.Sql;
   lastUsed: number;
+  startedAt: number; // pool açılma zamanı (ms)
 }
 
 export class PoolManager {
@@ -57,7 +58,8 @@ export class PoolManager {
       onnotice: () => {}, // gürültüyü bastır
     });
 
-    this.pools.set(dbName, { sql, lastUsed: Date.now() });
+    const now = Date.now();
+    this.pools.set(dbName, { sql, lastUsed: now, startedAt: now });
     return sql;
   }
 
@@ -106,5 +108,10 @@ export class PoolManager {
   /** Aktif pool isimlerini döner. */
   get activePoolNames(): string[] {
     return Array.from(this.pools.keys());
+  }
+
+  /** Belirtilen DB'nin pool başlangıç zamanını döner (ms). Yoksa null. */
+  getPoolStartedAt(dbName: string): number | null {
+    return this.pools.get(dbName)?.startedAt ?? null;
   }
 }

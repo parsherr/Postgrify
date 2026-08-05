@@ -43,8 +43,8 @@ export default function DashboardPage() {
   const { data: databases, isLoading: dbLoading } = useDatabases();
   const { data: stats, isLoading: statsLoading } = useAdminStats();
 
-  const totalSize = databases?.reduce((sum, db) => sum + (db.size_bytes ?? 0), 0) ?? 0;
-  const totalTables = databases?.reduce((sum, db) => sum + db.table_count, 0) ?? 0;
+  const totalSize = databases?.reduce((sum, db) => sum + Number(db.size_bytes ?? 0), 0) ?? 0;
+  const totalTables = databases?.reduce((sum, db) => sum + Number(db.table_count ?? 0), 0) ?? 0;
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
@@ -141,7 +141,7 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-6 text-2xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Table2 className="h-3 w-3" />
-                    {db.table_count} tablo
+                    {Number(db.table_count)} tablo
                   </span>
                   <span className="flex items-center gap-1">
                     <HardDrive className="h-3 w-3" />

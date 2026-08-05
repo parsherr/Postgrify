@@ -5,13 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Bytes'ı okunabilir formata çevirir */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
+/** Bytes'ı okunabilir formata çevirir. PostgreSQL bigint string olarak gelebilir. */
+export function formatBytes(bytes: number | string | null | undefined): string {
+  const n = Number(bytes);
+  if (!isFinite(n) || n <= 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(k)), sizes.length - 1);
+  return `${parseFloat((n / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 /** Sayıyı kısaltır: 1234 → 1.2k */

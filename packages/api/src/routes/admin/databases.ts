@@ -1,8 +1,10 @@
 /**
  * Admin DB yönetim route'ları:
- *   GET    /admin/databases        — DB listesi + boyut + tablo sayısı
- *   POST   /admin/databases        — Yeni DB oluştur
- *   DELETE /admin/databases/:db    — DB sil
+ *   GET    /admin/databases              — DB listesi + boyut + tablo sayısı + pool_active
+ *   POST   /admin/databases              — Yeni DB oluştur
+ *   DELETE /admin/databases/:db          — DB sil
+ *   POST   /admin/databases/:db/pool/stop  — Pool'u kapat (DB silinmez)
+ *   POST   /admin/databases/:db/pool/start — Pool'u başlat / yeniden bağlan
  */
 
 import type { FastifyInstance } from "fastify";
@@ -15,32 +17,110 @@ export async function databasesRoute(server: FastifyInstance) {
     "/databases",
     {
       schema: {
-        description: "List all databases with size and table count",
+        description: "List all databases with size, table count and pool status",
         tags: ["admin"],
       },
     },
     asyncHandler(async (_req, reply) => {
-      // postgres veritabanı admin bağlantısı için kullanılır
       const sql = server.poolManager.getPool("postgres");
 
-      const databases = await sql`
+      const dbRows = await sql`
         SELECT
           d.datname AS name,
-          pg_database_size(d.datname) AS size_bytes,
-          (
-            SELECT count(*)
-            FROM information_schema.tables t
-            WHERE t.table_schema = 'public'
-              AND t.table_catalog = d.datname
-              AND t.table_type = 'BASE TABLE'
-          ) AS table_count
+          pg_database_size(d.datname) AS size_bytes
         FROM pg_database d
         WHERE d.datistemplate = false
           AND d.datname != 'postgres'
         ORDER BY d.datname
       `;
 
+      const activeNames = server.poolManager.activePoolNames;
+
+      // Her DB için tablo sayısı — pool aktifse kendi bağlantısını kullan
+      const databases = await Promise.all(
+        dbRows.map(async (row) => {
+          const name = row.name as string;
+          const poolActive = activeNames.includes(name);
+          let tableCount = 0;
+
+          try {
+            const dbSql = server.poolManager.getPool(name);
+            const [countRow] = await dbSql`
+              SELECT count(*) AS table_count
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_type = 'BASE TABLE'
+            `;
+            tableCount = Number(countRow.table_count);
+          } catch {
+            // DB bağlantısı başarısız olursa 0 döndür
+          }
+
+          const startedAt = server.poolManager.getPoolStartedAt(name);
+          return {
+            name,
+            size_bytes: Number(row.size_bytes),
+            table_count: tableCount,
+            pool_active: server.poolManager.activePoolNames.includes(name),
+            pool_started_at: startedAt, // ms timestamp, null = kapalı
+          };
+        })
+      );
+
       return reply.send({ databases });
+    })
+  );
+
+  // POST /admin/databases/:db/pool/stop — pool'u kapat, DB silinmez
+  server.post(
+    "/databases/:db/pool/stop",
+    {
+      schema: {
+        description: "Close the connection pool for a database without dropping it",
+        tags: ["admin"],
+        params: {
+          type: "object",
+          properties: { db: { type: "string" } },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { db } = req.params as { db: string };
+
+      if (!isValidIdentifier(db)) {
+        return reply.status(400).send({ error: "Invalid database name" });
+      }
+
+      await server.poolManager.releasePool(db);
+      server.log.info(`Pool stopped: ${db}`);
+      return reply.send({ name: db, pool_active: false });
+    })
+  );
+
+  // POST /admin/databases/:db/pool/start — pool'u başlat (lazy init + test)
+  server.post(
+    "/databases/:db/pool/start",
+    {
+      schema: {
+        description: "Open (or re-open) the connection pool for a database",
+        tags: ["admin"],
+        params: {
+          type: "object",
+          properties: { db: { type: "string" } },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { db } = req.params as { db: string };
+
+      if (!isValidIdentifier(db)) {
+        return reply.status(400).send({ error: "Invalid database name" });
+      }
+
+      const dbSql = server.poolManager.getPool(db); // lazy init
+      await dbSql`SELECT 1`; // bağlantıyı doğrula
+      server.log.info(`Pool started: ${db}`);
+      return reply.send({ name: db, pool_active: true });
     })
   );
 
@@ -68,8 +148,6 @@ export async function databasesRoute(server: FastifyInstance) {
       }
 
       const sql = server.poolManager.getPool("postgres");
-      // postgres.js template literal ile identifier injection mümkün değil;
-      // CREATE DATABASE DDL için unsafe() kullanılır ve identifier validate edilmiştir.
       await sql.unsafe(`CREATE DATABASE "${name}"`);
 
       server.log.info(`Database created: ${name}`);
@@ -97,13 +175,10 @@ export async function databasesRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid database name" });
       }
 
-      // Mevcut pool'u kapat (bağlantı kesilmeden DROP çalışmaz)
       await server.poolManager.releasePool(db);
 
       const sql = server.poolManager.getPool("postgres");
-      await sql.unsafe(
-        `DROP DATABASE IF EXISTS "${db}" WITH (FORCE)`
-      );
+      await sql.unsafe(`DROP DATABASE IF EXISTS "${db}" WITH (FORCE)`);
 
       server.log.info(`Database dropped: ${db}`);
       return reply.send({ name: db, dropped: true });

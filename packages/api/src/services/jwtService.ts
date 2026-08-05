@@ -30,9 +30,13 @@ export class JwtService {
 
   /**
    * Admin token üretir. Tüm DB'lere ve tüm scope'lara tam erişim.
+   * email verilirse payload'a eklenir (GUI login akışı).
    */
-  async signAdminToken(expiresIn: string = "24h"): Promise<string> {
-    return new SignJWT({ role: "admin" })
+  async signAdminToken(expiresIn: string = "24h", email?: string): Promise<string> {
+    const payload: Record<string, unknown> = { role: "admin" };
+    if (email) payload.email = email;
+
+    return new SignJWT(payload)
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime(expiresIn)

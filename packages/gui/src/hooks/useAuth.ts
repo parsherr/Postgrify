@@ -1,22 +1,25 @@
 /**
- * Auth hook'ları — login, logout, token yönetimi.
+ * Auth hook'ları — geriye dönük uyumluluk için.
+ *
+ * useAdminLogin ve useLogout artık AuthContext'e delege eder.
+ * useDbToken değişmedi (programatik API erişimi için hâlâ gerekli).
  */
 
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useAuthContext } from "./useAuthContext.js";
 import { api } from "../lib/api.js";
 import type { TokenResponse } from "../types/index.js";
 
-const TOKEN_KEY = "postgrify_token";
-
 export function useAdminLogin() {
+  const { login } = useAuthContext();
   const navigate = useNavigate();
 
   return useMutation({
-    mutationFn: (adminSecret: string) =>
-      api.post<TokenResponse>("/auth/token/admin", { adminSecret }),
-    onSuccess: (data) => {
-      localStorage.setItem(TOKEN_KEY, data.token);
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      await login(email, password);
+    },
+    onSuccess: () => {
       navigate("/");
     },
   });
@@ -45,13 +48,15 @@ export function useDbToken() {
 }
 
 export function useLogout() {
+  const { logout } = useAuthContext();
   const navigate = useNavigate();
-  return () => {
-    localStorage.removeItem(TOKEN_KEY);
+  return async () => {
+    await logout();
     navigate("/login");
   };
 }
 
 export function useIsAuthenticated() {
-  return !!localStorage.getItem(TOKEN_KEY);
+  const { isAuthenticated } = useAuthContext();
+  return isAuthenticated;
 }

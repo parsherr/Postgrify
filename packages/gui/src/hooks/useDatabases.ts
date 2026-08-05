@@ -41,3 +41,21 @@ export function useDeleteDatabase() {
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
   });
 }
+
+export function useStopPool() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (db: string) =>
+      api.post<{ name: string; pool_active: boolean }>(`/admin/databases/${db}/pool/stop`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
+  });
+}
+
+export function useStartPool() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (db: string) =>
+      api.post<{ name: string; pool_active: boolean }>(`/admin/databases/${db}/pool/start`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
+  });
+}

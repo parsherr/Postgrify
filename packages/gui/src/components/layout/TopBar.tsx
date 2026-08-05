@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDatabases } from "@/hooks/useDatabases";
+import { useAuthContext } from "@/hooks/useAuthContext";
 
 function useBreadcrumbs() {
   const location = useLocation();
@@ -44,9 +45,10 @@ export function TopBar() {
   const navigate = useNavigate();
   const { db: activeDb } = useParams<{ db?: string }>();
   const { data: databases } = useDatabases();
+  const { logout } = useAuthContext();
 
-  function handleLogout() {
-    localStorage.removeItem("postgrify_token");
+  async function handleLogout() {
+    await logout();
     navigate("/login");
   }
 

@@ -1,0 +1,50 @@
+# ─── Build aşaması ────────────────────────────────────────────────────────────
+# Context: monorepo root (package-lock.json ve node_modules buradadir)
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Root bağımlılık dosyaları — monorepo lock dosyası
+COPY package.json package-lock.json ./
+
+# API package.json (workspace bağımlılıkları için)
+COPY packages/api/package.json ./packages/api/
+
+# npm ci: lock dosyasından deterministik, hızlı yükleme
+# --workspace=packages/api: sadece API workspace bağımlılıklarını kur
+RUN npm ci --workspace=packages/api
+
+# API kaynak ve config
+COPY packages/api/tsconfig.json ./packages/api/
+COPY packages/api/src ./packages/api/src
+
+WORKDIR /app/packages/api
+
+RUN npm run build
+
+# ─── Production aşaması ───────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+RUN addgroup -g 1001 -S postgrify && \
+    adduser -S postgrify -u 1001
+
+# Root + API package.json — production bağımlılıkları için
+COPY package.json package-lock.json ./
+COPY packages/api/package.json ./packages/api/
+
+RUN npm ci --workspace=packages/api --omit=dev
+
+COPY --from=builder /app/packages/api/dist ./packages/api/dist
+
+USER postgrify
+
+WORKDIR /app/packages/api
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+CMD ["node", "dist/index.js"]

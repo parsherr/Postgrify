@@ -4,8 +4,8 @@
 
 import React from "react";
 import { Link } from "react-router-dom";
-import { Database, Plus, Trash2, HardDrive, Table2, Loader2 } from "lucide-react";
-import { useDatabases, useCreateDatabase, useDeleteDatabase } from "@/hooks/useDatabases";
+import { Database, Plus, Trash2, HardDrive, Table2, Loader2, Power, PowerOff } from "lucide-react";
+import { useDatabases, useCreateDatabase, useDeleteDatabase, useStopPool, useStartPool } from "@/hooks/useDatabases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,9 @@ export default function DatabasesPage() {
   const { data: databases, isLoading } = useDatabases();
   const { mutateAsync: createDb, isPending: creating } = useCreateDatabase();
   const { mutateAsync: deleteDb, isPending: deleting } = useDeleteDatabase();
+  const { mutateAsync: stopPool, isPending: stopping } = useStopPool();
+  const { mutateAsync: startPool, isPending: starting } = useStartPool();
+  const [poolLoadingDb, setPoolLoadingDb] = React.useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [newDbName, setNewDbName] = React.useState("");
@@ -92,8 +95,9 @@ export default function DatabasesPage() {
             {databases?.map((db) => (
               <div
                 key={db.name}
-                className="group grid grid-cols-[1fr_auto_auto_auto] items-center gap-6 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-accent/10"
+                className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-accent/10"
               >
+                {/* DB adı + aktiflik göstergesi */}
                 <Link
                   to={`/databases/${db.name}`}
                   className="flex items-center gap-2.5"
@@ -104,9 +108,14 @@ export default function DatabasesPage() {
                   <span className="font-mono text-sm text-foreground hover:underline">
                     {db.name}
                   </span>
+                  {/* Pool durum noktası */}
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${db.pool_active ? "bg-green-500" : "bg-zinc-600"}`}
+                    title={db.pool_active ? "Pool aktif" : "Pool kapalı"}
+                  />
                 </Link>
 
-                <span className="flex w-24 items-center justify-end gap-1 font-mono text-xs text-muted-foreground">
+                <span className="flex w-20 items-center justify-end gap-1 font-mono text-xs text-muted-foreground">
                   <Table2 className="h-3 w-3" />
                   {db.table_count}
                 </span>
@@ -115,6 +124,38 @@ export default function DatabasesPage() {
                   {formatBytes(db.size_bytes ?? 0)}
                 </span>
 
+                {/* Pool toggle butonu */}
+                <button
+                  onClick={async () => {
+                    setPoolLoadingDb(db.name);
+                    try {
+                      if (db.pool_active) {
+                        await stopPool(db.name);
+                      } else {
+                        await startPool(db.name);
+                      }
+                    } finally {
+                      setPoolLoadingDb(null);
+                    }
+                  }}
+                  disabled={poolLoadingDb === db.name || stopping || starting}
+                  title={db.pool_active ? "Pool'u durdur" : "Pool'u başlat"}
+                  className={`flex h-6 w-6 items-center justify-center rounded transition-all
+                    ${db.pool_active
+                      ? "text-muted-foreground/40 hover:bg-amber-950/40 hover:text-amber-400 opacity-0 group-hover:opacity-100"
+                      : "text-green-500/70 hover:bg-green-950/40 hover:text-green-400"
+                    }`}
+                >
+                  {poolLoadingDb === db.name ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : db.pool_active ? (
+                    <PowerOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Power className="h-3.5 w-3.5" />
+                  )}
+                </button>
+
+                {/* Sil butonu */}
                 <button
                   onClick={() => setDeleteTarget(db.name)}
                   className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-950/50 hover:text-red-400"

@@ -14,12 +14,17 @@ services:
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: packages/api/Dockerfile.monorepo
     ports:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      # argon2 hash icindeki $ Docker Compose'da $$ ile escape edilir.
+      # Hash'i degistirmek icin: cd packages/api && npx tsx scripts/hash-password.ts "sifre"
+      # Ciktidaki her $ isaretini $$ yaparak buraya yapistir.
+      ADMIN_PASSWORD_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$x6GWQgBkGnPjBPlNYxfn+g$$cyHdYctixJW/olyFQdvFAI9UEXwm1AAu9jghzhyLUds"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -35,7 +40,6 @@ services:
 
   gui:
     build:
-      # Context: monorepo root (package-lock.json buradadir)
       context: ..
       dockerfile: packages/gui/Dockerfile.monorepo
       args:

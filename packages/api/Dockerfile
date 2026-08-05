@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Önce sadece package.json — bağımlılık layer'ı cache'lenir
-COPY package.json package-lock.json* ./
+COPY package.json ./
 RUN npm install
 
 COPY tsconfig.json ./
@@ -19,7 +19,7 @@ WORKDIR /app
 RUN addgroup -g 1001 -S postgrify && \
     adduser -S postgrify -u 1001
 
-COPY package.json package-lock.json* ./
+COPY package.json ./
 RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist

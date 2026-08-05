@@ -4,12 +4,19 @@
 
 export interface Database {
   name: string;
-  size_bytes: number;
+  /** PostgreSQL bigint → string olarak gelebilir, Number() ile parse et */
+  size_bytes: number | string;
+  /** cross-DB sorgu kısıtı nedeniyle güvenilmez, 0 gelebilir */
   table_count: number;
+  /** Pool aktif mi? false = bağlantı kapalı, sorgu yapılamaz */
+  pool_active: boolean;
+  /** Pool açılma zamanı (ms timestamp). null = kapalı */
+  pool_started_at: number | null;
 }
 
 export interface TableInfo {
   name: string;
+  /** pg_class.reltuples: -1 = hiç ANALYZE edilmemiş, 0 = boş, >0 tahmin */
   estimated_row_count: number;
   size: string;
 }
