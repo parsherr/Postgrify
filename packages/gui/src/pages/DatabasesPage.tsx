@@ -2,9 +2,9 @@
  * DatabasesPage — tüm veritabanları listesi + yeni DB oluşturma.
  */
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Database, Plus, Trash2, HardDrive, Table2, Loader2, Power, PowerOff } from "lucide-react";
+import { Database, Plus, Trash2, HardDrive, Table2, Loader2, Power, PowerOff, Search } from "lucide-react";
 import { useDatabases, useCreateDatabase, useDeleteDatabase, useStopPool, useStartPool } from "@/hooks/useDatabases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,10 +28,18 @@ export default function DatabasesPage() {
   const { mutateAsync: startPool, isPending: starting } = useStartPool();
   const [poolLoadingDb, setPoolLoadingDb] = React.useState<string | null>(null);
 
+  const [search, setSearch] = React.useState("");
   const [createOpen, setCreateOpen] = React.useState(false);
   const [newDbName, setNewDbName] = React.useState("");
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
   const [createError, setCreateError] = React.useState<string | null>(null);
+
+  const filteredDatabases = useMemo(() => {
+    if (!databases) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return databases;
+    return databases.filter((db) => db.name.toLowerCase().includes(q));
+  }, [databases, search]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -68,6 +76,18 @@ export default function DatabasesPage() {
         </Button>
       </div>
 
+      {/* Arama */}
+      <div className="relative w-full max-w-xs">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Veritabanı ara…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-full rounded border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
+
       {/* Liste */}
       <div className="rounded border border-border">
         {/* Tablo başlığı */}
@@ -92,7 +112,12 @@ export default function DatabasesPage() {
           </div>
         ) : (
           <div>
-            {databases?.map((db) => (
+            {filteredDatabases.length === 0 && !isLoading && (
+              <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                {search.trim() ? `"${search}" ile eşleşen veritabanı bulunamadı.` : "Henüz veritabanı yok."}
+              </p>
+            )}
+            {filteredDatabases.map((db) => (
               <div
                 key={db.name}
                 className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-accent/10"
@@ -165,7 +190,7 @@ export default function DatabasesPage() {
               </div>
             ))}
 
-            {databases?.length === 0 && (
+            {databases?.length === 0 && !search.trim() && (
               <div className="flex flex-col items-center gap-3 py-16 text-center">
                 <Database className="h-8 w-8 text-muted-foreground/30" />
                 <p className="text-xs text-muted-foreground">Veritabanı yok</p>

@@ -36,24 +36,28 @@ export async function databasesRoute(server: FastifyInstance) {
 
       const activeNames = server.poolManager.activePoolNames;
 
-      // Her DB için tablo sayısı — pool aktifse kendi bağlantısını kullan
+      // Her DB için tablo sayısı — yalnızca zaten açık olan pool'ları kullan.
+      // getPool() lazy init yapar, kapalı bir DB için çağırırsak pool yeniden
+      // açılır; bu yüzden sadece activeNames'e dahil olanlara sorguyoruz.
       const databases = await Promise.all(
         dbRows.map(async (row) => {
           const name = row.name as string;
           const poolActive = activeNames.includes(name);
           let tableCount = 0;
 
-          try {
-            const dbSql = server.poolManager.getPool(name);
-            const [countRow] = await dbSql`
-              SELECT count(*) AS table_count
-              FROM information_schema.tables
-              WHERE table_schema = 'public'
-                AND table_type = 'BASE TABLE'
-            `;
-            tableCount = Number(countRow.table_count);
-          } catch {
-            // DB bağlantısı başarısız olursa 0 döndür
+          if (poolActive) {
+            try {
+              const dbSql = server.poolManager.getPool(name);
+              const [countRow] = await dbSql`
+                SELECT count(*) AS table_count
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_type = 'BASE TABLE'
+              `;
+              tableCount = Number(countRow.table_count);
+            } catch {
+              // Bağlantı hatası — 0 döndür
+            }
           }
 
           const startedAt = server.poolManager.getPoolStartedAt(name);
@@ -61,7 +65,7 @@ export async function databasesRoute(server: FastifyInstance) {
             name,
             size_bytes: Number(row.size_bytes),
             table_count: tableCount,
-            pool_active: server.poolManager.activePoolNames.includes(name),
+            pool_active: poolActive,
             pool_started_at: startedAt, // ms timestamp, null = kapalı
           };
         })
