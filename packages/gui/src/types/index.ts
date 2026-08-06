@@ -8,10 +8,6 @@ export interface Database {
   size_bytes: number | string;
   /** cross-DB sorgu kısıtı nedeniyle güvenilmez, 0 gelebilir */
   table_count: number;
-  /** Pool aktif mi? false = bağlantı kapalı, sorgu yapılamaz */
-  pool_active: boolean;
-  /** Pool açılma zamanı (ms timestamp). null = kapalı */
-  pool_started_at: number | null;
 }
 
 export interface TableInfo {

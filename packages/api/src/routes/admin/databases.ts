@@ -1,10 +1,11 @@
 /**
  * Admin DB yönetim route'ları:
- *   GET    /admin/databases              — DB listesi + boyut + tablo sayısı + pool_active
- *   POST   /admin/databases              — Yeni DB oluştur
- *   DELETE /admin/databases/:db          — DB sil
- *   POST   /admin/databases/:db/pool/stop  — Pool'u kapat (DB silinmez)
- *   POST   /admin/databases/:db/pool/start — Pool'u başlat / yeniden bağlan
+ *   GET    /admin/databases                        — DB listesi + boyut + tablo sayısı + pool_active + auto_start
+ *   POST   /admin/databases                        — Yeni DB oluştur
+ *   DELETE /admin/databases/:db                    — DB sil (PostgreSQL seviyesinde DROP)
+ *   POST   /admin/databases/:db/pool/stop          — Pool'u kapat (DB silinmez)
+ *   POST   /admin/databases/:db/pool/start         — Pool'u başlat / yeniden bağlan
+ *   PUT    /admin/databases/:db/settings           — auto_start ayarını güncelle
  */
 
 import type { FastifyInstance } from "fastify";
@@ -35,6 +36,7 @@ export async function databasesRoute(server: FastifyInstance) {
       `;
 
       const activeNames = server.poolManager.activePoolNames;
+      const autoStartDbs = await server.settings.getAutoStartDatabases();
 
       // Her DB için tablo sayısı — yalnızca zaten açık olan pool'ları kullan.
       // getPool() lazy init yapar, kapalı bir DB için çağırırsak pool yeniden
@@ -67,6 +69,7 @@ export async function databasesRoute(server: FastifyInstance) {
             table_count: tableCount,
             pool_active: poolActive,
             pool_started_at: startedAt, // ms timestamp, null = kapalı
+            auto_start: autoStartDbs.includes(name),
           };
         })
       );
@@ -179,13 +182,49 @@ export async function databasesRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid database name" });
       }
 
+      // Pool'u kapat, settings'i temizle, sonra DROP
       await server.poolManager.releasePool(db);
+      await server.settings.deleteDatabase(db);
 
       const sql = server.poolManager.getPool("postgres");
       await sql.unsafe(`DROP DATABASE IF EXISTS "${db}" WITH (FORCE)`);
 
       server.log.info(`Database dropped: ${db}`);
       return reply.send({ name: db, dropped: true });
+    })
+  );
+
+  // PUT /admin/databases/:db/settings — auto_start güncelle
+  server.put(
+    "/databases/:db/settings",
+    {
+      schema: {
+        description: "Update per-database settings (auto_start)",
+        tags: ["admin"],
+        params: {
+          type: "object",
+          properties: { db: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["auto_start"],
+          properties: {
+            auto_start: { type: "boolean" },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { db } = req.params as { db: string };
+      const { auto_start } = req.body as { auto_start: boolean };
+
+      if (!isValidIdentifier(db)) {
+        return reply.status(400).send({ error: "Invalid database name" });
+      }
+
+      await server.settings.setAutoStart(db, auto_start);
+      server.log.info(`Auto-start set to ${auto_start} for DB: ${db}`);
+      return reply.send({ name: db, auto_start });
     })
   );
 }

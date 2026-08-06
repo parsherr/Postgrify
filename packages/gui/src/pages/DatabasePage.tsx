@@ -8,19 +8,17 @@
  */
 
 import React from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Table2,
   Rows3,
   Terminal,
   Settings2,
-  Play,
-  PowerOff,
   Loader2,
+  Play,
   Database,
   HardDrive,
-  Clock,
   Hash,
   ChevronRight,
   Copy,
@@ -34,7 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatBytes } from "@/lib/utils";
-import { useDatabases, useStopPool, useStartPool } from "@/hooks/useDatabases";
+import { useDatabases, useDeleteDatabase } from "@/hooks/useDatabases";
 import { useTables, useTableSchema, useDropTable } from "@/hooks/useTables";
 import { useRows, useDeleteRow, useUpdateRow } from "@/hooks/useRows";
 import { useDbAuthUsers } from "@/hooks/useDbAuth";
@@ -61,24 +59,6 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-// ── Uptime sayaci ────────────────────────────────────────────────────────────
-
-function useUptime(startedAt: number | null) {
-  const [now, setNow] = React.useState(Date.now());
-  React.useEffect(() => {
-    if (!startedAt) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [startedAt]);
-
-  if (!startedAt) return null;
-  const sec = Math.floor((now - startedAt) / 1000);
-  const h = Math.floor(sec / 3600).toString().padStart(2, "0");
-  const m = Math.floor((sec % 3600) / 60).toString().padStart(2, "0");
-  const s = (sec % 60).toString().padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
-
 // ── Ana bilesen ───────────────────────────────────────────────────────────────
 
 export default function DatabasePage() {
@@ -90,12 +70,6 @@ export default function DatabasePage() {
   const { data: databases, isLoading: dbLoading } = useDatabases();
   const dbInfo: DbType | undefined = databases?.find((d) => d.name === db);
 
-  const { mutateAsync: stopPool, isPending: stopping } = useStopPool();
-  const { mutateAsync: startPool, isPending: starting } = useStartPool();
-  const [poolActionLoading, setPoolActionLoading] = React.useState(false);
-
-  const uptime = useUptime(dbInfo?.pool_started_at ?? null);
-
   if (!db) return null;
 
   function setTab(id: TabId) {
@@ -106,22 +80,6 @@ export default function DatabasePage() {
     setSearchParams({ tab: "data", table: name });
   }
 
-  async function handlePoolToggle() {
-    if (!dbInfo) return;
-    setPoolActionLoading(true);
-    try {
-      if (dbInfo.pool_active) {
-        await stopPool(db!);
-      } else {
-        await startPool(db!);
-      }
-    } finally {
-      setPoolActionLoading(false);
-    }
-  }
-
-  const isActionLoading = poolActionLoading || stopping || starting;
-
   return (
     <div className="flex h-full overflow-hidden">
 
@@ -129,15 +87,7 @@ export default function DatabasePage() {
       <div className="flex w-52 shrink-0 flex-col border-r border-border bg-card">
         {/* DB baslik */}
         <div className="flex h-10 items-center gap-2 border-b border-border px-3">
-          <div className="relative shrink-0">
-            <Database className="h-4 w-4 text-muted-foreground" />
-            <span
-              className={cn(
-                "absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-card",
-                dbInfo?.pool_active ? "bg-green-500" : "bg-red-500"
-              )}
-            />
-          </div>
+          <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate font-mono text-sm font-semibold">{db}</span>
         </div>
 
@@ -175,57 +125,8 @@ export default function DatabasePage() {
       {/* Sag icerik */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Baslik bari */}
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm font-semibold">{db}</span>
-            {dbInfo?.pool_active && uptime && (
-              <span className="text-xs text-muted-foreground">(Uptime: {uptime})</span>
-            )}
-            <Badge
-              variant="outline"
-              className={cn(
-                "h-4 px-1.5 text-2xs",
-                dbInfo?.pool_active
-                  ? "border-green-500/30 text-green-400"
-                  : "border-red-500/30 text-red-400"
-              )}
-            >
-              {dbInfo?.pool_active ? "running" : "stopped"}
-            </Badge>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {dbInfo?.pool_active ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handlePoolToggle}
-                disabled={isActionLoading}
-                className="h-7 gap-1.5 border-red-500/30 text-red-400 hover:border-red-500/60 hover:bg-red-950/30 hover:text-red-300"
-              >
-                {isActionLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <PowerOff className="h-3 w-3" />
-                )}
-                Durdur
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={handlePoolToggle}
-                disabled={isActionLoading}
-                className="h-7 gap-1.5"
-              >
-                {isActionLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Play className="h-3 w-3" />
-                )}
-                Baslat
-              </Button>
-            )}
-          </div>
+        <div className="flex h-10 shrink-0 items-center border-b border-border px-4">
+          <span className="font-mono text-sm font-semibold">{db}</span>
         </div>
 
         {/* Sekme icerigi */}
@@ -237,7 +138,7 @@ export default function DatabasePage() {
               ))}
             </div>
           ) : activeTab === "summary" ? (
-            <SummaryTab db={db} dbInfo={dbInfo} uptime={uptime} />
+            <SummaryTab db={db} dbInfo={dbInfo} />
           ) : activeTab === "tables" ? (
             <TablesTab db={db} />
           ) : activeTab === "data" ? (
@@ -262,19 +163,11 @@ export default function DatabasePage() {
 function SummaryTab({
   db,
   dbInfo,
-  uptime,
 }: {
   db: string;
   dbInfo: DbType | undefined;
-  uptime: string | null;
 }) {
   const stats = [
-    {
-      label: "Status",
-      value: dbInfo?.pool_active ? "running" : "stopped",
-      icon: Database,
-      accent: dbInfo?.pool_active ? "text-green-400" : "text-red-400",
-    },
     {
       label: "Disk boyutu",
       value: formatBytes(dbInfo?.size_bytes ?? 0),
@@ -285,12 +178,6 @@ function SummaryTab({
       label: "Tablo sayisi",
       value: String(dbInfo?.table_count ?? 0),
       icon: Hash,
-      accent: "text-foreground",
-    },
-    {
-      label: "Uptime",
-      value: uptime ?? "—",
-      icon: Clock,
       accent: "text-foreground",
     },
   ];
@@ -1174,27 +1061,34 @@ function BackupTab({ db }: { db: string }) {
 // ── Options Tab ───────────────────────────────────────────────────────────────
 
 function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) {
+  const { mutateAsync: deleteDatabase, isPending: deleting } = useDeleteDatabase();
+  const [deleteConfirm, setDeleteConfirm] = React.useState(false);
+  const [deleteInput, setDeleteInput] = React.useState("");
+  const navigate = useNavigate();
+
+  async function handleDelete() {
+    if (deleteInput !== db) return;
+    await deleteDatabase(db);
+    navigate("/databases");
+  }
+
+  const stats = dbInfo
+    ? [
+        { label: "Boyut", value: formatBytes(dbInfo.size_bytes), accent: "" },
+        { label: "Tablo sayisi", value: String(dbInfo.table_count), accent: "" },
+      ]
+    : [];
+
   return (
     <div className="h-full overflow-y-auto p-6">
-      <div className="mx-auto max-w-lg space-y-4">
+      <div className="mx-auto max-w-lg space-y-6">
         <h2 className="text-sm font-semibold">Veritabani Secenekleri</h2>
-        <div className="rounded border border-border bg-card p-4 text-sm text-muted-foreground">
+
+        {/* Info kartı */}
+        <div className="rounded border border-border bg-card p-4">
           <p className="mb-1 font-mono text-xs text-foreground">{db}</p>
-          <p className="text-xs">
-            Bu bolumden veritabani seviyesinde konfigurasyon yapilabilir.
-          </p>
-        </div>
-        {dbInfo && (
-          <div className="space-y-2 text-xs text-muted-foreground">
-            {[
-              { label: "Boyut", value: formatBytes(dbInfo.size_bytes), accent: "" },
-              { label: "Tablo sayisi", value: String(dbInfo.table_count), accent: "" },
-              {
-                label: "Pool durumu",
-                value: dbInfo.pool_active ? "aktif" : "kapali",
-                accent: dbInfo.pool_active ? "text-green-400" : "text-red-400",
-              },
-            ].map((row, i, arr) => (
+          <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+            {stats.map((row, i, arr) => (
               <div
                 key={row.label}
                 className={cn(
@@ -1207,7 +1101,58 @@ function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) 
               </div>
             ))}
           </div>
-        )}
+        </div>
+
+        {/* Delete Zone */}
+        <div className="rounded border border-red-900/40 bg-card p-4">
+          <p className="mb-1 text-xs font-medium text-red-400">Tehlikeli Bölge</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Bu işlem geri alınamaz. Veritabanı ve tüm verileri kalıcı olarak silinir.
+          </p>
+          {!deleteConfirm ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setDeleteConfirm(true)}
+              className="gap-1.5"
+            >
+              Veritabanını Sil
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Onaylamak için veritabanı adını yazın:{" "}
+                <span className="font-mono text-foreground">{db}</span>
+              </p>
+              <input
+                type="text"
+                value={deleteInput}
+                onChange={(e) => setDeleteInput(e.target.value)}
+                placeholder={db}
+                className="h-8 w-full rounded border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-red-500"
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleDelete}
+                  disabled={deleteInput !== db || deleting}
+                  className="gap-1.5"
+                >
+                  {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Kalıcı Olarak Sil
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setDeleteConfirm(false); setDeleteInput(""); }}
+                >
+                  İptal
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

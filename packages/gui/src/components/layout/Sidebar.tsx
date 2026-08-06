@@ -35,26 +35,14 @@ const navItems = [
 /** Tek bir veritabanının sidebar satırını gösterir */
 function DbTreeNode({
   dbName,
-  poolActive,
   collapsed,
 }: {
   dbName: string;
-  poolActive: boolean;
   collapsed: boolean;
 }) {
   const params = useParams<{ db?: string }>();
   const isActiveDb = params.db === dbName;
   const dbPath = `/databases/${dbName}`;
-
-  const dot = (
-    <span
-      className={cn(
-        "h-1.5 w-1.5 shrink-0 rounded-full",
-        poolActive ? "bg-green-500" : "bg-zinc-600"
-      )}
-      title={poolActive ? "Pool aktif" : "Pool kapalı"}
-    />
-  );
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -70,22 +58,12 @@ function DbTreeNode({
               collapsed && "justify-center px-0"
             )}
           >
-            {/* collapsed modda ikon + nokta üst üste */}
             {collapsed ? (
-              <span className="relative mx-auto">
-                <Database className="h-3.5 w-3.5" />
-                <span
-                  className={cn(
-                    "absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-background",
-                    poolActive ? "bg-green-500" : "bg-zinc-600"
-                  )}
-                />
-              </span>
+              <Database className="h-3.5 w-3.5 mx-auto" />
             ) : (
               <>
                 <Database className="h-3.5 w-3.5 shrink-0" />
                 <span className="flex-1 truncate font-mono text-xs">{dbName}</span>
-                {dot}
               </>
             )}
           </Link>
@@ -93,9 +71,6 @@ function DbTreeNode({
         {collapsed && (
           <TooltipContent side="right" className="font-mono text-xs">
             {dbName}
-            <span className="ml-1.5 opacity-60">
-              {poolActive ? "● aktif" : "○ kapalı"}
-            </span>
           </TooltipContent>
         )}
       </Tooltip>
@@ -166,7 +141,6 @@ export function Sidebar({ collapsed }: SidebarProps) {
             <DbTreeNode
               key={db.name}
               dbName={db.name}
-              poolActive={db.pool_active}
               collapsed={collapsed}
             />
           ))}

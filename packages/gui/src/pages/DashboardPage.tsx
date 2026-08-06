@@ -137,19 +137,6 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex flex-1 items-center gap-2">
                   <span className="font-mono text-sm text-foreground">{db.name}</span>
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${db.pool_active ? "bg-green-500" : "bg-zinc-600"}`}
-                    title={db.pool_active ? "Pool aktif" : "Pool kapalı"}
-                  />
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-2xs font-medium ${
-                      db.pool_active
-                        ? "bg-green-500/10 text-green-400"
-                        : "bg-zinc-800 text-zinc-500"
-                    }`}
-                  >
-                    {db.pool_active ? "active" : "offline"}
-                  </span>
                 </div>
                 <div className="flex items-center gap-6 text-2xs text-muted-foreground">
                   <span className="flex items-center gap-1">
