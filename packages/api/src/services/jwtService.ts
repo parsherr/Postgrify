@@ -44,6 +44,26 @@ export class JwtService {
   }
 
   /**
+   * Per-database kullanıcı token üretir.
+   * iss: "postgrify/db-auth" ile admin token'lardan ayrılır.
+   */
+  async signDbUserToken(
+    database: string,
+    userId: string,
+    email: string,
+    role: string,
+    expiresIn: string = "15m"
+  ): Promise<string> {
+    return new SignJWT({ db: database, email, role })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(userId)
+      .setIssuer("postgrify/db-auth")
+      .setIssuedAt()
+      .setExpirationTime(expiresIn)
+      .sign(this.secret);
+  }
+
+  /**
    * Token doğrular. Geçersiz/süresi dolmuşsa null döner.
    */
   async verify(token: string): Promise<JwtPayload | null> {

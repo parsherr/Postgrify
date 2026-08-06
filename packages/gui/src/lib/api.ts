@@ -9,7 +9,7 @@
  * AuthContext tarafından buraya inject edilir (setTokenAccessors).
  */
 
-const BASE_URL =
+export const BASE_URL =
   (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ??
   "http://localhost:3000";
 
@@ -27,7 +27,7 @@ export function setTokenAccessors(
   _setToken = setter;
 }
 
-function getToken(): string | null {
+export function getToken(): string | null {
   return _getToken ? _getToken() : null;
 }
 
@@ -139,3 +139,51 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   delete: <T = void>(path: string) => request<T>("DELETE", path),
 };
+
+// ── Setup API (auth gerektirmez, doğrudan fetch) ──────────────────────────────
+
+export interface SetupStatus {
+  configured: boolean;
+}
+
+export interface SetupPayload {
+  adminEmail: string;
+  adminPassword: string;
+  pgHost: string;
+  pgPort: number;
+  pgUser: string;
+  pgPassword: string;
+}
+
+export interface SetupResult {
+  ok: boolean;
+  message: string;
+}
+
+export async function getSetupStatus(): Promise<SetupStatus> {
+  const res = await fetch(`${BASE_URL}/setup/status`);
+  if (!res.ok) {
+    // API erişilemiyorsa → setup gerekiyor gibi davran
+    return { configured: false };
+  }
+  return res.json() as Promise<SetupStatus>;
+}
+
+export async function postSetup(payload: SetupPayload): Promise<SetupResult> {
+  const res = await fetch(`${BASE_URL}/setup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const err = (await res.json()) as { error?: string; message?: string };
+      message = err.error ?? err.message ?? message;
+    } catch { /* ignore */ }
+    throw new Error(message);
+  }
+
+  return res.json() as Promise<SetupResult>;
+}

@@ -9,6 +9,7 @@ import { tablesRoute } from "./tables.js";
 import { rowsRoute } from "./rows.js";
 import { queryRoute } from "./query.js";
 import { metaRoute } from "./meta.js";
+import { backupRoute } from "./backup.js";
 
 export async function dbRoutes(server: FastifyInstance) {
   // Tüm /db route'larında auth + DB çözümleme zorunlu
@@ -19,4 +20,5 @@ export async function dbRoutes(server: FastifyInstance) {
   await server.register(rowsRoute);
   await server.register(metaRoute);
   await server.register(queryRoute);
+  await server.register(backupRoute);
 }

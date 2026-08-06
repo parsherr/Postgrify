@@ -11,6 +11,7 @@ import { cachePlugin } from "./cache.js";
 import { sessionPlugin } from "./session.js";
 import { poolPlugin } from "./pool.js";
 import { openApiPlugin } from "./openApi.js";
+import { websocketPlugin } from "./websocket.js";
 
 export async function registerPlugins(server: FastifyInstance) {
   await server.register(corsPlugin);
@@ -19,5 +20,6 @@ export async function registerPlugins(server: FastifyInstance) {
   await server.register(cachePlugin);
   await server.register(sessionPlugin);
   await server.register(poolPlugin);
+  await server.register(websocketPlugin);
   await server.register(openApiPlugin);
 }

@@ -7,9 +7,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./contexts/AuthContext";
 import { useAuthContext } from "./hooks/useAuthContext";
+import { useSetupStatus } from "./hooks/useSetupStatus";
 import { setTokenAccessors } from "./lib/api";
 import { AppShell } from "./components/layout/AppShell";
 import LoginPage from "./pages/LoginPage";
+import SetupPage from "./pages/SetupPage";
 import DashboardPage from "./pages/DashboardPage";
 import DatabasesPage from "./pages/DatabasesPage";
 import DatabasePage from "./pages/DatabasePage";
@@ -62,75 +64,107 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }
 
+/**
+ * SetupGuard — uygulama ilk yüklendiğinde /setup/status kontrol eder.
+ * configured=false ise tüm route'ları /setup'a yönlendirir.
+ * configured=true ise normal akış devam eder.
+ */
+function SetupGuard({ children }: { children: React.ReactNode }) {
+  const { data, isLoading } = useSetupStatus();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
+      </div>
+    );
+  }
+
+  // API'ye erişilemiyorsa veya kurulum tamamlanmamışsa → setup
+  if (!data?.configured) {
+    return (
+      <Routes>
+        <Route path="/setup" element={<SetupPage />} />
+        <Route path="*" element={<Navigate to="/setup" replace />} />
+      </Routes>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AuthProvider>
-          <TokenInjector />
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
+        <SetupGuard>
+          <AuthProvider>
+            <TokenInjector />
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/setup" element={<Navigate to="/" replace />} />
 
-            <Route
-              path="/"
-              element={
-                <ProtectedLayout>
-                  <DashboardPage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/databases"
-              element={
-                <ProtectedLayout>
-                  <DatabasesPage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/databases/:db"
-              element={
-                <ProtectedLayout>
-                  <DatabasePage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/databases/:db/new-table"
-              element={
-                <ProtectedLayout>
-                  <CreateTablePage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/databases/:db/tables/:table"
-              element={
-                <ProtectedLayout>
-                  <TablePage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/query"
-              element={
-                <ProtectedLayout>
-                  <QueryPage />
-                </ProtectedLayout>
-              }
-            />
-            <Route
-              path="/api-keys"
-              element={
-                <ProtectedLayout>
-                  <ApiKeysPage />
-                </ProtectedLayout>
-              }
-            />
+              <Route
+                path="/"
+                element={
+                  <ProtectedLayout>
+                    <DashboardPage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/databases"
+                element={
+                  <ProtectedLayout>
+                    <DatabasesPage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/databases/:db"
+                element={
+                  <ProtectedLayout>
+                    <DatabasePage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/databases/:db/new-table"
+                element={
+                  <ProtectedLayout>
+                    <CreateTablePage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/databases/:db/tables/:table"
+                element={
+                  <ProtectedLayout>
+                    <TablePage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/query"
+                element={
+                  <ProtectedLayout>
+                    <QueryPage />
+                  </ProtectedLayout>
+                }
+              />
+              <Route
+                path="/api-keys"
+                element={
+                  <ProtectedLayout>
+                    <ApiKeysPage />
+                  </ProtectedLayout>
+                }
+              />
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AuthProvider>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AuthProvider>
+        </SetupGuard>
       </BrowserRouter>
     </QueryClientProvider>
   );

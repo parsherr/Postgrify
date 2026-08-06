@@ -37,13 +37,15 @@ import { cn, formatBytes } from "@/lib/utils";
 import { useDatabases, useStopPool, useStartPool } from "@/hooks/useDatabases";
 import { useTables, useTableSchema, useDropTable } from "@/hooks/useTables";
 import { useRows, useDeleteRow, useUpdateRow } from "@/hooks/useRows";
+import { useDbAuthUsers } from "@/hooks/useDbAuth";
 import type { Database as DbType } from "@/types";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import type { DataGridColumn } from "@/components/data-grid/DataGrid";
 import { QueryEditor } from "@/components/query-editor/QueryEditor";
 import { ResultsPanel } from "@/components/query-editor/ResultsPanel";
 import { saveToHistory } from "@/components/query-editor/QueryHistory";
-import { api } from "@/lib/api";
+import { api, BASE_URL, getToken } from "@/lib/api";
+import { AuthsTab } from "@/components/database/AuthsTab";
 
 // ── Sekme tanimlari ──────────────────────────────────────────────────────────
 
@@ -82,7 +84,8 @@ function useUptime(startedAt: number | null) {
 export default function DatabasePage() {
   const { db } = useParams<{ db: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabId) ?? "summary";
+  const activeTab   = (searchParams.get("tab") as TabId) ?? "summary";
+  const activeTable = searchParams.get("table") ?? "";
 
   const { data: databases, isLoading: dbLoading } = useDatabases();
   const dbInfo: DbType | undefined = databases?.find((d) => d.name === db);
@@ -97,6 +100,10 @@ export default function DatabasePage() {
 
   function setTab(id: TabId) {
     setSearchParams({ tab: id });
+  }
+
+  function setTable(name: string) {
+    setSearchParams({ tab: "data", table: name });
   }
 
   async function handlePoolToggle() {
@@ -234,13 +241,13 @@ export default function DatabasePage() {
           ) : activeTab === "tables" ? (
             <TablesTab db={db} />
           ) : activeTab === "data" ? (
-            <DataTab db={db} />
+            <DataTab db={db} activeTable={activeTable} setTable={setTable} />
           ) : activeTab === "query" ? (
             <SqlEditorTab db={db} />
           ) : activeTab === "backup" ? (
-            <PlaceholderTab label="Backup" description="Veritabani yedekleme ve geri yukleme ozellikleri yakininda eklenecek." />
+            <BackupTab db={db} />
           ) : activeTab === "auths" ? (
-            <PlaceholderTab label="Auths" description="Veritabani erisim yetkilendirme yonetimi yakininda eklenecek." />
+            <AuthsTab db={db} />
           ) : (
             <OptionsTab db={db} dbInfo={dbInfo} />
           )}
@@ -509,49 +516,89 @@ function TablesTab({ db }: { db: string }) {
 
 // ── Data Tab ──────────────────────────────────────────────────────────────────
 
-function DataTab({ db }: { db: string }) {
+const AUTH_SCHEMA = "_postgrify_auth";
+const AUTH_TABLES = ["users", "sessions"] as const;
+
+function DataTab({
+  db,
+  activeTable,
+  setTable,
+}: {
+  db: string;
+  activeTable: string;
+  setTable: (name: string) => void;
+}) {
   const { data: tables, isLoading: tablesLoading } = useTables(db);
-  const [selectedTable, setSelectedTable] = React.useState<string>("");
   const [page, setPage] = React.useState(0);
   const [pageSize, setPageSize] = React.useState(25);
 
+  // URL'den seçili tablo gelmiyorsa ilk public tabloyu otomatik seç
   React.useEffect(() => {
-    if (tables && tables.length > 0 && !selectedTable) {
-      setSelectedTable(tables[0].name);
+    if (!activeTable && tables && tables.length > 0) {
+      setTable(tables[0].name);
     }
-  }, [tables, selectedTable]);
+  }, [activeTable, tables, setTable]);
 
-  React.useEffect(() => {
-    setPage(0);
-  }, [selectedTable]);
+  // Tablo değişince sayfa sıfırla
+  React.useEffect(() => { setPage(0); }, [activeTable]);
 
+  // "schema.table" parse — auth tabloları için
+  const isAuthTable =
+    activeTable.startsWith(AUTH_SCHEMA + ".") ||
+    AUTH_TABLES.includes(activeTable.replace(AUTH_SCHEMA + ".", "") as typeof AUTH_TABLES[number]);
+  const resolvedSchema = activeTable.startsWith(AUTH_SCHEMA + ".") ? AUTH_SCHEMA : "public";
+  const resolvedTable  = activeTable.startsWith(AUTH_SCHEMA + ".")
+    ? activeTable.slice(AUTH_SCHEMA.length + 1)
+    : activeTable;
+
+  // Public table rows
   const { data: rowsResult, isLoading: rowsLoading, refetch } = useRows(
     db,
-    selectedTable,
+    isAuthTable ? "" : resolvedTable,       // auth tablosu seçiliyse public hook devre dışı
     { limit: pageSize, offset: page * pageSize }
   );
 
+  // Auth users (sadece _postgrify_auth.users için)
+  const {
+    data: authUsersResult,
+    isLoading: authUsersLoading,
+    refetch: refetchAuthUsers,
+  } = useDbAuthUsers(isAuthTable && resolvedTable === "users" ? db : "");
+
+  // Auth rows → DataGrid formatına normalize et
+  const authRows: Record<string, unknown>[] = React.useMemo(
+    () => (authUsersResult?.users ?? []) as unknown as Record<string, unknown>[],
+    [authUsersResult]
+  );
+
+  // Aktif veri + loading + refetch
+  const activeRows    = isAuthTable ? authRows               : (rowsResult?.rows ?? []);
+  const activeTotal   = isAuthTable ? (authUsersResult?.total ?? 0) : (rowsResult?.total ?? 0);
+  const activeLoading = isAuthTable ? authUsersLoading        : rowsLoading;
+  function activeRefetch() {
+    if (isAuthTable) { refetchAuthUsers(); } else { refetch(); }
+  }
+
   const columns: DataGridColumn[] = React.useMemo(() => {
-    if (!rowsResult?.rows?.length) return [];
-    return Object.keys(rowsResult.rows[0]).map((key) => ({
+    if (!activeRows.length) return [];
+    return Object.keys(activeRows[0]).map((key) => ({
       key,
       label: key,
       type: "text" as const,
     }));
-  }, [rowsResult]);
+  }, [activeRows]);
 
   const { mutateAsync: deleteRow } = useDeleteRow();
   const { mutateAsync: updateRow } = useUpdateRow();
 
   function rowId(row: Record<string, unknown>): string | number {
-    // "id" varsa onu kullan, yoksa ilk alanin degerini dene
     const id = row["id"] ?? Object.values(row)[0];
     return id as string | number;
   }
 
   async function handleDelete(rows: Record<string, unknown>[]) {
     for (const row of rows) {
-      await deleteRow({ db, table: selectedTable, id: rowId(row) });
+      await deleteRow({ db, table: resolvedTable, id: rowId(row) });
     }
     refetch();
   }
@@ -563,59 +610,133 @@ function DataTab({ db }: { db: string }) {
   ) {
     await updateRow({
       db,
-      table: selectedTable,
+      table: resolvedTable,
       id: rowId(row),
       data: { [col]: value },
     });
     refetch();
   }
 
+  const publicTableNames = tables?.map((t) => t.name) ?? [];
+
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      {/* Tablo secici */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
-        {tablesLoading ? (
-          <Skeleton className="h-4 w-32" />
-        ) : (
-          <select
-            value={selectedTable}
-            onChange={(e) => setSelectedTable(e.target.value)}
-            className="rounded bg-zinc-950 px-1 py-0.5 font-mono text-xs text-white outline-none"
-          >
-            {tables?.map((t) => (
-              <option key={t.name} value={t.name} className="bg-zinc-950 text-white">
-                {t.name}
-              </option>
-            ))}
-          </select>
-        )}
+    <div className="flex h-full overflow-hidden">
+      {/* ── Sol panel: tablo listesi ── */}
+      <div className="flex w-48 shrink-0 flex-col border-r border-border bg-muted/10">
+        <div className="flex h-9 items-center border-b border-border px-3">
+          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Tablolar
+          </span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-1">
+          {tablesLoading ? (
+            <div className="flex flex-col gap-1.5 px-2 py-2">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-6 w-full rounded" />)}
+            </div>
+          ) : (
+            <>
+              {/* PUBLIC grubu */}
+              {publicTableNames.length > 0 && (
+                <div>
+                  <div className="px-3 pb-0.5 pt-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                      public
+                    </span>
+                  </div>
+                  {publicTableNames.map((name) => (
+                    <button
+                      key={name}
+                      onClick={() => setTable(name)}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                        activeTable === name
+                          ? "bg-accent/10 font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                      )}
+                    >
+                      <Table2 className="h-3 w-3 shrink-0 opacity-60" />
+                      <span className="truncate font-mono">{name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* _POSTGRIFY_AUTH grubu */}
+              <div>
+                <div className="px-3 pb-0.5 pt-3">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                    _postgrify_auth
+                  </span>
+                </div>
+                {AUTH_TABLES.map((name) => {
+                  const fullName = `${AUTH_SCHEMA}.${name}`;
+                  return (
+                    <button
+                      key={fullName}
+                      onClick={() => setTable(fullName)}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                        activeTable === fullName
+                          ? "bg-accent/10 font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                      )}
+                    >
+                      <KeyRound className="h-3 w-3 shrink-0 opacity-60" />
+                      <span className="truncate font-mono">{name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* DataGrid */}
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {!selectedTable ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {tablesLoading ? "Tablolar yukleniyor..." : "Tablo yok"}
+      {/* ── Sağ panel: veri grid ── */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Tablo başlığı */}
+        {activeTable && (
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+            {isAuthTable
+              ? <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+              : <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+            }
+            <span className="font-mono text-xs text-muted-foreground">
+              {resolvedSchema !== "public" && (
+                <span className="text-muted-foreground/50">{resolvedSchema}.</span>
+              )}
+              <span className="text-foreground">{resolvedTable}</span>
+            </span>
+            {isAuthTable && (
+              <span className="ml-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-500">
+                auth
+              </span>
+            )}
           </div>
-        ) : (
-          <DataGrid
-            columns={columns}
-            data={rowsResult?.rows ?? []}
-            total={rowsResult?.total ?? 0}
-            page={page}
-            pageSize={pageSize}
-            isLoading={rowsLoading}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => {
-              setPageSize(s);
-              setPage(0);
-            }}
-            onRefresh={() => refetch()}
-            onDelete={handleDelete}
-            onCellEdit={handleCellEdit}
-          />
         )}
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {!activeTable ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {tablesLoading ? "Tablolar yükleniyor…" : "Bir tablo seçin"}
+            </div>
+          ) : (
+            <DataGrid
+              columns={columns}
+              data={activeRows}
+              total={activeTotal}
+              page={page}
+              pageSize={pageSize}
+              isLoading={activeLoading}
+              onPageChange={setPage}
+              onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+              onRefresh={activeRefetch}
+              onDelete={isAuthTable ? undefined : handleDelete}
+              onCellEdit={isAuthTable ? undefined : handleCellEdit}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -918,17 +1039,133 @@ function SchemaTableItem({
   );
 }
 
-// ── Placeholder Tab ───────────────────────────────────────────────────────────
 
-function PlaceholderTab({ label, description }: { label: string; description: string }) {
+// ── Backup Tab ────────────────────────────────────────────────────────────────
+
+function BackupTab({ db }: { db: string }) {
+  const { data: tables } = useTables(db);
+  const { data: databases } = useDatabases();
+  const dbInfo = databases?.find((d) => d.name === db);
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [lastDownload, setLastDownload] = React.useState<string | null>(null);
+
+  async function handleDownload() {
+    setIsDownloading(true);
+    setError(null);
+    try {
+      const token = getToken();
+      const res = await fetch(`${BASE_URL}/db/${db}/backup/download`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
+        throw new Error(err.error ?? err.message ?? `HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      const now  = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      a.href     = url;
+      a.download = `${db}_${now}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setLastDownload(new Date().toLocaleString("tr-TR"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  const tableCount = tables?.length ?? 0;
+  const dbSize     = dbInfo?.size_bytes ? formatBytes(dbInfo.size_bytes) : "—";
+
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-      <div className="flex h-10 w-10 items-center justify-center rounded border border-border bg-card">
-        <Clock className="h-5 w-5 text-muted-foreground/40" />
-      </div>
-      <div>
-        <p className="text-sm font-medium text-foreground/80">{label}</p>
-        <p className="mt-1 max-w-xs text-xs text-muted-foreground">{description}</p>
+    <div className="flex h-full items-start justify-center overflow-y-auto p-8">
+      <div className="w-full max-w-md space-y-6">
+        {/* Başlık */}
+        <div>
+          <h2 className="text-base font-semibold">Backup</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Veritabanının SQL dump'ını indirin. DDL (CREATE TABLE) ve DML (INSERT) ifadelerini içerir.
+          </p>
+        </div>
+
+        {/* DB Bilgisi */}
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="grid grid-cols-3 divide-x divide-border text-center">
+            <div className="px-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Veritabanı</p>
+              <p className="mt-1 font-mono text-sm font-medium">{db}</p>
+            </div>
+            <div className="px-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Tablolar</p>
+              <p className="mt-1 text-sm font-medium">{tableCount}</p>
+            </div>
+            <div className="px-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Boyut</p>
+              <p className="mt-1 text-sm font-medium">{dbSize}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Download Kartı */}
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-muted/30">
+              <Archive className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">SQL Dump</p>
+              <p className="text-xs text-muted-foreground">
+                Public schema — CREATE TABLE + INSERT INTO ifadeleri.
+                Sadece veri; view, index, foreign key dahil değil.
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {error}
+            </div>
+          )}
+
+          {lastDownload && !error && (
+            <p className="text-xs text-muted-foreground">
+              Son indirme: {lastDownload}
+            </p>
+          )}
+
+          <Button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="w-full"
+          >
+            {isDownloading ? (
+              <>
+                <span className="mr-2 h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Hazırlanıyor…
+              </>
+            ) : (
+              <>
+                <Archive className="mr-2 h-3.5 w-3.5" />
+                Download SQL Backup
+              </>
+            )}
+          </Button>
+        </div>
+
+        {/* Uyarı */}
+        <p className="text-center text-xs text-muted-foreground/60">
+          Bu dump yalnızca geliştirme ve test ortamları içindir.
+          Üretim yedeklemesi için <code className="text-muted-foreground">pg_dump</code> kullanın.
+        </p>
       </div>
     </div>
   );

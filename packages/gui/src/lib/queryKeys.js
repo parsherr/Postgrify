@@ -13,4 +13,6 @@ export const queryKeys = {
     // Row-level
     rows: (db, table, params) => params ? ["rows", db, table, params] : ["rows", db, table],
     row: (db, table, id) => ["row", db, table, id],
+    // Per-database auth
+    dbAuthUsers: (db) => ["dbAuthUsers", db],
 };

@@ -10,7 +10,7 @@ const envSchema = z.object({
   PG_HOST: z.string().default("localhost"),
   PG_PORT: z.coerce.number().default(5432),
   PG_USER: z.string().default("postgres"),
-  PG_PASSWORD: z.string(),
+  PG_PASSWORD: z.string().default(""),
   PG_SSL: z
     .string()
     .transform((v) => v === "true")
@@ -21,9 +21,9 @@ const envSchema = z.object({
   PG_POOL_IDLE_TIMEOUT: z.coerce.number().default(30_000),
   PG_POOL_MAX_LIFETIME: z.coerce.number().default(3_600_000),
 
-  // Auth
-  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 chars"),
-  ADMIN_SECRET: z.string().min(16, "ADMIN_SECRET must be at least 16 chars"),
+  // Auth (setup tamamlanmadan önce placeholder olabilir)
+  JWT_SECRET: z.string().default("placeholder-will-be-replaced-by-setup-wizard-32x"),
+  ADMIN_SECRET: z.string().default("placeholder-setup-16x"),
   JWT_EXPIRY: z.string().default("24h"),
 
   // Admin kullanıcı kimlik bilgileri (GUI login için)

@@ -52,6 +52,18 @@ npm run build   # production build → dist/
 2. **Plugins** (order matters): `cors → rateLimit → auth → cache → pool → openApi`
 3. **Routes**: `/health`, `/auth/*`, `/admin/*`, `/db/:db/*`
 
+### Route map
+| Group | Prefix | Files |
+|-------|--------|-------|
+| Health | `/health` | `routes/health.ts` |
+| Admin auth | `/auth` | `routes/auth/{token,adminToken,adminLogin,logout,refresh,me}.ts` |
+| Admin DB mgmt | `/admin` | `routes/admin/{databases,stats}.ts` |
+| DB data | `/db/:database` | `routes/db/{tables,rows,query,meta}.ts` — requires `authenticate` + `dbResolver` |
+| DB auth | `/db/:database/auth` | `routes/db/auth/{users,tokens}.ts` — `dbResolver` only; login/logout/refresh public |
+
+All `/db/:database/*` data routes run `authenticate` → `dbResolver` as Fastify hooks at group level.
+DB auth routes (`/db/:db/auth/*`) skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; user CRUD routes add `authenticate` + `scopeGuard` per-handler.
+
 ### Auth model
 Two token types, both JWT signed with `JWT_SECRET`:
 - **DB token** — scoped (`read`/`write`/`delete`/`schema`/`query`), tied to one database. Obtained via `POST /auth/token` with a per-DB secret (falls back to `ADMIN_SECRET`).
@@ -77,16 +89,22 @@ Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAM
 ### Query builder
 `services/queryBuilder.ts` converts HTTP query parameters into safe parameterized SQL. Filter syntax: `where=field.op.value` (e.g. `where=age.gt.18&where=status.eq.active`). Supported operators: `eq neq gt gte lt lte like ilike in is not`. Order syntax: `order=field.asc` or `order=field.desc`. Select syntax: `select=id,name,email` (comma-separated column names or `*`). All column names are validated with `isValidIdentifier` before use.
 
-### Identifier safety
+### Per-database auth system
+Each managed database has an isolated `_postgrify_auth` schema (not in `public` — invisible in the Tables tab) provisioned lazily on first auth request via `routes/db/auth/provision.ts`. Tables: `_postgrify_auth.users` (argon2id password hash, roles: viewer/editor/admin) and `_postgrify_auth.sessions` (refresh tokens with rotation). JWT for DB users is signed with the same `JWT_SECRET` but carries `iss: "postgrify/db-auth"` to distinguish from admin tokens. `services/jwtService.ts` has `signDbUserToken()` for this. Password ops reuse `services/passwordService.ts`.
+
+### Identifier and DDL safety
 All table/column/DB names pass through `utils/identifier.ts` before being interpolated into SQL. The regex is `/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/` plus a reserved-keyword blocklist. Never skip this when adding new routes that accept user-supplied identifiers.
+
+`utils/ddlSanitizer.ts` strips dangerous DDL statements (e.g. `DROP`, `TRUNCATE`, write CTEs) from SQL passed to read-only contexts. Used by the `/sql` route to enforce read-only mode when the DB token scope is `query` (read-only SQL).
 
 `utils/asyncHandler.ts` wraps async route handlers to forward thrown errors to Fastify's error handler (avoids unhandled promise rejections in route callbacks).
 
 ### GUI structure
 - `lib/api.ts` — all HTTP calls; reads `VITE_API_URL` at build time (default `http://localhost:3000`)
-- `hooks/` — React Query wrappers (`useAuth`, `useDatabases`, `useTables`, `useRows`, `useDbSize`)
-- `pages/` — one file per route; all protected pages use `ProtectedLayout` from `App.tsx`
-- Auth state is stored in `localStorage` under the key `postgrify_token`
+- `hooks/` — React Query wrappers: `useDatabases`, `useTables`, `useRows`, `useDbAuth` (per-DB auth users)
+- `pages/` — `LoginPage`, `DashboardPage`, `DatabasesPage`, `DatabasePage`, `TablePage`, `CreateTablePage`, `QueryPage`, `ApiKeysPage`. All protected pages wrap `ProtectedLayout` from `App.tsx`.
+- `components/database/AuthsTab.tsx` — per-database user management tab (user table + Invite/Edit/ResetPassword dialogs)
+- Auth state is stored in memory via `AuthContext`; refresh token in `localStorage` under `postgrify_refresh_token`
 
 ### Test setup
 Tests use Vitest. `test/setup.ts` overrides all env vars (including `NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.

@@ -1,6 +1,9 @@
 # ─── Build aşaması ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
+# node-pty native build için gerekli araçlar
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 # Önce sadece package.json — bağımlılık layer'ı cache'lenir
@@ -14,14 +17,26 @@ RUN npm run build
 # ─── Production aşaması ───────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
+# Runtime araçlar:
+#   bash          — daha iyi shell (sh yerine)
+#   libstdc++     — node-pty native addon runtime
+#   curl          — HTTP endpoint testi
+#   jq            — JSON işleme
+#   wget          — dosya indirme
+#   postgresql-client — psql (Alpine paket adı)
+RUN apk update && apk add --no-cache bash libstdc++ curl jq wget && \
+    apk add --no-cache postgresql-client || apk add --no-cache postgresql16-client || true
+ENV SHELL=/bin/bash
+
 WORKDIR /app
 
 RUN addgroup -g 1001 -S postgrify && \
     adduser -S postgrify -u 1001
 
 COPY package.json ./
-RUN npm install --omit=dev
 
+# node_modules'u builder'dan kopyala — node-pty native binary zaten derlenmiş
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
 USER postgrify

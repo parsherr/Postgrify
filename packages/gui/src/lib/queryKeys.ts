@@ -18,4 +18,7 @@ export const queryKeys = {
     params ? ["rows", db, table, params] : ["rows", db, table],
   row: (db: string, table: string, id: string | number) =>
     ["row", db, table, id] as const,
+
+  // Per-database auth
+  dbAuthUsers: (db: string) => ["dbAuthUsers", db] as const,
 } as const;

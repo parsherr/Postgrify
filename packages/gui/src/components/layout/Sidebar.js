@@ -3,12 +3,11 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  * Sidebar — tree-nav ile DB/tablo navigasyonu.
  * VSCode tarzı alt panel (slide-up mini SQL editörü) ve version satırı içerir.
  */
-import React from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { LayoutDashboard, Terminal, KeyRound, Database, Table2, Plus, LogOut, ChevronDown, Loader2, ExternalLink, } from "lucide-react";
+import { LayoutDashboard, Terminal, KeyRound, Database, Plus, LogOut, ExternalLink, } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDatabases } from "@/hooks/useDatabases";
-import { useTables } from "@/hooks/useTables";
+import { useAuthContext } from "@/hooks/useAuthContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 const VERSION = import.meta.env.VITE_APP_VERSION ?? "0.1.0";
@@ -20,30 +19,20 @@ const navItems = [
 ];
 /** Tek bir veritabanının tablo listesini gösterir (lazy load) */
 function DbTreeNode({ dbName, collapsed }) {
-    const location = useLocation();
     const params = useParams();
     const isActiveDb = params.db === dbName;
-    const [open, setOpen] = React.useState(isActiveDb);
-    const { data: tables, isLoading } = useTables(open ? dbName : "");
     const dbPath = `/databases/${dbName}`;
-    return (_jsxs("div", { children: [_jsx(TooltipProvider, { delayDuration: 0, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsxs("button", { onClick: () => setOpen((o) => !o), className: cn("group flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors", isActiveDb
-                                    ? "border-l-2 border-zinc-400 bg-zinc-800/60 pl-1.5 text-foreground"
-                                    : "border-l-2 border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground"), children: [!collapsed && (_jsx(ChevronDown, { className: cn("h-3 w-3 shrink-0 transition-transform", open ? "rotate-0" : "-rotate-90") })), _jsx(Database, { className: cn("h-3.5 w-3.5 shrink-0", collapsed && "mx-auto") }), !collapsed && (_jsx("span", { className: "flex-1 truncate font-mono text-xs", children: dbName })), !collapsed && isActiveDb && (_jsx("span", { className: "h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" }))] }) }), collapsed && (_jsx(TooltipContent, { side: "right", className: "font-mono text-xs", children: dbName }))] }) }), !collapsed && open && (_jsxs("div", { className: "ml-4 mt-0.5 border-l border-border/50", children: [isLoading && (_jsxs("div", { className: "flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground", children: [_jsx(Loader2, { className: "h-3 w-3 animate-spin" }), "Y\u00FCkleniyor\u2026"] })), tables?.map((tbl) => {
-                        const tablePath = `/databases/${dbName}/tables/${tbl.name}`;
-                        const isActive = location.pathname === tablePath;
-                        return (_jsxs(Link, { to: tablePath, className: cn("flex items-center gap-2 px-3 py-1 text-xs transition-colors", isActive
-                                ? "bg-zinc-800 text-foreground"
-                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"), children: [_jsx(Table2, { className: "h-3 w-3 shrink-0" }), _jsx("span", { className: "truncate font-mono", children: tbl.name })] }, tbl.name));
-                    }), _jsx(Link, { to: dbPath, className: cn("flex items-center gap-2 px-3 py-1 text-xs italic transition-colors", location.pathname === dbPath
-                            ? "text-foreground"
-                            : "text-muted-foreground/60 hover:text-muted-foreground"), children: "T\u00FCm tablolar \u2192" })] }))] }));
+    return (_jsx(TooltipProvider, { delayDuration: 0, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsxs(Link, { to: dbPath, className: cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors", isActiveDb
+                            ? "border-l-2 border-zinc-400 bg-zinc-800/60 pl-1.5 text-foreground"
+                            : "border-l-2 border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground", collapsed && "justify-center px-0"), children: [_jsx(Database, { className: cn("h-3.5 w-3.5 shrink-0", collapsed && "mx-auto") }), !collapsed && (_jsx("span", { className: "flex-1 truncate font-mono text-xs", children: dbName })), !collapsed && isActiveDb && (_jsx("span", { className: "h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" }))] }) }), collapsed && (_jsx(TooltipContent, { side: "right", className: "font-mono text-xs", children: dbName }))] }) }));
 }
 export function Sidebar({ collapsed }) {
     const location = useLocation();
     const navigate = useNavigate();
     const { data: databases } = useDatabases();
-    function handleLogout() {
-        localStorage.removeItem("postgrify_token");
+    const { logout } = useAuthContext();
+    async function handleLogout() {
+        await logout();
         navigate("/login");
     }
     return (_jsxs("div", { className: "flex h-full flex-col text-sm", children: [_jsxs("div", { className: "flex-1 overflow-y-auto py-2", children: [_jsx("nav", { className: "space-y-0.5 px-2", children: navItems.map(({ label, to, icon: Icon }) => {

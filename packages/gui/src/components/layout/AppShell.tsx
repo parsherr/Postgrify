@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/resizable";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
-import { SidebarBottomPanel } from "./SidebarBottomPanel";
+import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -77,8 +77,8 @@ export function AppShell({ children }: AppShellProps) {
             </ResizablePanelGroup>
           </ResizablePanel>
 
-          {/* Alt panel (Quick SQL) — tam genişlikte, drag ile açılır */}
-          <SidebarBottomPanel />
+          {/* Alt panel (Terminal) — tam genişlikte, drag ile açılır */}
+          <TerminalPanel />
 
         </ResizablePanelGroup>
       </div>

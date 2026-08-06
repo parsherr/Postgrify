@@ -71,3 +71,22 @@ export interface TokenResponse {
   scope?: string[];
   expiresIn: string;
 }
+
+// ── Per-database Auth ────────────────────────────────────────────────────────
+
+export type DbAuthUserRole = "viewer" | "editor" | "admin";
+
+export interface DbAuthUser {
+  id: string;
+  email: string;
+  role: DbAuthUserRole;
+  is_active: boolean;
+  created_at: string;
+  last_login: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface DbAuthUsersResult {
+  users: DbAuthUser[];
+  total: number;
+}

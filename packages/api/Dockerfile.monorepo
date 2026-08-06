@@ -2,6 +2,9 @@
 # Context: monorepo root (package-lock.json ve node_modules buradadir)
 FROM node:20-alpine AS builder
 
+# node-pty native addon derlemesi için gerekli araçlar
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 # Root bağımlılık dosyaları — monorepo lock dosyası
@@ -24,6 +27,9 @@ RUN npm run build
 
 # ─── Production aşaması ───────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
+
+# node-pty Alpine'da prebuilt binary içermiyor — production install da kaynak derler
+RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
