@@ -13,6 +13,8 @@ Monorepo structure:
 
 ## Commands
 
+> **Working directory:** The primary working directory for Claude Code sessions is `packages/`. Commands below assume you're already there unless otherwise noted. The repo root contains `docker-compose.prod.yml`, `plan.md`, and `docs/`.
+
 ### Docker (recommended — runs full stack)
 ```bash
 cd packages
@@ -32,6 +34,7 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # eslint src/
 npm test             # vitest run (all tests)
 npm run test:watch   # vitest watch mode
+npm run test:coverage # vitest run --coverage
 
 # Run a single test file:
 npx vitest run test/routes/tables.test.ts
@@ -56,10 +59,12 @@ npm run build   # production build → dist/
 | Group | Prefix | Files |
 |-------|--------|-------|
 | Health | `/health` | `routes/health.ts` |
+| Setup | `/setup` | `routes/setup.ts` — first-run admin account creation; becomes no-op once setup is done |
 | Admin auth | `/auth` | `routes/auth/{token,adminToken,adminLogin,logout,refresh,me}.ts` |
 | Admin DB mgmt | `/admin` | `routes/admin/{databases,stats}.ts` |
-| DB data | `/db/:database` | `routes/db/{tables,rows,query,meta}.ts` — requires `authenticate` + `dbResolver` |
+| DB data | `/db/:database` | `routes/db/{tables,rows,query,meta,backup}.ts` — requires `authenticate` + `dbResolver` |
 | DB auth | `/db/:database/auth` | `routes/db/auth/{users,tokens}.ts` — `dbResolver` only; login/logout/refresh public |
+| Terminal | `/terminal` | `routes/terminal.ts` — WebSocket shell via `node-pty`; requires admin token |
 
 All `/db/:database/*` data routes run `authenticate` → `dbResolver` as Fastify hooks at group level.
 DB auth routes (`/db/:db/auth/*`) skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; user CRUD routes add `authenticate` + `scopeGuard` per-handler.
@@ -109,9 +114,11 @@ All table/column/DB names pass through `utils/identifier.ts` before being interp
 ### Test setup
 Tests use Vitest. `test/setup.ts` overrides all env vars (including `NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.
 
+Test files live under `packages/api/test/` mirroring the `src/` layout (e.g. `test/routes/tables.test.ts`, `test/services/queryBuilder.test.ts`). There is also a `packages/test/` directory at the monorepo level for integration-style tests that span packages.
+
 ## Environment variables
 
-`packages/.env` is required to run via Docker Compose. `packages/.env.example` is the template — copy and fill in secrets. Mandatory: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars).
+`packages/.env` is required to run via Docker Compose. `packages/.env.example` is the template — copy and fill in secrets. See also `exampleenv.md` at the repo root for annotated explanations of every variable. Mandatory: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars).
 
 **Docker Compose setup:** `PG_HOST=host.docker.internal` — the API container connects to the host machine's PostgreSQL (not a Docker-managed postgres container). `REDIS_URL=redis://redis:6379` (the Redis service name). There is no `postgres` service in docker-compose.yml; the host's PostgreSQL is used directly so data is never tied to Docker volumes.
 

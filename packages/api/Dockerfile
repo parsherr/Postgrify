@@ -17,15 +17,15 @@ RUN npm run build
 # ─── Production aşaması ───────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-# Runtime araçlar:
-#   bash          — daha iyi shell (sh yerine)
-#   libstdc++     — node-pty native addon runtime
-#   curl          — HTTP endpoint testi
-#   jq            — JSON işleme
-#   wget          — dosya indirme
-#   postgresql-client — psql (Alpine paket adı)
-RUN apk update && apk add --no-cache bash libstdc++ curl jq wget && \
-    apk add --no-cache postgresql-client || apk add --no-cache postgresql16-client || true
+# Runtime araçlar — her biri ayrı RUN satırı (hata görünür olsun)
+RUN apk update
+RUN apk add --no-cache bash libstdc++ curl jq wget
+# postgresql-client: Alpine 3.x'te paket adı değişebilir, iki isim deneniyor
+RUN apk add --no-cache postgresql-client 2>/dev/null || \
+    apk add --no-cache postgresql16-client 2>/dev/null || \
+    apk add --no-cache postgresql17-client 2>/dev/null || \
+    echo "WARNING: postgresql-client could not be installed"
+
 ENV SHELL=/bin/bash
 
 WORKDIR /app

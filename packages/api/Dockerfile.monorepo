@@ -14,7 +14,6 @@ COPY package.json package-lock.json ./
 COPY packages/api/package.json ./packages/api/
 
 # npm ci: lock dosyasından deterministik, hızlı yükleme
-# --workspace=packages/api: sadece API workspace bağımlılıklarını kur
 RUN npm ci --workspace=packages/api
 
 # API kaynak ve config
@@ -28,8 +27,16 @@ RUN npm run build
 # ─── Production aşaması ───────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-# node-pty Alpine'da prebuilt binary içermiyor — production install da kaynak derler
-RUN apk add --no-cache python3 make g++
+# Runtime araçlar
+RUN apk update
+RUN apk add --no-cache bash libstdc++ curl jq wget
+# postgresql-client: paket adı Alpine versiyonuna göre değişir
+RUN apk add --no-cache postgresql-client 2>/dev/null || \
+    apk add --no-cache postgresql16-client 2>/dev/null || \
+    apk add --no-cache postgresql17-client 2>/dev/null || \
+    echo "WARNING: postgresql-client not installed"
+
+ENV SHELL=/bin/bash
 
 WORKDIR /app
 
@@ -37,11 +44,13 @@ RUN addgroup -g 1001 -S postgrify && \
     adduser -S postgrify -u 1001
 
 # Root + API package.json — production bağımlılıkları için
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY packages/api/package.json ./packages/api/
 
-RUN npm ci --workspace=packages/api --omit=dev
-
+# node_modules ve dist builder'dan kopyala — node-pty native binary zaten derlenmiş
+# Monorepo: node_modules root'ta, dist packages/api/dist'ta
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/api/node_modules ./packages/api/node_modules
 COPY --from=builder /app/packages/api/dist ./packages/api/dist
 
 USER postgrify
