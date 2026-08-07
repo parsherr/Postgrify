@@ -1,0 +1,3 @@
+[submodule "packages/auth-js"]
+	path = packages/auth-js
+	url = https://github.com/parsherr/Postgrify-SDK.git
