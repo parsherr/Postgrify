@@ -8,6 +8,7 @@ import { adminTokenRoute } from "./adminToken.js";
 import { adminLoginRoute } from "./adminLogin.js";
 import { adminRefreshRoute } from "./refresh.js";
 import { adminLogoutRoute } from "./logout.js";
+import { adminSessionsRoute } from "./sessions.js";
 import { adminMeRoute } from "./me.js";
 
 export async function authRoutes(server: FastifyInstance) {
@@ -19,5 +20,6 @@ export async function authRoutes(server: FastifyInstance) {
   await server.register(adminLoginRoute);
   await server.register(adminRefreshRoute);
   await server.register(adminLogoutRoute);
+  await server.register(adminSessionsRoute);
   await server.register(adminMeRoute);
 }

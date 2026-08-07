@@ -7,8 +7,8 @@ packages/api/node_modules
 packages/gui/node_modules
 
 # Build çıktıları
-packages/gui/dist
 packages/api/dist
+# packages/gui/dist intentionally NOT excluded — Dockerfile.monorepo uses pre-built dist
 
 # Git
 .git

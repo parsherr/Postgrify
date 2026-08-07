@@ -12,6 +12,7 @@ import type { JwtPayload } from "../types/auth.js";
 
 declare module "fastify" {
   interface FastifyInstance {
+    jwtService: JwtService;
     authenticate: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
     authenticateAdmin: (
       req: FastifyRequest,
@@ -27,6 +28,9 @@ declare module "fastify" {
 export const authPlugin = fp(async (server: FastifyInstance) => {
   const jwtService = new JwtService(config.JWT_SECRET);
 
+  // JwtService'i tüm route'lardan erişilebilir kıl (DRY: inline new JwtService() gerekmez)
+  server.decorate("jwtService", jwtService);
+
   // request.user ve request.dbName'i her request'te null ile başlat
   server.decorateRequest("user", null);
   server.decorateRequest("dbName", null);
@@ -40,7 +44,7 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
         return reply.status(401).send({ error: "Missing authorization token" });
       }
 
-      const payload = await jwtService.verify(token);
+      const payload = await jwtService.verifyAdminOrDb(token);
       if (!payload) {
         return reply.status(401).send({ error: "Invalid or expired token" });
       }
@@ -58,7 +62,7 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
         return reply.status(401).send({ error: "Missing authorization token" });
       }
 
-      const payload = await jwtService.verify(token);
+      const payload = await jwtService.verifyAdminOrDb(token);
       if (!payload || payload.role !== "admin") {
         return reply.status(403).send({ error: "Admin access required" });
       }

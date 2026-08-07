@@ -14,7 +14,7 @@ import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { verifyPassword } from "../../../services/passwordService.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
-import { ensureAuthSchema } from "./provision.js";
+import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js";
 import crypto from "node:crypto";
 
 const RATE_LIMIT = { max: 10, timeWindow: "1 minute" } as const;
@@ -80,24 +80,52 @@ export async function authTokensRoute(server: FastifyInstance) {
           "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           password
         );
+        await insertAuditLog(sql, "login_failed", null, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+          metadata: { email, reason: "user_not_found" },
+        });
         return reply.status(401).send({ error: "Invalid credentials" });
       }
 
       if (!user.is_active) {
+        await insertAuditLog(sql, "account_disabled", user.id as string, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+        });
         return reply.status(403).send({ error: "Account is disabled" });
+      }
+
+      // email_verify_required kontrolü
+      const verifyRequired = await getAuthSetting(sql, "email_verify_required", "false");
+      if (verifyRequired === "true" && !user.email_verified) {
+        return reply.status(403).send({
+          error: "Email not verified",
+          message: "Please verify your email address before signing in.",
+        });
       }
 
       const valid = await verifyPassword(user.password_hash as string, password);
       if (!valid) {
+        await insertAuditLog(sql, "login_failed", user.id as string, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+          metadata: { reason: "wrong_password" },
+        });
         return reply.status(401).send({ error: "Invalid credentials" });
       }
 
-      // last_login güncelle
+      // last_login güncelle + audit log
       await sql`
         UPDATE _postgrify_auth.users
         SET last_login = now()
         WHERE id = ${user.id}
       `;
+
+      await insertAuditLog(sql, "login", user.id as string, {
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
 
       // Access token — DB-user scoped
       const accessToken = await jwtService.signDbUserToken(
@@ -237,6 +265,18 @@ export async function authTokensRoute(server: FastifyInstance) {
         SET revoked = true
         WHERE refresh_token = ${refreshToken}
       `;
+
+      // Logout audit log (session'dan user_id bul)
+      const [session] = await sql`
+        SELECT user_id FROM _postgrify_auth.sessions
+        WHERE refresh_token = ${refreshToken}
+      `;
+      if (session) {
+        await insertAuditLog(sql, "logout", session.user_id as string, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+        });
+      }
 
       return reply.status(204).send();
     })

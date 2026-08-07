@@ -19,6 +19,22 @@ let server: FastifyInstance;
 beforeAll(async () => {
   server = Fastify({ logger: false });
 
+  // authPlugin: server.jwtService + authenticate + authenticateAdmin decorator'larını sağlar
+  const { authPlugin } = await import("../../src/plugins/auth.js");
+  await server.register(authPlugin);
+
+  // sessionService mock: logout/refresh endpoint'leri için
+  server.decorate("sessionService", {
+    isAvailable: false,
+    create: async () => null,
+    get: async () => null,
+    revoke: async () => undefined,
+    rotate: async () => null,
+    listAll: async () => [],
+    listByEmail: async () => [],
+    revokeAllByEmail: async () => 0,
+  });
+
   const { authRoutes } = await import("../../src/routes/auth/index.js");
   await server.register(authRoutes, { prefix: "/auth" });
   await server.ready();

@@ -8,7 +8,7 @@ export interface Database {
   size_bytes: number | string;
   /** cross-DB sorgu kısıtı nedeniyle güvenilmez, 0 gelebilir */
   table_count: number;
-}
+  }
 
 export interface TableInfo {
   name: string;

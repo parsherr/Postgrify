@@ -29,7 +29,7 @@ export function useCreateDatabase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) =>
-      api.post<{ name: string; created: boolean }>("/admin/databases", { name }),
+      api.post<{ name: string; created: boolean; api_key?: string }>("/admin/databases", { name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
   });
 }
@@ -39,6 +39,30 @@ export function useDeleteDatabase() {
   return useMutation({
     mutationFn: (name: string) => api.delete(`/admin/databases/${name}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
+  });
+}
+
+export function useGetApiKey(dbName: string | null) {
+  return useQuery({
+    queryKey: ["db-api-key", dbName],
+    queryFn: () =>
+      api
+        .get(`/admin/databases/${dbName}/api-key`)
+        .then((r) => (r as { database: string; api_key: string }).api_key),
+    enabled: !!dbName,
+  });
+}
+
+export function useRotateApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dbName: string) =>
+      api
+        .post(`/admin/databases/${dbName}/api-key/rotate`, {})
+        .then((r) => (r as { database: string; api_key: string }).api_key),
+    onSuccess: (_data: string, dbName: string) => {
+      qc.invalidateQueries({ queryKey: ["db-api-key", dbName] });
+    },
   });
 }
 

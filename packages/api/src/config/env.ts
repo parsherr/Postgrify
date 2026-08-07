@@ -50,6 +50,17 @@ const envSchema = z.object({
     .default("info"),
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
 
+  // SMTP (magic link, email verify, şifre sıfırlama için)
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().default("noreply@postgrify.local"),
+  SMTP_SECURE: z.string().transform((v) => v === "true").default("false"),
+
+  // Genel uygulama URL'i (email linklerinde kullanılır)
+  APP_URL: z.string().default("http://localhost:5173"),
+
   // Özellik bayrakları
   ALLOW_RAW_SQL_ADMIN: z
     .string()

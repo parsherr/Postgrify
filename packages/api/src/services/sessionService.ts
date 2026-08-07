@@ -85,6 +85,98 @@ export class SessionService {
     await this.client.del(`${SESSION_PREFIX}${token}`);
   }
 
+  /**
+   * Token rotation: eski token'ı sil, yeni token üret ve kaydet.
+   * Güvenlik: her refresh sonrası eski token geçersiz olur.
+   * Redis yoksa null döner.
+   */
+  async rotate(oldToken: string, email: string): Promise<string | null> {
+    if (!this.client) return null;
+
+    // Eski token'ı önce sil — race condition'a karşı atomik olmasa da
+    // Redis single-threaded olduğu için DEL + SET ardışık güvenlidir.
+    await this.client.del(`${SESSION_PREFIX}${oldToken}`);
+
+    const newToken = randomBytes(32).toString("hex");
+    const data: SessionData = { email, createdAt: Date.now() };
+
+    await this.client.set(
+      `${SESSION_PREFIX}${newToken}`,
+      JSON.stringify(data),
+      { EX: this.ttlSeconds }
+    );
+
+    return newToken;
+  }
+
+  /**
+   * Belirli bir email'e ait tüm aktif session'ları döner.
+   * Redis SCAN kullanır — production'da büyük session havuzlarında dikkatli kullanın.
+   */
+  async listByEmail(email: string): Promise<Array<{ token: string; data: SessionData; ttl: number }>> {
+    if (!this.client) return [];
+
+    const results: Array<{ token: string; data: SessionData; ttl: number }> = [];
+    const pattern = `${SESSION_PREFIX}*`;
+
+    for await (const key of this.client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+      const [raw, ttl] = await Promise.all([
+        this.client.get(key),
+        this.client.ttl(key),
+      ]);
+      if (!raw) continue;
+      try {
+        const data = JSON.parse(raw) as SessionData;
+        if (data.email === email) {
+          results.push({ token: key.replace(SESSION_PREFIX, ""), data, ttl });
+        }
+      } catch {
+        // Bozuk kayıt — atla
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Tüm aktif session'ları listeler (admin panel için).
+   */
+  async listAll(): Promise<Array<{ token: string; data: SessionData; ttl: number }>> {
+    if (!this.client) return [];
+
+    const results: Array<{ token: string; data: SessionData; ttl: number }> = [];
+    const pattern = `${SESSION_PREFIX}*`;
+
+    for await (const key of this.client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+      const [raw, ttl] = await Promise.all([
+        this.client.get(key),
+        this.client.ttl(key),
+      ]);
+      if (!raw) continue;
+      try {
+        const data = JSON.parse(raw) as SessionData;
+        results.push({ token: key.replace(SESSION_PREFIX, ""), data, ttl });
+      } catch {
+        // Bozuk kayıt — atla
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Belirli bir email'e ait tüm session'ları revoke eder.
+   */
+  async revokeAllByEmail(email: string): Promise<number> {
+    if (!this.client) return 0;
+
+    const sessions = await this.listByEmail(email);
+    if (sessions.length === 0) return 0;
+
+    await this.client.del(sessions.map((s) => `${SESSION_PREFIX}${s.token}`));
+    return sessions.length;
+  }
+
   /** Redis bağlı mı? */
   get isAvailable(): boolean {
     return this.client !== null;

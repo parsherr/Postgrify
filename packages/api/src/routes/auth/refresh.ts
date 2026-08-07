@@ -1,25 +1,22 @@
 /**
- * POST /auth/admin/refresh — Refresh token ile yeni access token üret.
+ * POST /auth/admin/refresh — Refresh token ile yeni access + refresh token çifti üret.
  *
- * Refresh token Redis'te geçerliyse yeni access token döner.
+ * Token rotation: eski refresh token revoke edilir, yeni çift döner.
  * Redis yoksa 503 döner.
  *
  * Rate limit: IP başına 30 req/dk.
  */
 
 import type { FastifyInstance } from "fastify";
-import { JwtService } from "../../services/jwtService.js";
 import { config } from "../../config/env.js";
 
 export async function adminRefreshRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
-
   server.post(
     "/admin/refresh",
     {
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
       schema: {
-        description: "Exchange a refresh token for a new access token.",
+        description: "Exchange a refresh token for a new access + refresh token pair (rotation).",
         tags: ["auth"],
         security: [],
         body: {
@@ -33,8 +30,9 @@ export async function adminRefreshRoute(server: FastifyInstance) {
           200: {
             type: "object",
             properties: {
-              accessToken: { type: "string" },
-              expiresIn: { type: "string" },
+              accessToken:  { type: "string" },
+              refreshToken: { type: "string" },
+              expiresIn:    { type: "string" },
             },
           },
         },
@@ -50,18 +48,29 @@ export async function adminRefreshRoute(server: FastifyInstance) {
         });
       }
 
+      // Önce geçerliliğini kontrol et
       const session = await server.sessionService.get(refreshToken);
       if (!session) {
         return reply.status(401).send({ error: "Invalid or expired refresh token" });
       }
 
-      const accessToken = await jwtService.signAdminToken(
+      // Token rotation: eski sil, yeni üret
+      const newRefreshToken = await server.sessionService.rotate(refreshToken, session.email);
+      if (!newRefreshToken) {
+        return reply.status(503).send({
+          error: "Session rotation failed",
+          message: "Could not rotate refresh token",
+        });
+      }
+
+      const accessToken = await server.jwtService.signAdminToken(
         config.ACCESS_TOKEN_EXPIRY,
         session.email
       );
 
       return reply.send({
         accessToken,
+        refreshToken: newRefreshToken,
         expiresIn: config.ACCESS_TOKEN_EXPIRY,
       });
     }

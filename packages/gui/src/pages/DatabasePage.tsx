@@ -26,7 +26,7 @@ import {
   Archive,
   KeyRound,
   Square,
-} from "lucide-react";
+  } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -216,7 +216,8 @@ function SummaryTab({
             <span className="text-foreground/60">postgresql://.../{db}</span>
           </div>
         </div>
-      </div>
+
+        </div>
     </div>
   );
 }
@@ -621,6 +622,8 @@ function DataTab({
               onRefresh={activeRefetch}
               onDelete={isAuthTable ? undefined : handleDelete}
               onCellEdit={isAuthTable ? undefined : handleCellEdit}
+              db={db}
+              tableName={resolvedTable}
             />
           )}
         </div>

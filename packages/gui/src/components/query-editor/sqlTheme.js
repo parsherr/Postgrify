@@ -32,7 +32,7 @@ export const zincTheme = EditorView.theme({
         lineHeight: "1.6",
     },
     /* Gutter (satır numaraları) */
-    "w": {
+    ".cm-gutters": {
         backgroundColor: zinc[900],
         color: zinc[600],
         borderRight: `1px solid ${zinc[800]}`,

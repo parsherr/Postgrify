@@ -3,7 +3,7 @@
  */
 
 import { Link, useNavigate } from "react-router-dom";
-import { Database, Table2, HardDrive, Terminal, Plus, Activity, Cpu } from "lucide-react";
+import { Database, Table2, HardDrive, Terminal, Plus, Cpu } from "lucide-react";
 import { useDatabases, useAdminStats } from "@/hooks/useDatabases";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -97,10 +97,9 @@ export default function DashboardPage() {
               icon={HardDrive}
             />
             <StatTile
-              label="Aktif Pool"
-              value={stats?.activePools ?? 0}
-              icon={Activity}
-              sub={`/ ${databases?.length ?? 0} toplam`}
+              label="Ortalama Boyut"
+              value={databases?.length ? formatBytes(totalSize / databases.length) : "—"}
+              icon={Cpu}
             />
           </>
         )}
@@ -175,12 +174,7 @@ export default function DashboardPage() {
           <span>
             Uptime: {Math.floor(stats.uptime / 3600)}sa {Math.floor((stats.uptime % 3600) / 60)}dk
           </span>
-          {stats.activePoolNames.length > 0 && (
-            <span>
-              Aktif: {stats.activePoolNames.join(", ")}
-            </span>
-          )}
-        </div>
+                  </div>
       )}
     </div>
   );

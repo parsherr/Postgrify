@@ -2,18 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Code Philosophy
+
+These are non-negotiable standards for every change made to this codebase.
+
+**Write for the next developer, not just the compiler.**
+Every file, function, and variable should be immediately understandable to someone who has never seen it before. If you need a comment to explain *what* code does, rewrite the code. Comments explain *why*, not *what*.
+
+**Think in years, not sprints.**
+Before adding any abstraction, dependency, or architectural pattern, ask: "Will this still make sense in 2 years when the codebase is 5× larger?" Prefer boring, explicit code over clever, concise code. A future maintainer will thank you for the extra 3 lines of clarity.
+
+**Specific rules:**
+- Functions do one thing. If you need "and" to describe a function, split it.
+- No magic numbers or strings — extract named constants.
+- Fail loudly and early with descriptive errors. Silent failures and empty catch blocks are forbidden except where explicitly documented with a reason.
+- Keep files under ~300 lines. A file that does too many things should be split along its natural seams.
+- Side effects belong at the edges (route handlers, service entry points), not buried in utilities.
+- Every new route, service, or hook must have the same level of structure and documentation as the files around it — no drive-by additions.
+
 ## Project Overview
 
-Postgrify is a multi-database PostgreSQL gateway: a single REST API that manages multiple PostgreSQL databases, each with its own lazy connection pool. Includes a React GUI for table/schema/SQL management.
+Postgrify is a multi-database PostgreSQL gateway: a single REST API that manages multiple PostgreSQL databases, each with its own lazy connection pool. Includes a React GUI for table/schema/SQL management, and a zero-dependency auth SDK.
 
 Monorepo structure:
 - `packages/api/` — Fastify + TypeScript REST API
 - `packages/gui/` — React + Vite + Tailwind CSS frontend
+- `packages/auth-js/` — `@postgrify/auth-js` SDK (zero-dep, browser + Node)
 - `packages/docker-compose.yml` — canonical way to run everything
 
 ## Commands
 
-> **Working directory:** The primary working directory for Claude Code sessions is `packages/`. Commands below assume you're already there unless otherwise noted. The repo root contains `docker-compose.prod.yml`, `plan.md`, and `docs/`.
+> **Working directory:** The primary working directory for Claude Code sessions is `packages/gui/`. Commands below assume you're in the relevant package directory unless noted. The repo root contains `docker-compose.prod.yml`, `plan.md`, and `docs/`.
 
 ### Docker (recommended — runs full stack)
 ```bash
@@ -48,6 +67,14 @@ npm run dev     # Vite dev server → http://localhost:5173
 npm run build   # production build → dist/
 ```
 
+### auth-js SDK
+```bash
+cd packages/auth-js
+npm install
+npm run build   # tsup → dist/ (ESM + CJS + .d.ts)
+npm run typecheck
+```
+
 ## Architecture
 
 ### API request lifecycle
@@ -60,69 +87,113 @@ npm run build   # production build → dist/
 |-------|--------|-------|
 | Health | `/health` | `routes/health.ts` |
 | Setup | `/setup` | `routes/setup.ts` — first-run admin account creation; becomes no-op once setup is done |
-| Admin auth | `/auth` | `routes/auth/{token,adminToken,adminLogin,logout,refresh,me}.ts` |
+| Admin auth | `/auth` | `routes/auth/{token,adminToken,adminLogin,logout,refresh,me,sessions}.ts` |
 | Admin DB mgmt | `/admin` | `routes/admin/{databases,stats}.ts` |
 | DB data | `/db/:database` | `routes/db/{tables,rows,query,meta,backup}.ts` — requires `authenticate` + `dbResolver` |
-| DB auth | `/db/:database/auth` | `routes/db/auth/{users,tokens}.ts` — `dbResolver` only; login/logout/refresh public |
+| DB auth | `/db/:database/auth` | `routes/db/auth/` — see Per-DB Auth section below |
 | Terminal | `/terminal` | `routes/terminal.ts` — WebSocket shell via `node-pty`; requires admin token |
 
 All `/db/:database/*` data routes run `authenticate` → `dbResolver` as Fastify hooks at group level.
-DB auth routes (`/db/:db/auth/*`) skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; user CRUD routes add `authenticate` + `scopeGuard` per-handler.
+DB auth routes skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; admin-gated routes add `authenticate` + `scopeGuard("schema")` per-handler.
 
 ### Auth model
 Two token types, both JWT signed with `JWT_SECRET`:
 - **DB token** — scoped (`read`/`write`/`delete`/`schema`/`query`), tied to one database. Obtained via `POST /auth/token` with a per-DB secret (falls back to `ADMIN_SECRET`).
 - **Admin token** — full access. Obtained via `POST /auth/token/admin` with `ADMIN_SECRET`.
+- **DB user token** — issued to per-DB app users; carries `iss: "postgrify/db-auth"`. `jwtService.verifyAdminOrDb()` rejects these; `jwtService.verifyDbUser()` requires them.
 
-Fastify decorators `server.authenticate` and `server.authenticateAdmin` are added by `plugins/auth.ts` and used as `preHandler` hooks on individual routes.
+`plugins/auth.ts` exposes `server.jwtService` (decorator) and `server.authenticate` / `server.authenticateAdmin` (preHandlers).
 
-Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAME>=<secret>` in the environment (e.g. `DB_SECRET_PROJECT1=my-secret`).
+Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAME>=<secret>` in the environment.
 
 ### Middleware
-`middleware/dbResolver.ts` — resolves `req.dbName` from (in priority order) URL param `/db/:database`, `X-Database` header, or `?database=` query param. Applied as a `preHandler` on all `/db/:db/*` routes.
+`middleware/dbResolver.ts` — resolves `req.dbName` from URL param `/db/:database`, `X-Database` header, or `?database=` query param.
 
-`middleware/scopeGuard.ts` — factory that returns a Fastify `preHandler`. Usage: `preHandler: [server.authenticate, scopeGuard("write")]`. Admin tokens bypass scope checks; DB tokens are also checked against `req.dbName` to prevent cross-database access.
+`middleware/scopeGuard.ts` — factory: `preHandler: [server.authenticate, scopeGuard("write")]`. Admin tokens bypass scope checks; DB tokens are checked against `req.dbName` to prevent cross-database access.
 
 ### Connection pool model
-`services/poolManager.ts` wraps `postgres` (postgres.js). Pools are created lazily on first `getPool(dbName)` call, and evicted after idle timeout. The `PoolManager` instance is available on all routes as `server.poolManager`.
+`services/poolManager.ts` wraps `postgres` (postgres.js). Pools are created lazily on first `getPool(dbName)` call and evicted after idle timeout. Available on routes as `server.poolManager`.
 
 ### Cache model
-`services/cacheService.ts` uses Redis if `REDIS_URL` is set, otherwise falls back to an in-memory LRU cache. Available on routes as `server.cache`.
-
-**Important:** `@fastify/rate-limit` requires `ioredis`; the project uses `node-redis` v4. The Redis store for rate-limiting is intentionally disabled in `plugins/rateLimit.ts` — rate limiting runs in-memory.
+`services/cacheService.ts` uses Redis if `REDIS_URL` is set, otherwise falls back to an in-memory LRU cache. `@fastify/rate-limit` requires `ioredis`; the project uses `node-redis` v4, so the Redis store for rate-limiting is intentionally disabled in `plugins/rateLimit.ts`.
 
 ### Query builder
-`services/queryBuilder.ts` converts HTTP query parameters into safe parameterized SQL. Filter syntax: `where=field.op.value` (e.g. `where=age.gt.18&where=status.eq.active`). Supported operators: `eq neq gt gte lt lte like ilike in is not`. Order syntax: `order=field.asc` or `order=field.desc`. Select syntax: `select=id,name,email` (comma-separated column names or `*`). All column names are validated with `isValidIdentifier` before use.
+`services/queryBuilder.ts` converts HTTP query parameters into safe parameterized SQL. Filter syntax: `where=field.op.value`. Supported operators: `eq neq gt gte lt lte like ilike in is not`. All column names are validated with `isValidIdentifier` before use.
 
 ### Per-database auth system
-Each managed database has an isolated `_postgrify_auth` schema (not in `public` — invisible in the Tables tab) provisioned lazily on first auth request via `routes/db/auth/provision.ts`. Tables: `_postgrify_auth.users` (argon2id password hash, roles: viewer/editor/admin) and `_postgrify_auth.sessions` (refresh tokens with rotation). JWT for DB users is signed with the same `JWT_SECRET` but carries `iss: "postgrify/db-auth"` to distinguish from admin tokens. `services/jwtService.ts` has `signDbUserToken()` for this. Password ops reuse `services/passwordService.ts`.
+
+Each managed database has an isolated `_postgrify_auth` schema provisioned lazily via `routes/db/auth/provision.ts`. The schema is invisible in the Tables tab. Tables: `users`, `sessions`, `audit_log`, `oauth_providers`, `auth_settings`.
+
+**Auth route files** (all under `routes/db/auth/`):
+
+| File | Endpoints |
+|------|-----------|
+| `tokens.ts` | `POST /login`, `POST /logout`, `POST /refresh` |
+| `signup.ts` | `POST /signup` — creates user, sends verify email |
+| `verify.ts` | `GET /verify?token=` — email verification |
+| `me.ts` | `GET /me` — current user profile (DB user JWT required) |
+| `passwordReset.ts` | `POST /password/forgot`, `POST /password/reset` |
+| `magicLink.ts` | `POST /magic-link`, `GET /magic-link/verify?token=` |
+| `oauth.ts` | `GET /oauth/:provider`, `GET /oauth/:provider/callback` |
+| `users.ts` | User CRUD + `PATCH /me/password` (schema scope) |
+| `settings.ts` | `GET/PUT /settings`, `GET/POST/DELETE /settings/oauth/:provider` (schema scope) |
+| `audit.ts` | `GET /audit` — paginated log (schema scope) |
+| `sessions.ts` | `GET /sessions`, `DELETE /sessions/:id`, `DELETE /sessions?user_id=` (schema scope) |
+
+`provision.ts` also exports `insertAuditLog()` and `getAuthSetting()` — used by all auth handlers to record events and read feature flags.
+
+`services/emailService.ts` — nodemailer wrapper. Falls back to `console.log` when `SMTP_HOST` is unset (dev mode). Templates: `buildVerifyEmail`, `buildPasswordResetEmail`, `buildMagicLinkEmail`.
+
+`services/oauthService.ts` — Google and GitHub authorization code flow (`getAuthUrl`, `exchangeCode`).
+
+### Settings service
+`services/settingsService.ts` persists admin configuration to a `_postgrify_settings` table in the primary PostgreSQL database. Stores `autoStartDatabases`. Exposed via `GET/POST /admin/settings`.
 
 ### Identifier and DDL safety
-All table/column/DB names pass through `utils/identifier.ts` before being interpolated into SQL. The regex is `/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/` plus a reserved-keyword blocklist. Never skip this when adding new routes that accept user-supplied identifiers.
+All table/column/DB names pass through `utils/identifier.ts` before SQL interpolation. Regex: `/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/` plus reserved-keyword blocklist. Never skip this for user-supplied identifiers.
 
-`utils/ddlSanitizer.ts` strips dangerous DDL statements (e.g. `DROP`, `TRUNCATE`, write CTEs) from SQL passed to read-only contexts. Used by the `/sql` route to enforce read-only mode when the DB token scope is `query` (read-only SQL).
+`utils/ddlSanitizer.ts` strips dangerous DDL from SQL in read-only query contexts.
 
-`utils/asyncHandler.ts` wraps async route handlers to forward thrown errors to Fastify's error handler (avoids unhandled promise rejections in route callbacks).
+`utils/asyncHandler.ts` wraps async handlers to forward errors to Fastify's error handler.
 
 ### GUI structure
-- `lib/api.ts` — all HTTP calls; reads `VITE_API_URL` at build time (default `http://localhost:3000`)
-- `hooks/` — React Query wrappers: `useDatabases`, `useTables`, `useRows`, `useDbAuth` (per-DB auth users)
+- `lib/api.ts` — all HTTP calls; reads `VITE_API_URL` at build time (default `http://localhost:3000`). Exposes `setTokenAccessors()` for AuthContext injection. Admin refresh token in `localStorage` under `postgrify_refresh_token`.
+- `hooks/` — React Query wrappers: `useDatabases`, `useTables`, `useRows`, `useDbAuth` (per-DB users), `useAuthSettings`, `useAuditLog`, `useAuthSessions`
 - `pages/` — `LoginPage`, `DashboardPage`, `DatabasesPage`, `DatabasePage`, `TablePage`, `CreateTablePage`, `QueryPage`, `ApiKeysPage`. All protected pages wrap `ProtectedLayout` from `App.tsx`.
-- `components/database/AuthsTab.tsx` — per-database user management tab (user table + Invite/Edit/ResetPassword dialogs)
-- Auth state is stored in memory via `AuthContext`; refresh token in `localStorage` under `postgrify_refresh_token`
+- `components/database/AuthsTab.tsx` — 4-tab per-DB auth panel: Kullanıcılar / Ayarlar / Audit Log / Session'lar
+- Auth state stored in memory via `AuthContext`; admin refresh token in localStorage.
+
+### @postgrify/auth-js SDK
+Zero-dependency Supabase-like client for per-DB app auth:
+```typescript
+import { createClient } from '@postgrify/auth-js'
+const auth = createClient({ url, database })
+await auth.signUp({ email, password })
+await auth.signIn({ email, password })
+auth.signInWithOAuth({ provider: 'google' })
+auth.onAuthStateChange((event, session) => { ... })
+```
+Internals: `client.ts` (main class + `createClient` factory), `session.ts` (SessionManager, auto-refresh timer), `storage.ts` (localStorage/sessionStorage/memory adapters), `types.ts`.
+
+### First-run setup
+`routes/setup.ts` handles `POST /setup` — creates the initial admin account. Returns 409 if admin already exists. `LoginPage` detects this and redirects to setup flow.
 
 ### Test setup
-Tests use Vitest. `test/setup.ts` overrides all env vars (including `NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.
+Tests use Vitest. `test/setup.ts` overrides all env vars (`NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.
 
-Test files live under `packages/api/test/` mirroring the `src/` layout (e.g. `test/routes/tables.test.ts`, `test/services/queryBuilder.test.ts`). There is also a `packages/test/` directory at the monorepo level for integration-style tests that span packages.
+Test files under `packages/api/test/` mirror `src/` layout. `packages/test/` at monorepo level is reserved for future integration tests.
 
 ## Environment variables
 
-`packages/.env` is required to run via Docker Compose. `packages/.env.example` is the template — copy and fill in secrets. See also `exampleenv.md` at the repo root for annotated explanations of every variable. Mandatory: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars).
+`packages/.env` is required for Docker Compose. `packages/.env.example` is the template. `exampleenv.md` at repo root has annotated explanations. Mandatory: `PG_PASSWORD`, `JWT_SECRET` (≥32 chars), `ADMIN_SECRET` (≥16 chars).
 
-**Docker Compose setup:** `PG_HOST=host.docker.internal` — the API container connects to the host machine's PostgreSQL (not a Docker-managed postgres container). `REDIS_URL=redis://redis:6379` (the Redis service name). There is no `postgres` service in docker-compose.yml; the host's PostgreSQL is used directly so data is never tied to Docker volumes.
+Optional for auth features:
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE` — email sending
+- `APP_URL` — base URL for email links (default `http://localhost:5173`)
 
-Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAME>=<secret>` in the environment (e.g. `DB_SECRET_PROJECT1=my-secret`).
+**Docker Compose setup:** `PG_HOST=host.docker.internal` — API container connects to host PostgreSQL. `REDIS_URL=redis://redis:6379`. No `postgres` service in docker-compose.yml; host's PostgreSQL is used directly.
+
+Per-DB secrets: `DB_SECRET_<DBNAME>=<secret>` (e.g. `DB_SECRET_PROJECT1=my-secret`).
 
 ## Port map (Docker)
 
@@ -133,9 +204,8 @@ Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAM
 | Redis    | 6379      | |
 | PostgreSQL | 5432    | **Host machine's PostgreSQL** — not a Docker container |
 
-GUI's nginx proxies `/api/` to `http://api:3000/` so `VITE_API_URL=/api` works regardless of the host IP. No `localhost:3000` hardcoded in the browser.
+GUI's nginx proxies `/api/` to `http://api:3000/` so `VITE_API_URL=/api` works regardless of host IP.
 
 ### Host PostgreSQL prerequisites
-The host's PostgreSQL must accept connections from Docker's network range:
 - `postgresql.conf`: `listen_addresses = '*'`
 - `pg_hba.conf`: `host all all 172.16.0.0/12 scram-sha-256`

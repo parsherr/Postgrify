@@ -8,14 +8,14 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
  * URL: /databases/:db   ?tab=summary|tables|data|query|options
  */
 import React from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
-import { LayoutDashboard, Table2, Rows3, Terminal, Settings2, Play, PowerOff, Loader2, Database, HardDrive, Clock, Hash, ChevronRight, Copy, Check, Archive, KeyRound, Square, } from "lucide-react";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
+import { LayoutDashboard, Table2, Rows3, Terminal, Settings2, Loader2, Play, Database, HardDrive, Hash, ChevronRight, Copy, Check, Archive, KeyRound, Square, } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatBytes } from "@/lib/utils";
-import { useDatabases, useStopPool, useStartPool } from "@/hooks/useDatabases";
+import { useDatabases, useDeleteDatabase } from "@/hooks/useDatabases";
 import { useTables, useTableSchema, useDropTable } from "@/hooks/useTables";
 import { useRows, useDeleteRow, useUpdateRow } from "@/hooks/useRows";
 import { useDbAuthUsers } from "@/hooks/useDbAuth";
@@ -35,23 +35,6 @@ const TABS = [
     { id: "auths", label: "Auths", icon: KeyRound },
     { id: "options", label: "Database Options", icon: Settings2 },
 ];
-// ── Uptime sayaci ────────────────────────────────────────────────────────────
-function useUptime(startedAt) {
-    const [now, setNow] = React.useState(Date.now());
-    React.useEffect(() => {
-        if (!startedAt)
-            return;
-        const t = setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(t);
-    }, [startedAt]);
-    if (!startedAt)
-        return null;
-    const sec = Math.floor((now - startedAt) / 1000);
-    const h = Math.floor(sec / 3600).toString().padStart(2, "0");
-    const m = Math.floor((sec % 3600) / 60).toString().padStart(2, "0");
-    const s = (sec % 60).toString().padStart(2, "0");
-    return `${h}:${m}:${s}`;
-}
 // ── Ana bilesen ───────────────────────────────────────────────────────────────
 export default function DatabasePage() {
     const { db } = useParams();
@@ -60,10 +43,6 @@ export default function DatabasePage() {
     const activeTable = searchParams.get("table") ?? "";
     const { data: databases, isLoading: dbLoading } = useDatabases();
     const dbInfo = databases?.find((d) => d.name === db);
-    const { mutateAsync: stopPool, isPending: stopping } = useStopPool();
-    const { mutateAsync: startPool, isPending: starting } = useStartPool();
-    const [poolActionLoading, setPoolActionLoading] = React.useState(false);
-    const uptime = useUptime(dbInfo?.pool_started_at ?? null);
     if (!db)
         return null;
     function setTab(id) {
@@ -72,38 +51,13 @@ export default function DatabasePage() {
     function setTable(name) {
         setSearchParams({ tab: "data", table: name });
     }
-    async function handlePoolToggle() {
-        if (!dbInfo)
-            return;
-        setPoolActionLoading(true);
-        try {
-            if (dbInfo.pool_active) {
-                await stopPool(db);
-            }
-            else {
-                await startPool(db);
-            }
-        }
-        finally {
-            setPoolActionLoading(false);
-        }
-    }
-    const isActionLoading = poolActionLoading || stopping || starting;
-    return (_jsxs("div", { className: "flex h-full overflow-hidden", children: [_jsxs("div", { className: "flex w-52 shrink-0 flex-col border-r border-border bg-card", children: [_jsxs("div", { className: "flex h-10 items-center gap-2 border-b border-border px-3", children: [_jsxs("div", { className: "relative shrink-0", children: [_jsx(Database, { className: "h-4 w-4 text-muted-foreground" }), _jsx("span", { className: cn("absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-card", dbInfo?.pool_active ? "bg-green-500" : "bg-red-500") })] }), _jsx("span", { className: "truncate font-mono text-sm font-semibold", children: db })] }), _jsx("nav", { className: "flex-1 py-2", children: TABS.map(({ id, label, icon: Icon }) => (_jsxs("button", { onClick: () => setTab(id), className: cn("flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors", activeTab === id
+    return (_jsxs("div", { className: "flex h-full overflow-hidden", children: [_jsxs("div", { className: "flex w-52 shrink-0 flex-col border-r border-border bg-card", children: [_jsxs("div", { className: "flex h-10 items-center gap-2 border-b border-border px-3", children: [_jsx(Database, { className: "h-4 w-4 shrink-0 text-muted-foreground" }), _jsx("span", { className: "truncate font-mono text-sm font-semibold", children: db })] }), _jsx("nav", { className: "flex-1 py-2", children: TABS.map(({ id, label, icon: Icon }) => (_jsxs("button", { onClick: () => setTab(id), className: cn("flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors", activeTab === id
                                 ? "bg-accent text-foreground"
-                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"), children: [_jsx(Icon, { className: "h-3.5 w-3.5 shrink-0" }), label] }, id))) }), _jsx("div", { className: "border-t border-border p-2", children: _jsxs(Link, { to: "/databases", className: "flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground", children: [_jsx(ChevronRight, { className: "h-3 w-3 rotate-180" }), "Veritabanlari"] }) })] }), _jsxs("div", { className: "flex min-w-0 flex-1 flex-col overflow-hidden", children: [_jsxs("div", { className: "flex h-10 shrink-0 items-center justify-between border-b border-border px-4", children: [_jsxs("div", { className: "flex items-center gap-2", children: [_jsx("span", { className: "font-mono text-sm font-semibold", children: db }), dbInfo?.pool_active && uptime && (_jsxs("span", { className: "text-xs text-muted-foreground", children: ["(Uptime: ", uptime, ")"] })), _jsx(Badge, { variant: "outline", className: cn("h-4 px-1.5 text-2xs", dbInfo?.pool_active
-                                            ? "border-green-500/30 text-green-400"
-                                            : "border-red-500/30 text-red-400"), children: dbInfo?.pool_active ? "running" : "stopped" })] }), _jsx("div", { className: "flex items-center gap-2", children: dbInfo?.pool_active ? (_jsxs(Button, { size: "sm", variant: "outline", onClick: handlePoolToggle, disabled: isActionLoading, className: "h-7 gap-1.5 border-red-500/30 text-red-400 hover:border-red-500/60 hover:bg-red-950/30 hover:text-red-300", children: [isActionLoading ? (_jsx(Loader2, { className: "h-3 w-3 animate-spin" })) : (_jsx(PowerOff, { className: "h-3 w-3" })), "Durdur"] })) : (_jsxs(Button, { size: "sm", onClick: handlePoolToggle, disabled: isActionLoading, className: "h-7 gap-1.5", children: [isActionLoading ? (_jsx(Loader2, { className: "h-3 w-3 animate-spin" })) : (_jsx(Play, { className: "h-3 w-3" })), "Baslat"] })) })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: dbLoading ? (_jsx("div", { className: "space-y-3 p-6", children: Array.from({ length: 4 }).map((_, i) => (_jsx(Skeleton, { className: "h-8 w-full" }, i))) })) : activeTab === "summary" ? (_jsx(SummaryTab, { db: db, dbInfo: dbInfo, uptime: uptime })) : activeTab === "tables" ? (_jsx(TablesTab, { db: db })) : activeTab === "data" ? (_jsx(DataTab, { db: db, activeTable: activeTable, setTable: setTable })) : activeTab === "query" ? (_jsx(SqlEditorTab, { db: db })) : activeTab === "backup" ? (_jsx(BackupTab, { db: db })) : activeTab === "auths" ? (_jsx(AuthsTab, { db: db })) : (_jsx(OptionsTab, { db: db, dbInfo: dbInfo })) })] })] }));
+                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"), children: [_jsx(Icon, { className: "h-3.5 w-3.5 shrink-0" }), label] }, id))) }), _jsx("div", { className: "border-t border-border p-2", children: _jsxs(Link, { to: "/databases", className: "flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground", children: [_jsx(ChevronRight, { className: "h-3 w-3 rotate-180" }), "Veritabanlari"] }) })] }), _jsxs("div", { className: "flex min-w-0 flex-1 flex-col overflow-hidden", children: [_jsx("div", { className: "flex h-10 shrink-0 items-center border-b border-border px-4", children: _jsx("span", { className: "font-mono text-sm font-semibold", children: db }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: dbLoading ? (_jsx("div", { className: "space-y-3 p-6", children: Array.from({ length: 4 }).map((_, i) => (_jsx(Skeleton, { className: "h-8 w-full" }, i))) })) : activeTab === "summary" ? (_jsx(SummaryTab, { db: db, dbInfo: dbInfo })) : activeTab === "tables" ? (_jsx(TablesTab, { db: db })) : activeTab === "data" ? (_jsx(DataTab, { db: db, activeTable: activeTable, setTable: setTable })) : activeTab === "query" ? (_jsx(SqlEditorTab, { db: db })) : activeTab === "backup" ? (_jsx(BackupTab, { db: db })) : activeTab === "auths" ? (_jsx(AuthsTab, { db: db })) : (_jsx(OptionsTab, { db: db, dbInfo: dbInfo })) })] })] }));
 }
 // ── Summary Tab ──────────────────────────────────────────────────────────────
-function SummaryTab({ db, dbInfo, uptime, }) {
+function SummaryTab({ db, dbInfo, }) {
     const stats = [
-        {
-            label: "Status",
-            value: dbInfo?.pool_active ? "running" : "stopped",
-            icon: Database,
-            accent: dbInfo?.pool_active ? "text-green-400" : "text-red-400",
-        },
         {
             label: "Disk boyutu",
             value: formatBytes(dbInfo?.size_bytes ?? 0),
@@ -114,12 +68,6 @@ function SummaryTab({ db, dbInfo, uptime, }) {
             label: "Tablo sayisi",
             value: String(dbInfo?.table_count ?? 0),
             icon: Hash,
-            accent: "text-foreground",
-        },
-        {
-            label: "Uptime",
-            value: uptime ?? "—",
-            icon: Clock,
             accent: "text-foreground",
         },
     ];
@@ -248,7 +196,7 @@ function DataTab({ db, activeTable, setTable, }) {
                                                     : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"), children: [_jsx(KeyRound, { className: "h-3 w-3 shrink-0 opacity-60" }), _jsx("span", { className: "truncate font-mono", children: name })] }, fullName));
                                         })] })] })) })] }), _jsxs("div", { className: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", children: [activeTable && (_jsxs("div", { className: "flex h-9 shrink-0 items-center gap-2 border-b border-border px-3", children: [isAuthTable
                                 ? _jsx(KeyRound, { className: "h-3.5 w-3.5 shrink-0 text-muted-foreground/50" })
-                                : _jsx(Table2, { className: "h-3.5 w-3.5 shrink-0 text-muted-foreground/50" }), _jsxs("span", { className: "font-mono text-xs text-muted-foreground", children: [resolvedSchema !== "public" && (_jsxs("span", { className: "text-muted-foreground/50", children: [resolvedSchema, "."] })), _jsx("span", { className: "text-foreground", children: resolvedTable })] }), isAuthTable && (_jsx("span", { className: "ml-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-500", children: "auth" }))] })), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: !activeTable ? (_jsx("div", { className: "flex h-full items-center justify-center text-sm text-muted-foreground", children: tablesLoading ? "Tablolar yükleniyor…" : "Bir tablo seçin" })) : (_jsx(DataGrid, { columns: columns, data: activeRows, total: activeTotal, page: page, pageSize: pageSize, isLoading: activeLoading, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(0); }, onRefresh: activeRefetch, onDelete: isAuthTable ? undefined : handleDelete, onCellEdit: isAuthTable ? undefined : handleCellEdit })) })] })] }));
+                                : _jsx(Table2, { className: "h-3.5 w-3.5 shrink-0 text-muted-foreground/50" }), _jsxs("span", { className: "font-mono text-xs text-muted-foreground", children: [resolvedSchema !== "public" && (_jsxs("span", { className: "text-muted-foreground/50", children: [resolvedSchema, "."] })), _jsx("span", { className: "text-foreground", children: resolvedTable })] }), isAuthTable && (_jsx("span", { className: "ml-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-500", children: "auth" }))] })), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: !activeTable ? (_jsx("div", { className: "flex h-full items-center justify-center text-sm text-muted-foreground", children: tablesLoading ? "Tablolar yükleniyor…" : "Bir tablo seçin" })) : (_jsx(DataGrid, { columns: columns, data: activeRows, total: activeTotal, page: page, pageSize: pageSize, isLoading: activeLoading, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(0); }, onRefresh: activeRefetch, onDelete: isAuthTable ? undefined : handleDelete, onCellEdit: isAuthTable ? undefined : handleCellEdit, db: db, tableName: resolvedTable })) })] })] }));
 }
 // ── SQL Editor Tab ────────────────────────────────────────────────────────────
 const SCHEMA_WIDTH_KEY = "postgrify_dbpage_schema_width";
@@ -402,13 +350,21 @@ function BackupTab({ db }) {
 }
 // ── Options Tab ───────────────────────────────────────────────────────────────
 function OptionsTab({ db, dbInfo }) {
-    return (_jsx("div", { className: "h-full overflow-y-auto p-6", children: _jsxs("div", { className: "mx-auto max-w-lg space-y-4", children: [_jsx("h2", { className: "text-sm font-semibold", children: "Veritabani Secenekleri" }), _jsxs("div", { className: "rounded border border-border bg-card p-4 text-sm text-muted-foreground", children: [_jsx("p", { className: "mb-1 font-mono text-xs text-foreground", children: db }), _jsx("p", { className: "text-xs", children: "Bu bolumden veritabani seviyesinde konfigurasyon yapilabilir." })] }), dbInfo && (_jsx("div", { className: "space-y-2 text-xs text-muted-foreground", children: [
-                        { label: "Boyut", value: formatBytes(dbInfo.size_bytes), accent: "" },
-                        { label: "Tablo sayisi", value: String(dbInfo.table_count), accent: "" },
-                        {
-                            label: "Pool durumu",
-                            value: dbInfo.pool_active ? "aktif" : "kapali",
-                            accent: dbInfo.pool_active ? "text-green-400" : "text-red-400",
-                        },
-                    ].map((row, i, arr) => (_jsxs("div", { className: cn("flex justify-between", i !== arr.length - 1 && "border-b border-border/40 pb-2"), children: [_jsx("span", { children: row.label }), _jsx("span", { className: cn("font-mono", row.accent), children: row.value })] }, row.label))) }))] }) }));
+    const { mutateAsync: deleteDatabase, isPending: deleting } = useDeleteDatabase();
+    const [deleteConfirm, setDeleteConfirm] = React.useState(false);
+    const [deleteInput, setDeleteInput] = React.useState("");
+    const navigate = useNavigate();
+    async function handleDelete() {
+        if (deleteInput !== db)
+            return;
+        await deleteDatabase(db);
+        navigate("/databases");
+    }
+    const stats = dbInfo
+        ? [
+            { label: "Boyut", value: formatBytes(dbInfo.size_bytes), accent: "" },
+            { label: "Tablo sayisi", value: String(dbInfo.table_count), accent: "" },
+        ]
+        : [];
+    return (_jsx("div", { className: "h-full overflow-y-auto p-6", children: _jsxs("div", { className: "mx-auto max-w-lg space-y-6", children: [_jsx("h2", { className: "text-sm font-semibold", children: "Veritabani Secenekleri" }), _jsxs("div", { className: "rounded border border-border bg-card p-4", children: [_jsx("p", { className: "mb-1 font-mono text-xs text-foreground", children: db }), _jsx("div", { className: "mt-3 space-y-2 text-xs text-muted-foreground", children: stats.map((row, i, arr) => (_jsxs("div", { className: cn("flex justify-between", i !== arr.length - 1 && "border-b border-border/40 pb-2"), children: [_jsx("span", { children: row.label }), _jsx("span", { className: cn("font-mono", row.accent), children: row.value })] }, row.label))) })] }), _jsxs("div", { className: "rounded border border-red-900/40 bg-card p-4", children: [_jsx("p", { className: "mb-1 text-xs font-medium text-red-400", children: "Tehlikeli B\u00F6lge" }), _jsx("p", { className: "mb-3 text-xs text-muted-foreground", children: "Bu i\u015Flem geri al\u0131namaz. Veritaban\u0131 ve t\u00FCm verileri kal\u0131c\u0131 olarak silinir." }), !deleteConfirm ? (_jsx(Button, { size: "sm", variant: "destructive", onClick: () => setDeleteConfirm(true), className: "gap-1.5", children: "Veritaban\u0131n\u0131 Sil" })) : (_jsxs("div", { className: "space-y-2", children: [_jsxs("p", { className: "text-xs text-muted-foreground", children: ["Onaylamak i\u00E7in veritaban\u0131 ad\u0131n\u0131 yaz\u0131n:", " ", _jsx("span", { className: "font-mono text-foreground", children: db })] }), _jsx("input", { type: "text", value: deleteInput, onChange: (e) => setDeleteInput(e.target.value), placeholder: db, className: "h-8 w-full rounded border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-red-500" }), _jsxs("div", { className: "flex gap-2", children: [_jsxs(Button, { size: "sm", variant: "destructive", onClick: handleDelete, disabled: deleteInput !== db || deleting, className: "gap-1.5", children: [deleting ? _jsx(Loader2, { className: "h-3.5 w-3.5 animate-spin" }) : null, "Kal\u0131c\u0131 Olarak Sil"] }), _jsx(Button, { size: "sm", variant: "outline", onClick: () => { setDeleteConfirm(false); setDeleteInput(""); }, children: "\u0130ptal" })] })] }))] })] }) }));
 }

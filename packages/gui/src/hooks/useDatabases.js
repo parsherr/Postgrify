@@ -33,17 +33,23 @@ export function useDeleteDatabase() {
         onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
     });
 }
-export function useStopPool() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: (db) => api.post(`/admin/databases/${db}/pool/stop`, {}),
-        onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
+export function useGetApiKey(dbName) {
+    return useQuery({
+        queryKey: ["db-api-key", dbName],
+        queryFn: () => api
+            .get(`/admin/databases/${dbName}/api-key`)
+            .then((r) => r.api_key),
+        enabled: !!dbName,
     });
 }
-export function useStartPool() {
+export function useRotateApiKey() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: (db) => api.post(`/admin/databases/${db}/pool/start`, {}),
-        onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.databases() }),
+        mutationFn: (dbName) => api
+            .post(`/admin/databases/${dbName}/api-key/rotate`, {})
+            .then((r) => r.api_key),
+        onSuccess: (_data, dbName) => {
+            qc.invalidateQueries({ queryKey: ["db-api-key", dbName] });
+        },
     });
 }

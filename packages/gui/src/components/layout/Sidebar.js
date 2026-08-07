@@ -1,4 +1,4 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
 /**
  * Sidebar — tree-nav ile DB/tablo navigasyonu.
  * VSCode tarzı alt panel (slide-up mini SQL editörü) ve version satırı içerir.
@@ -17,14 +17,14 @@ const navItems = [
     { label: "SQL Editörü", to: "/query", icon: Terminal },
     { label: "API Keys", to: "/api-keys", icon: KeyRound },
 ];
-/** Tek bir veritabanının tablo listesini gösterir (lazy load) */
-function DbTreeNode({ dbName, collapsed }) {
+/** Tek bir veritabanının sidebar satırını gösterir */
+function DbTreeNode({ dbName, collapsed, }) {
     const params = useParams();
     const isActiveDb = params.db === dbName;
     const dbPath = `/databases/${dbName}`;
-    return (_jsx(TooltipProvider, { delayDuration: 0, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsxs(Link, { to: dbPath, className: cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors", isActiveDb
+    return (_jsx(TooltipProvider, { delayDuration: 0, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx(Link, { to: dbPath, className: cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors", isActiveDb
                             ? "border-l-2 border-zinc-400 bg-zinc-800/60 pl-1.5 text-foreground"
-                            : "border-l-2 border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground", collapsed && "justify-center px-0"), children: [_jsx(Database, { className: cn("h-3.5 w-3.5 shrink-0", collapsed && "mx-auto") }), !collapsed && (_jsx("span", { className: "flex-1 truncate font-mono text-xs", children: dbName })), !collapsed && isActiveDb && (_jsx("span", { className: "h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" }))] }) }), collapsed && (_jsx(TooltipContent, { side: "right", className: "font-mono text-xs", children: dbName }))] }) }));
+                            : "border-l-2 border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground", collapsed && "justify-center px-0"), children: collapsed ? (_jsx(Database, { className: "h-3.5 w-3.5 mx-auto" })) : (_jsxs(_Fragment, { children: [_jsx(Database, { className: "h-3.5 w-3.5 shrink-0" }), _jsx("span", { className: "flex-1 truncate font-mono text-xs", children: dbName })] })) }) }), collapsed && (_jsx(TooltipContent, { side: "right", className: "font-mono text-xs", children: dbName }))] }) }));
 }
 export function Sidebar({ collapsed }) {
     const location = useLocation();

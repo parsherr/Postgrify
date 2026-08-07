@@ -1,39 +1,24 @@
-# ─── Build aşaması ────────────────────────────────────────────────────────────
-# Context: monorepo root (package-lock.json ve node_modules buradadir)
+# ─── Build aşaması: local dist kullanır ──────────────────────────────────────
+# Context: monorepo root
+# Kullanım:
+#   cd packages/gui && npm run build   (local build — dist/ üretir)
+#   cd .. && docker compose up -d gui --build
+#
+# Neden pre-built: npm ci --workspace inside Docker kurduğu
+# node_modules farkından dolayı farklı bundle hash üretiyor.
+# Local build deterministik, hızlı ve CI'da tekrarlanabilir.
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Root bağımlılık dosyaları — monorepo lock dosyası
-COPY package.json package-lock.json ./
-
-# GUI package.json (workspace bağımlılıkları için)
-COPY packages/gui/package.json ./packages/gui/
-
-# npm ci: lock dosyasından deterministik, hızlı yükleme
-# --workspace=packages/gui: sadece GUI workspace bağımlılıklarını kur
-RUN npm ci --workspace=packages/gui
-
-# GUI config ve kaynak
-COPY packages/gui/tsconfig.json packages/gui/tsconfig.node.json ./packages/gui/
-COPY packages/gui/vite.config.ts packages/gui/postcss.config.js packages/gui/tailwind.config.ts ./packages/gui/
-COPY packages/gui/index.html ./packages/gui/
-COPY packages/gui/src ./packages/gui/src
-COPY packages/gui/public ./packages/gui/public
-COPY packages/gui/nginx.conf ./packages/gui/
-
-WORKDIR /app/packages/gui
-
-ARG VITE_API_URL=/api
-ENV VITE_API_URL=$VITE_API_URL
-
-RUN npm run build
+# Pre-built dist kopyala
+COPY packages/gui/dist ./packages/gui/dist
 
 # ─── Production: nginx ile static serve ───────────────────────────────────────
 FROM nginx:alpine AS runner
 
 COPY --from=builder /app/packages/gui/dist /usr/share/nginx/html
-COPY --from=builder /app/packages/gui/nginx.conf /etc/nginx/conf.d/default.conf
+COPY packages/gui/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 

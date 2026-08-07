@@ -32,6 +32,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { BASE_URL } from "@/lib/api";
+import { AuthContext } from "@/contexts/AuthContext";
+
+/** DataGrid içindeki binary preview için context */
+const BinaryContext = React.createContext<{ db: string; tableName: string; token: string | null }>({
+  db: "",
+  tableName: "",
+  token: null,
+});
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +59,35 @@ export interface DataGridColumn {
   nullable?: boolean;
 }
 
+/** Kolon adı ve tipine göre akıllı genişlik tahmini */
+function estimateColWidth(key: string, type?: string): number {
+  const k = key.toLowerCase();
+  const t = (type ?? "").toLowerCase();
+
+  // UUID kolonlar
+  if (t.includes("uuid") || k === "id" || k.endsWith("_id") || k.endsWith("id")) {
+    // UUID değeri 36 karakter — sabit genişlik
+    if (t.includes("uuid")) return 280;
+    // id kolonları genellikle int
+    return 80;
+  }
+  // Boolean
+  if (t.includes("bool") || k === "is_private" || k.startsWith("is_") || k.startsWith("has_")) return 90;
+  // Timestamp / date
+  if (t.includes("timestamp") || t.includes("date") || k.endsWith("_at") || k.endsWith("_date")) return 200;
+  // Binary (bytea) → thumbnail
+  if (t.includes("bytea") || t.includes("binary")) return 80;
+  // MIME type
+  if (k.endsWith("_mime") || k === "mime" || k === "content_type") return 120;
+  // Short known fields
+  if (["name", "title", "slug", "username", "email"].includes(k)) return 160;
+  if (["status", "role", "type", "state", "branch", "default_branch"].includes(k)) return 110;
+  // Long text
+  if (t.includes("text") || k.includes("description") || k.includes("content") || k.includes("body")) return 200;
+  // Default
+  return 140;
+}
+
 export interface DataGridProps {
   columns: DataGridColumn[];
   data: Record<string, unknown>[];
@@ -65,6 +103,9 @@ export interface DataGridProps {
   onCellEdit?: (row: Record<string, unknown>, col: string, value: unknown) => Promise<void>;
   /** Dışarıdan filtre chip'leri için */
   filterChips?: { label: string; onRemove: () => void }[];
+  /** Binary (bytea) önizleme için gerekli bağlam */
+  db?: string;
+  tableName?: string;
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
@@ -89,6 +130,112 @@ function SortableHeader({ column, label }: { column: Column<Record<string, unkno
   );
 }
 
+/** bytea verisi mi? postgres.js { type:"Buffer", data:[...] } veya Buffer objesi döner */
+function isBinaryValue(v: unknown): boolean {
+  if (v === null || v === undefined) return false;
+  if (v instanceof Uint8Array) return true;
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (o.type === "Buffer" && Array.isArray(o.data)) return true;
+  }
+  return false;
+}
+
+/** Binary hücre — inline thumbnail + lightbox + indirme */
+function BinaryCell({
+  rowId,
+  colKey,
+  mimeHint,
+}: {
+  rowId: unknown;
+  colKey: string;
+  mimeHint?: string;
+}) {
+  const { db, tableName, token } = React.useContext(BinaryContext);
+
+  const [open, setOpen] = React.useState(false);
+  const [objUrl, setObjUrl] = React.useState<string | null>(null);
+  const [errored, setErrored] = React.useState(false);
+
+  const rawUrl = `${BASE_URL}/db/${db}/${tableName}/${rowId}/${colKey}/raw`;
+
+  // Token hazır olduğunda thumbnail'i otomatik fetch et
+  React.useEffect(() => {
+    if (!token || objUrl || errored) return;
+    let active = true;
+    fetch(rawUrl, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.blob(); })
+      .then(b => { if (active) setObjUrl(URL.createObjectURL(b)); })
+      .catch(() => { if (active) setErrored(true); });
+    return () => { active = false; };
+  }, [token, rawUrl, objUrl, errored]);
+
+  async function handleOpen() {
+    if (objUrl) { setOpen(true); return; }
+    if (!token) return;
+    try {
+      const res = await fetch(rawUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setObjUrl(url);
+      setOpen(true);
+    } catch {
+      setErrored(true);
+    }
+  }
+
+  const isImage = mimeHint
+    ? mimeHint.startsWith("image/")
+    : true; // bilinmiyorsa image dene
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5">
+        {isImage ? (
+          <button
+            onClick={handleOpen}
+            disabled={errored || !token}
+            className="group relative h-8 w-12 overflow-hidden rounded border border-border bg-zinc-900 hover:border-ring transition-colors disabled:opacity-50 disabled:cursor-default"
+            title={errored ? "Yüklenemedi" : "Görseli büyüt"}
+          >
+            {objUrl ? (
+              <img src={objUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                {errored ? "!" : "…"}
+              </span>
+            )}
+          </button>
+        ) : null}
+      </div>
+
+      {/* Lightbox */}
+      {open && objUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          onClick={() => setOpen(false)}
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw]" onClick={e => e.stopPropagation()}>
+            <img
+              src={objUrl}
+              alt={colKey}
+              className="max-h-[88vh] max-w-[88vw] rounded-lg object-contain shadow-2xl"
+            />
+            <button
+              onClick={() => setOpen(false)}
+              className="absolute -right-3 -top-3 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-zinc-900 text-sm text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+
 /** Tek hücre — inline edit destekli */
 function EditableCell({
   value: initialValue,
@@ -110,6 +257,17 @@ function EditableCell({
     if (editing) inputRef.current?.select();
   }, [editing]);
 
+  // Binary (bytea) kontrolü — postgres.js { type:"Buffer", data:[...] } döner
+  const isBinary = isBinaryValue(initialValue);
+
+  // Eğer bu kolon binary ise, aynı satırdaki <colKey>_mime kolonundan MIME ipucu al
+  const mimeHint = isBinary
+    ? (rowData[`${colKey}_mime`] as string | undefined)
+    : undefined;
+
+  // Satır PK'sini bul (id kolonu yoksa ilk kolon)
+  const rowId = rowData["id"] ?? Object.values(rowData)[0];
+
   const displayValue = initialValue === null ? null : String(initialValue ?? "");
 
   async function commit() {
@@ -124,6 +282,17 @@ function EditableCell({
       setSaving(false);
       setEditing(false);
     }
+  }
+
+  // Binary değer → BinaryCell göster (context'ten db/tableName alır)
+  if (isBinary) {
+    return (
+      <BinaryCell
+        rowId={rowId}
+        colKey={colKey}
+        mimeHint={mimeHint}
+      />
+    );
   }
 
   if (editing) {
@@ -172,12 +341,21 @@ export function DataGrid({
   onDelete,
   onCellEdit,
   filterChips,
+  db,
+  tableName,
 }: DataGridProps) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [globalFilter, setGlobalFilter] = React.useState("");
+
+  // BinaryContext — hook kurallarına uygun: koşulsuz, en üstte
+  const auth = React.useContext(AuthContext);
+  const binaryCtxValue = React.useMemo(
+    () => ({ db: db ?? "", tableName: tableName ?? "", token: auth?.accessToken ?? null }),
+    [db, tableName, auth?.accessToken]
+  );
 
   const tableBodyRef = React.useRef<HTMLTableSectionElement>(null);
 
@@ -218,7 +396,7 @@ export function DataGrid({
           onEdit={onCellEdit}
         />
       ),
-      size: 150,
+      size: estimateColWidth(col.key, col.type),
     })),
   ], [colDefs, onCellEdit]);
 
@@ -291,6 +469,7 @@ export function DataGrid({
   }
 
   return (
+    <BinaryContext.Provider value={binaryCtxValue}>
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
@@ -507,5 +686,6 @@ export function DataGrid({
         </div>
       </div>
     </div>
+    </BinaryContext.Provider>
   );
 }

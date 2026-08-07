@@ -154,6 +154,8 @@ export default function TablePage() {
             onRefresh={() => refetch()}
             onCellEdit={schema?.columns.some((c: Column) => c.primary_key) ? handleCellEdit : undefined}
             onDelete={schema?.columns.some((c: Column) => c.primary_key) ? handleDeleteRows : undefined}
+            db={db}
+            tableName={table}
           />
         )}
       </div>

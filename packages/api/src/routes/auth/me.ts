@@ -6,12 +6,8 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { JwtService } from "../../services/jwtService.js";
-import { config } from "../../config/env.js";
 
 export async function adminMeRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
-
   server.get(
     "/admin/me",
     {
@@ -24,32 +20,31 @@ export async function adminMeRoute(server: FastifyInstance) {
             type: "object",
             properties: {
               email: { type: "string" },
-              role: { type: "string" },
-              iat: { type: "number" },
-              exp: { type: "number" },
+              role:  { type: "string" },
+              iat:   { type: "number" },
+              exp:   { type: "number" },
             },
           },
         },
       },
     },
     async (req, reply) => {
-      // Token doğrulama — decorator yerine inline (auth route scope'unda decorator erişimi yok)
       const auth = req.headers.authorization;
       if (!auth?.startsWith("Bearer ")) {
         return reply.status(401).send({ error: "Missing authorization token" });
       }
 
       const token = auth.slice(7);
-      const payload = await jwtService.verify(token);
+      const payload = await server.jwtService.verifyAdminOrDb(token);
       if (!payload || payload.role !== "admin") {
         return reply.status(403).send({ error: "Admin access required" });
       }
 
       return reply.send({
         email: payload.email ?? null,
-        role: payload.role,
-        iat: payload.iat,
-        exp: payload.exp,
+        role:  payload.role,
+        iat:   payload.iat,
+        exp:   payload.exp,
       });
     }
   );

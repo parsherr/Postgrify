@@ -14,7 +14,9 @@
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { scopeGuard } from "../../../middleware/scopeGuard.js";
-import { hashPassword } from "../../../services/passwordService.js";
+import { hashPassword, verifyPassword } from "../../../services/passwordService.js";
+import { JwtService } from "../../../services/jwtService.js";
+import { config } from "../../../config/env.js";
 import { ensureAuthSchema } from "./provision.js";
 
 // users route'larında authenticate + scopeGuard birlikte kullanılır
@@ -24,6 +26,7 @@ function authGuard(server: FastifyInstance, scope: Parameters<typeof scopeGuard>
 }
 
 export async function authUsersRoute(server: FastifyInstance) {
+  const jwtService = new JwtService(config.JWT_SECRET);
   // ── GET /:database/auth/users ──────────────────────────────────────────────
   server.get(
     "/:database/auth/users",
@@ -237,6 +240,100 @@ export async function authUsersRoute(server: FastifyInstance) {
       `;
 
       return reply.send({ ok: true, message: "Password updated. All existing sessions revoked." });
+    })
+  );
+
+  // ── PATCH /:database/auth/me/password ─────────────────────────────────────
+  server.patch(
+    "/:database/auth/me/password",
+    {
+      preHandler: [server.authenticate],
+      schema: {
+        description: "Change own password (DB user self-service). Revokes all other active sessions.",
+        tags: ["db-auth"],
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["currentPassword", "newPassword"],
+          properties: {
+            currentPassword: { type: "string", minLength: 1 },
+            newPassword:     { type: "string", minLength: 8 },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok:      { type: "boolean" },
+              message: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      // Bu endpoint yalnızca per-DB user token'ı ile çağrılabilir
+      const authHeader = req.headers.authorization;
+      const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      if (!rawToken) {
+        return reply.status(401).send({ error: "Missing authorization token" });
+      }
+
+      const dbUserPayload = await jwtService.verifyDbUser(rawToken);
+      if (!dbUserPayload) {
+        return reply.status(403).send({
+          error: "Forbidden",
+          message: "This endpoint requires a per-database user token, not an admin token",
+        });
+      }
+
+      const userId = dbUserPayload.sub;
+      const database = req.dbName!;
+
+      // Token'ın bu DB için geçerli olduğunu kontrol et
+      if (dbUserPayload.db !== database) {
+        return reply.status(403).send({ error: "Token database mismatch" });
+      }
+
+      const { currentPassword, newPassword } = req.body as {
+        currentPassword: string;
+        newPassword: string;
+      };
+
+      const sql = server.poolManager.getPool(database);
+      await ensureAuthSchema(sql);
+
+      // Mevcut şifreyi doğrula
+      const [user] = await sql`
+        SELECT password_hash FROM _postgrify_auth.users
+        WHERE id = ${userId} AND is_active = true
+      `;
+
+      if (!user) {
+        return reply.status(404).send({ error: "User not found or disabled" });
+      }
+
+      const valid = await verifyPassword(user.password_hash as string, currentPassword);
+      if (!valid) {
+        return reply.status(401).send({ error: "Current password is incorrect" });
+      }
+
+      const newHash = await hashPassword(newPassword);
+
+      await sql`
+        UPDATE _postgrify_auth.users
+        SET password_hash = ${newHash}
+        WHERE id = ${userId}
+      `;
+
+      // Diğer tüm aktif session'ları revoke et (kendi token'ı hariç — o zaten kısa ömürlü)
+      await sql`
+        UPDATE _postgrify_auth.sessions
+        SET revoked = true
+        WHERE user_id = ${userId} AND revoked = false
+      `;
+
+      return reply.send({ ok: true, message: "Password updated. All other sessions revoked." });
     })
   );
 }
