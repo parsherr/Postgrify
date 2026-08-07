@@ -60,7 +60,7 @@ export function TopBar() {
           to="/"
           className="flex items-center gap-1.5 font-semibold text-foreground"
         >
-          <img src="/logo.png" alt="Postgrify" className="h-5 w-5 object-contain" />
+          <img src="/logo.png" alt="Postgrify" className="h-7 w-7 object-contain" />
           <span className="hidden text-sm sm:block">Postgrify</span>
         </Link>
 

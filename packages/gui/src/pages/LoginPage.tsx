@@ -1,16 +1,84 @@
-/**
- * LoginPage — iki kolonlu tasarım.
- * Sol: form paneli  |  Sağ: GrainGradient + OS icon grid (new-login-design.md)
- */
-
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { GrainGradient } from "@paper-design/shaders-react";
 import { AuthContext } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
-// ── İkon bileşenleri (new-login-design.md'den birebir) ────────────────────────
+// ── Floating-label input (referans tasarımdan birebir) ────────────────────────
+// Odaklanmadan önce: sol taraf gri placeholder değer, sağ taraf beyaz label.
+// Odaklanınca: label kaybolur, input temizlenir ve kullanıcı yazmaya başlar.
+
+// Floating-label input — UX kuralları:
+// • Boş + odaklanmamış: label orta hizalı büyük placeholder gibi durur
+// • Odaklanınca veya değer varsa: label yukarı çıkar, küçülür
+// • Yazılan text her zaman beyaz
+
+function FieldBox({
+  label,
+  value,
+  type = "text",
+  onChange,
+  required,
+  autoComplete,
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  required?: boolean;
+  autoComplete?: string;
+}) {
+  const [isFocused, setIsFocused] = useState(false);
+  const isFloated = isFocused || value.length > 0;
+
+  return (
+    <label className="relative flex h-14 cursor-text items-center rounded-[10px] border border-white/15 bg-white/5 px-5 transition-colors focus-within:border-white/40">
+      {/* Floating label */}
+      <span
+        className={`pointer-events-none absolute left-5 select-none transition-all duration-150 ${
+          isFloated
+            ? "top-[7px] text-[11px] font-medium tracking-wide text-white/45"
+            : "top-1/2 -translate-y-1/2 text-base text-white/40"
+        }`}
+      >
+        {label}
+      </span>
+
+      {/* Input — paddingTop boşluğu label için */}
+      <input
+        type={type}
+        name={autoComplete ?? label.toLowerCase()}
+        value={value}
+        required={required}
+        autoComplete={autoComplete}
+        aria-label={label}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        onChange={onChange}
+        className={`w-full bg-transparent text-base text-white outline-none transition-all duration-150 ${
+          isFloated ? "pt-4" : "pt-0"
+        }`}
+      />
+    </label>
+  );
+}
+
+// ── Disabled sosyal giriş butonu ──────────────────────────────────────────────
+
+function SocialButton({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <button
+      type="button"
+      disabled
+      className="flex h-12 w-full cursor-not-allowed items-center justify-center gap-3 rounded-[10px] border border-white/20 bg-white/5 text-base font-medium text-white/50 transition-colors"
+    >
+      <span className="shrink-0">{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+// ── İkonlar ───────────────────────────────────────────────────────────────────
 
 function GoogleIcon() {
   return (
@@ -23,36 +91,21 @@ function GoogleIcon() {
   );
 }
 
-function AppleIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M17.05 12.54c-.03-3.02 2.47-4.47 2.58-4.54-1.41-2.06-3.6-2.34-4.38-2.37-1.86-.19-3.64 1.1-4.58 1.1-.95 0-2.42-1.07-3.98-1.04-2.05.03-3.94 1.19-4.99 3.02-2.13 3.69-.54 9.16 1.53 12.15 1.01 1.46 2.22 3.1 3.81 3.04 1.53-.06 2.11-.99 3.96-.99s2.37.99 3.99.96c1.65-.03 2.69-1.49 3.69-2.96 1.16-1.69 1.64-3.33 1.66-3.41-.04-.02-3.2-1.23-3.24-4.87ZM14.03 3.66c.84-1.02 1.41-2.43 1.25-3.84-1.21.05-2.68.81-3.55 1.83-.78.9-1.46 2.34-1.28 3.72 1.35.1 2.73-.69 3.58-1.71Z" />
-    </svg>
-  );
-}
 
-function WindowsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M3 4.7 10.7 3.6v7.7H3V4.7Zm8.8-1.25L21 2.1v9.2h-9.2V3.45ZM3 12.7h7.7v7.7L3 19.3v-6.6Zm8.8 0H21v9.2l-9.2-1.3v-7.9Z" />
-    </svg>
-  );
-}
 
 // ── Ana bileşen ───────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
-  const navigate  = useNavigate();
-  const auth      = React.useContext(AuthContext);
-  const login     = auth!.login;
+  const navigate = useNavigate();
+  const auth = React.useContext(AuthContext);
+  const login = auth!.login;
 
-  const [email,    setEmail]    = useState("admin@postgrify.local");
+  const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
-  const [showPw,   setShowPw]   = useState(false);
   const [error,    setError]    = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
-  // First-run setup
+  // İlk kurulum akışı — admin hesabı yoksa API 404/setup döner
   const [needsSetup, setNeedsSetup] = useState(false);
   const [setupEmail, setSetupEmail] = useState("");
   const [setupPw,    setSetupPw]    = useState("");
@@ -94,88 +147,53 @@ export default function LoginPage() {
   }
 
   return (
-    <section className="min-h-screen bg-white p-3 text-black antialiased dark:bg-[#050505] dark:text-white">
-      <div className="grid min-h-[calc(100vh-1.5rem)] gap-6 lg:grid-cols-[0.94fr_1.06fr]">
+    <section className="min-h-screen bg-black p-3 text-white antialiased [font-synthesis:none]">
+      {/* %50 / %50 iki sütun */}
+      <div className="grid min-h-[calc(100vh-1.5rem)] gap-6 lg:grid-cols-2">
 
         {/* ── Sol panel — form ──────────────────────────────────────────── */}
-        <div className="flex min-h-[760px] items-start rounded-md border border-black/20 bg-white px-6 py-12 sm:px-10 dark:border-white/10 dark:bg-[#0a0a0a] lg:min-h-0 lg:px-14 lg:py-28 xl:px-20">
-          <div className="mx-auto w-full max-w-[590px]">
+        <div className="flex min-h-[760px] items-start rounded-md border border-white/10 bg-[#101014] px-6 py-12 sm:px-10 lg:min-h-0 lg:px-14 lg:py-28 xl:px-20">
+          <div className="mx-auto w-full max-w-[520px]">
 
             {/* Başlık */}
             <div>
-              <h1 className="whitespace-nowrap text-3xl font-medium tracking-[-0.04em] sm:text-4xl lg:text-[42px] lg:leading-[1.05] xl:text-[50px]">
+              <h1 className="text-3xl font-medium tracking-[-0.04em] text-white sm:text-4xl lg:text-[42px] lg:leading-[1.05] xl:text-[50px]">
                 {needsSetup ? "İlk kurulum" : "Tekrar hoş geldiniz"}
               </h1>
-              <p className="mt-3 text-lg leading-snug text-black/60 dark:text-white/55 sm:text-xl lg:text-2xl xl:text-3xl">
+              <p className="mt-3 text-lg leading-snug text-white/55 sm:text-xl lg:text-2xl xl:text-3xl">
                 {needsSetup ? "Admin hesabı oluştur" : "PostgreSQL Gateway"}
               </p>
             </div>
 
             {!needsSetup ? (
               <>
-                {/* Sosyal butonlar (dekoratif) */}
-                <div className="mt-12 grid gap-5 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    disabled
-                    className="flex h-12 items-center justify-center gap-3 rounded-[10px] border border-black/15 bg-white text-sm font-medium text-black/70 dark:border-white/10 dark:bg-white/5 dark:text-white/70 opacity-40 cursor-not-allowed"
-                  >
-                    <GoogleIcon />
-                    Google ile giriş
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="flex h-12 items-center justify-center gap-3 rounded-[10px] border border-black/15 bg-white text-sm font-medium text-black/70 dark:border-white/10 dark:bg-white/5 dark:text-white/70 opacity-40 cursor-not-allowed"
-                  >
-                    <AppleIcon />
-                    Apple ile giriş
-                  </button>
+                {/* Sosyal giriş butonu (disabled — OAuth entegrasyonu yok) */}
+                <div className="mt-10">
+                  <SocialButton icon={<GoogleIcon />} label="Google ile giriş" />
                 </div>
 
-                <div className="my-10 text-center text-xl font-medium text-black/60 dark:text-white/50">
+                <div className="my-10 text-center text-xl font-medium text-white/50">
                   veya
                 </div>
 
-                {/* Login formu */}
+                {/* Giriş formu */}
                 <form onSubmit={handleLogin} className="space-y-5">
-                  <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-black/60 dark:text-white/55">
-                      E-posta
-                    </label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      autoComplete="email"
-                      required
-                      className="h-12 w-full rounded-[10px] border border-black/15 bg-transparent px-4 text-sm text-black outline-none transition-colors placeholder:text-black/30 focus:border-black/40 dark:border-white/10 dark:text-white dark:placeholder:text-white/30 dark:focus:border-white/30"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-black/60 dark:text-white/55">
-                      Şifre
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPw ? "text" : "password"}
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
-                        autoComplete="current-password"
-                        required
-                        className="h-12 w-full rounded-[10px] border border-black/15 bg-transparent px-4 pr-11 text-sm text-black outline-none transition-colors focus:border-black/40 dark:border-white/10 dark:text-white dark:focus:border-white/30"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPw(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-black/40 hover:text-black/70 dark:text-white/40 dark:hover:text-white/70 transition-colors"
-                        tabIndex={-1}
-                      >
-                        {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <FieldBox
+                    label="E-posta"
+                    value={email}
+                    type="email"
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                  <FieldBox
+                    label="Şifre"
+                    value={password}
+                    type="password"
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                  />
 
                   {error && (
                     <div className="rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-500">
@@ -186,47 +204,42 @@ export default function LoginPage() {
                   <button
                     type="submit"
                     disabled={isPending}
-                    className="mt-9 flex h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-b-[3px] border-black bg-black text-sm font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-50 dark:border-white dark:bg-white dark:text-black"
+                    className="mt-9 flex h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-white/40 bg-white text-xl font-medium text-black transition-colors hover:bg-white/85 disabled:opacity-50"
                   >
-                    {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {isPending ? (
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                    ) : null}
                     Giriş Yap
                   </button>
                 </form>
               </>
             ) : (
-              /* Setup formu */
+              /* ── Setup formu ─────────────────────────────────────────── */
               <form onSubmit={handleSetup} className="mt-12 space-y-5">
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-black/60 dark:text-white/55">E-posta</label>
-                  <input
-                    type="email"
-                    value={setupEmail}
-                    onChange={e => setSetupEmail(e.target.value)}
-                    required
-                    placeholder="admin@ornek.com"
-                    className="h-12 w-full rounded-[10px] border border-black/15 bg-transparent px-4 text-sm outline-none transition-colors focus:border-black/40 dark:border-white/10 dark:text-white dark:focus:border-white/30"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-black/60 dark:text-white/55">Şifre</label>
-                  <input
-                    type="password"
-                    value={setupPw}
-                    onChange={e => setSetupPw(e.target.value)}
-                    required
-                    className="h-12 w-full rounded-[10px] border border-black/15 bg-transparent px-4 text-sm outline-none transition-colors focus:border-black/40 dark:border-white/10 dark:text-white dark:focus:border-white/30"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-black/60 dark:text-white/55">Şifre tekrar</label>
-                  <input
-                    type="password"
-                    value={setupPw2}
-                    onChange={e => setSetupPw2(e.target.value)}
-                    required
-                    className="h-12 w-full rounded-[10px] border border-black/15 bg-transparent px-4 text-sm outline-none transition-colors focus:border-black/40 dark:border-white/10 dark:text-white dark:focus:border-white/30"
-                  />
-                </div>
+                <FieldBox
+                  label="E-posta"
+                  value={setupEmail}
+                  type="email"
+                  onChange={e => setSetupEmail(e.target.value)}
+                  required
+                />
+                <FieldBox
+                  label="Şifre"
+                  value={setupPw}
+                  type="password"
+                  onChange={e => setSetupPw(e.target.value)}
+                  required
+                />
+                <FieldBox
+                  label="Şifre tekrar"
+                  value={setupPw2}
+                  type="password"
+                  onChange={e => setSetupPw2(e.target.value)}
+                  required
+                />
                 {error && (
                   <div className="rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-500">
                     {error}
@@ -235,74 +248,48 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isPending}
-                  className="mt-9 flex h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-b-[3px] border-black bg-black text-sm font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-50 dark:border-white dark:bg-white dark:text-black"
+                  className="mt-9 flex h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-white/40 bg-white text-xl font-medium text-black transition-colors hover:bg-white/85 disabled:opacity-50"
                 >
-                  {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Hesabı Oluştur
                 </button>
               </form>
             )}
 
-            <p className="mt-10 text-center text-[11px] text-black/25 dark:text-white/25 tracking-wide">
+            <p className="mt-10 text-center text-[11px] tracking-wide text-white/25">
               Argon2id · JWT · Redis session
             </p>
           </div>
         </div>
 
-        {/* ── Sağ panel — GrainGradient + icon grid (birebir tasarımdan) ── */}
-        <div className="relative hidden overflow-hidden rounded-md lg:block">
-          {/* Grain gradient arka plan */}
+        {/* ── Sağ panel — GrainGradient (referans tasarım) ──────────────── */}
+        <div className="relative hidden overflow-hidden rounded-md bg-black text-white lg:block">
+          {/* Turuncu grain gradient — köşelerden akan efekt */}
           <GrainGradient
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-            colors={["#1a0533", "#0d1a40", "#0a2a1a", "#1a1a2e"]}
-            speed={0.4}
-            noise={0.55}
+            speed={0.3}
+            scale={1}
+            rotation={0}
+            offsetX={0}
+            offsetY={0}
+            softness={0.5}
+            intensity={0.5}
+            noise={0.25}
+            shape="corners"
+            frame={2854.5}
+            colors={["#FFFFFF", "#FC7819", "#FC7819", "#FFFFFF"]}
+            colorBack="#00000000"
+            className="absolute inset-0 bg-black"
           />
 
-          {/* OS icon grid — tasarımdan birebir */}
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 p-8">
-            {/* 5×2 grid — her cell bir OS ikonu */}
-            <div className="grid grid-cols-5 gap-3 opacity-20">
-              {[...Array(10)].map((_, i) => (
-                <div
-                  key={i}
-                  className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/20 bg-white/5"
-                >
-                  {i % 3 === 0 ? (
-                    <WindowsIcon className="h-6 w-6 text-white" />
-                  ) : i % 3 === 1 ? (
-                    <AppleIcon />
-                  ) : (
-                    <GoogleIcon />
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-5 gap-3 opacity-10">
-              {[...Array(10)].map((_, i) => (
-                <div
-                  key={i}
-                  className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/10 bg-white/3"
-                >
-                  {i % 3 === 0 ? (
-                    <GoogleIcon />
-                  ) : i % 3 === 1 ? (
-                    <WindowsIcon className="h-6 w-6 text-white" />
-                  ) : (
-                    <AppleIcon />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* İçerik — üst başlık + alt bant */}
+          <div className="relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-12">
+            {/* Üst: büyük slogan */}
+            <h2 className="max-w-[520px] pt-0 text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:pt-16 lg:text-[64px] lg:leading-[0.98] xl:text-[70px]">
+              Query fast,
+              <br />
+              Scale faster
+            </h2>
 
-          {/* Alt: büyük Postgrify yazısı */}
-          <div className="absolute bottom-0 left-0 right-0 z-10 p-10">
-            <p className="text-[64px] font-bold leading-none tracking-[-0.04em] text-white/10 select-none">
-              Postgrify
-            </p>
-            <p className="mt-2 text-sm text-white/30">PostgreSQL Gateway · Multi-database management</p>
-          </div>
+                      </div>
         </div>
 
       </div>
