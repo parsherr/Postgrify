@@ -17,16 +17,28 @@ export class SettingsService {
   }
 
   private async provision(): Promise<void> {
-    await this.sql`
-      CREATE TABLE IF NOT EXISTS _postgrify_settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      )
-    `;
+    try {
+      await this.sql`
+        CREATE TABLE IF NOT EXISTS _postgrify_settings (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `;
+    } catch (err) {
+      // Provision hatası — sonraki çağrıda tekrar denensin diye ready'yi sıfırla
+      this.ready = Promise.reject(err);
+      throw err;
+    }
   }
 
   private async ensureReady(): Promise<void> {
-    await this.ready;
+    // Eğer önceki provision başarısız olduysa yeniden dene
+    try {
+      await this.ready;
+    } catch {
+      this.ready = this.provision();
+      await this.ready;
+    }
   }
 
   /** Belirli bir DB için auto_start değerini döner. */

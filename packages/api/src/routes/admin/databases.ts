@@ -36,7 +36,12 @@ export async function databasesRoute(server: FastifyInstance) {
       `;
 
       const activeNames = server.poolManager.activePoolNames;
-      const autoStartDbs = await server.settings.getAutoStartDatabases();
+      let autoStartDbs: string[] = [];
+      try {
+        autoStartDbs = await server.settings.getAutoStartDatabases();
+      } catch {
+        // settings tablosu henüz oluşturulmamış ya da erişilemiyor — devam et
+      }
 
       // Her DB için tablo sayısı — yalnızca zaten açık olan pool'ları kullan.
       // getPool() lazy init yapar, kapalı bir DB için çağırırsak pool yeniden
