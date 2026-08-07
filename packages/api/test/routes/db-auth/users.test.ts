@@ -231,7 +231,8 @@ describe("PATCH /:database/auth/users/:id", () => {
 
 describe("DELETE /:database/auth/users/:id", () => {
   it("Admin token ile silme → 204", async () => {
-    sqlFnRef.mockResolvedValue([]);
+    // DELETE ... RETURNING id → silinenin id'sini döndürür
+    sqlFnRef.mockResolvedValueOnce([{ id: "uuid-1" }]);
 
     const res = await server.inject({
       method: "DELETE",
