@@ -28,26 +28,31 @@ Postgrify manages multiple PostgreSQL databases through a single HTTP/REST API. 
 
 ## Installation
 
+> **Windows users:** Native installation is not supported. Use WSL2 instead — run `wsl --install` in PowerShell (requires restart), then open the WSL terminal and run the command below.
+
 ### Requirements
 
-- Linux or macOS
-- `curl` and `git` (Docker is installed automatically if missing)
-- A fresh server or local machine
+- **Linux** (Ubuntu, Debian, Fedora, CentOS, Arch) or **macOS**
+- `curl` — everything else (git, Docker) is installed automatically if missing
+- `sudo` access for Docker installation
 
-### Single command
+### Single command (Linux / macOS / WSL2)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/parsherr/postgrify/main/install.sh | bash
 ```
 
 The script will:
-1. Install Docker if not present
-2. Create `~/.postgrify/` and set up required files
-3. Auto-generate `JWT_SECRET` and `ADMIN_SECRET`
-4. Ask only for a PostgreSQL password (the only interactive step)
-5. Start all services and print the URLs + Admin Secret
 
-> **Note:** Save the `ADMIN_SECRET` printed at the end of installation — it will not be shown again. It is also stored in `~/.postgrify/.env`.
+1. Install Docker if not present
+2. Clone the repo into `~/.postgrify/`
+3. Auto-generate all secrets (`JWT_SECRET`, `ADMIN_SECRET`, `PG_PASSWORD`) — no prompts, no interaction
+4. Start all services (PostgreSQL, Redis, API, GUI)
+5. Print the URL where you finish setup
+
+**After the script finishes**, open http://localhost:5173/setup in your browser and create your admin account. That's the only step that requires user input.
+
+> All generated secrets are saved in `~/.postgrify/packages/.env`. Keep this file safe.
 
 ---
 
@@ -68,23 +73,31 @@ Once installation is complete:
 ### Get an admin token
 
 ```bash
-curl -X POST http://localhost:3000/auth/token/admin   -H "Content-Type: application/json"   -d '{"secret": "YOUR_ADMIN_SECRET"}'
+curl -X POST http://localhost:3000/auth/token/admin \
+  -H "Content-Type: application/json" \
+  -d '{"secret": "YOUR_ADMIN_SECRET"}'
 ```
 
 ### Add a database
 
 ```bash
-curl -X POST http://localhost:3000/admin/databases   -H "Authorization: Bearer ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"name": "myproject"}'
+curl -X POST http://localhost:3000/admin/databases \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "myproject"}'
 ```
 
 ### Get a DB token and use it
 
 ```bash
 # Get a scoped token
-curl -X POST http://localhost:3000/auth/token   -H "Content-Type: application/json"   -d '{"database": "myproject", "secret": "YOUR_ADMIN_SECRET", "scopes": ["read","write"]}'
+curl -X POST http://localhost:3000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"database": "myproject", "secret": "YOUR_ADMIN_SECRET", "scopes": ["read","write"]}'
 
 # List tables
-curl http://localhost:3000/db/myproject/tables   -H "Authorization: Bearer DB_TOKEN"
+curl http://localhost:3000/db/myproject/tables \
+  -H "Authorization: Bearer DB_TOKEN"
 ```
 
 For all endpoints: **http://localhost:3000/api-docs**
@@ -95,27 +108,31 @@ For all endpoints: **http://localhost:3000/api-docs**
 
 ```bash
 # Stop
-cd ~/.postgrify && docker compose down
+cd ~/.postgrify/packages && docker compose down
 
 # Start
-cd ~/.postgrify && docker compose up -d
+cd ~/.postgrify/packages && docker compose up -d
 
 # Follow logs
-cd ~/.postgrify && docker compose logs -f
+cd ~/.postgrify/packages && docker compose logs -f
 
-# Rebuild (after updating source code)
-cd ~/.postgrify && docker compose up -d --build
+# Update to latest version
+cd ~/.postgrify && git pull && cd packages && docker compose up -d --build
 ```
 
 ---
 
 ## Configuration
 
-All settings are in `~/.postgrify/.env`. After making changes, run `docker compose up -d`.
+All settings are in `~/.postgrify/packages/.env`. After making changes, run:
+
+```bash
+cd ~/.postgrify/packages && docker compose up -d
+```
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PG_PASSWORD` | PostgreSQL password | set during installation |
+| `PG_PASSWORD` | PostgreSQL password | auto-generated |
 | `JWT_SECRET` | Token signing key (>=32 chars) | auto-generated |
 | `ADMIN_SECRET` | Admin token password | auto-generated |
 | `JWT_EXPIRY` | Token validity duration | `24h` |
