@@ -1,15 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Postgrify — tek komutlu kurulum scripti
+# Kullanım: curl -fsSL https://raw.githubusercontent.com/parsherr/postgrify/main/install.sh | bash
+#
+# Desteklenen: Linux (Ubuntu/Debian/Fedora/CentOS/Arch), macOS
+# Gereksinim: curl, git (yoksa yüklenir), Docker (yoksa yüklenir)
+#
+# Bu script hiç interaktif girdi istemez — tüm secret'lar otomatik üretilir.
+# Admin hesabı web arayüzünden (http://localhost:5173/setup) oluşturulur.
+
 set -euo pipefail
 
-# ─────────────────────────────────────────────────────────────
-#  Postgrify Installer
-#  Kurulan yer: ~/.postgrify/
-#  Gereksinimler: curl, Docker (yoksa otomatik kurulur)
-# ─────────────────────────────────────────────────────────────
-
-INSTALL_DIR="$HOME/.postgrify"
-REPO_RAW="https://raw.githubusercontent.com/parsherr/postgrify/main"
-
+# ─── Renkler ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -17,223 +18,326 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-info()    { echo -e "${BLUE}[postgrify]${NC} $1"; }
-success() { echo -e "${GREEN}[postgrify]${NC} $1"; }
-warn()    { echo -e "${YELLOW}[postgrify]${NC} $1"; }
-error()   { echo -e "${RED}[postgrify]${NC} $1" >&2; exit 1; }
+# ─── Yardımcı fonksiyonlar ────────────────────────────────────────────────────
+info()    { echo -e "${BLUE}[postgrify]${NC} $*"; }
+success() { echo -e "${GREEN}[postgrify]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[postgrify]${NC} $*"; }
+error()   { echo -e "${RED}[postgrify]${NC} HATA: $*" >&2; exit 1; }
 
-echo ""
-echo -e "${BOLD}  Postgrify Installer${NC}"
-echo "  ────────────────────────────────────────"
-echo ""
+# OS tespiti
+detect_os() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_FAMILY="${ID_LIKE:-$OS_ID}"
+  elif [ "$(uname)" = "Darwin" ]; then
+    OS_ID="darwin"
+    OS_FAMILY="darwin"
+  else
+    OS_ID="unknown"
+    OS_FAMILY="unknown"
+  fi
+}
 
-# ── 1. Docker kontrolü ─────────────────────────────────────
+# Komut var mı?
+has() { command -v "$1" >/dev/null 2>&1; }
 
-if ! command -v docker &>/dev/null; then
-    warn "Docker bulunamadı. Kuruluyor..."
-    curl -fsSL https://get.docker.com | sh
-    # Linux'ta docker grubuna ekle (sudo gerekmeden çalışsın)
-    if getent group docker &>/dev/null; then
-        sudo usermod -aG docker "$USER" 2>/dev/null || true
+# ─── Docker kurulumu ──────────────────────────────────────────────────────────
+install_docker_linux() {
+  info "Docker kuruluyor..."
+
+  case "$OS_FAMILY" in
+    *debian*|*ubuntu*)
+      sudo apt-get update -qq
+      sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+      sudo install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null || \
+        curl -fsSL https://download.docker.com/linux/debian/gpg | \
+        sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      sudo chmod a+r /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+      sudo apt-get update -qq
+      sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      ;;
+    *fedora*|*rhel*|*centos*)
+      sudo dnf -y install dnf-plugins-core 2>/dev/null || sudo yum -y install yum-utils
+      sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
+        sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+      sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null || \
+        sudo yum -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      ;;
+    *arch*)
+      sudo pacman -Sy --noconfirm docker docker-compose
+      ;;
+    *)
+      # Evrensel Docker install script
+      warn "Dağıtım tanınamadı, Docker'ın resmi install script'i kullanılıyor..."
+      curl -fsSL https://get.docker.com | sh
+      ;;
+  esac
+
+  # Docker daemon'ı başlat
+  sudo systemctl enable docker 2>/dev/null || true
+  sudo systemctl start docker 2>/dev/null || true
+
+  # Mevcut kullanıcıyı docker grubuna ekle (sudo gerektirmesin)
+  if id -nG "$USER" 2>/dev/null | grep -qw docker; then
+    : # zaten grupta
+  else
+    sudo usermod -aG docker "$USER" 2>/dev/null || true
+    warn "Kullanıcı docker grubuna eklendi. Yeniden login olmadan docker komutu"
+    warn "için bu session'da 'sudo docker' gerekebilir. Script bunu otomatik halleder."
+  fi
+}
+
+install_docker_mac() {
+  error "macOS'ta Docker Desktop manuel kurulumu gereklidir.\nhttps://docs.docker.com/desktop/install/mac-install/\nKurduktan sonra bu scripti tekrar çalıştırın."
+}
+
+ensure_docker() {
+  if has docker && docker info >/dev/null 2>&1; then
+    local ver
+    ver=$(docker --version | grep -oP '\d+\.\d+' | head -1)
+    success "Docker bulundu: $ver"
+    return 0
+  fi
+
+  if has docker && ! docker info >/dev/null 2>&1; then
+    # Docker kurulu ama daemon çalışmıyor
+    warn "Docker daemon çalışmıyor, başlatılıyor..."
+    sudo systemctl start docker 2>/dev/null || \
+      sudo service docker start 2>/dev/null || \
+      error "Docker başlatılamadı. 'sudo systemctl start docker' komutunu manuel çalıştırın."
+    sleep 3
+    if docker info >/dev/null 2>&1; then
+      success "Docker başlatıldı."
+      return 0
     fi
-    success "Docker kuruldu."
-else
-    info "Docker bulundu: $(docker --version | cut -d' ' -f3 | tr -d ',')"
-fi
-
-if ! docker compose version &>/dev/null 2>&1; then
-    error "Docker Compose bulunamadı. Docker'ı güncelleyin: https://docs.docker.com/engine/install/"
-fi
-
-# ── 2. Kurulum dizini ─────────────────────────────────────
-
-info "Kurulum dizini oluşturuluyor: $INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR"
-
-# ── 3. PostgreSQL şifresi ─────────────────────────────────
-
-echo ""
-echo -e "${BOLD}  PostgreSQL Ayarı${NC}"
-echo "  ────────────────────────────────────────"
-echo "  Postgrify, kendi PostgreSQL container'ını kurar."
-echo "  Bu şifre sadece bu kurulum için kullanılır."
-echo ""
-while true; do
-    read -rsp "  PostgreSQL şifresi belirleyin: " PG_PASSWORD
-    echo ""
-    read -rsp "  Şifreyi tekrar girin: " PG_PASSWORD_CONFIRM
-    echo ""
-    if [[ "$PG_PASSWORD" == "$PG_PASSWORD_CONFIRM" ]]; then
-        break
+    # Belki docker grubundan dolayı permission sorunu, sudo ile dene
+    DOCKER_CMD="sudo docker"
+    COMPOSE_CMD="sudo docker compose"
+    if sudo docker info >/dev/null 2>&1; then
+      success "Docker sudo ile erişilebilir."
+      return 0
     fi
-    warn "Şifreler eşleşmedi, tekrar deneyin."
-done
+    error "Docker daemon'a bağlanılamıyor."
+  fi
 
-# ── 4. Secret'ları otomatik üret ─────────────────────────
+  # Docker hiç yok
+  info "Docker bulunamadı, kuruluyor..."
+  detect_os
+  case "$OS_ID" in
+    darwin) install_docker_mac ;;
+    *)      install_docker_linux ;;
+  esac
 
-JWT_SECRET=$(openssl rand -hex 32)
-ADMIN_SECRET=$(openssl rand -base64 24 | tr -d '=+/')
+  # Kurulum sonrası kontrol — grup değişikliği için newgrp gerekebilir
+  if ! docker info >/dev/null 2>&1; then
+    if sudo docker info >/dev/null 2>&1; then
+      DOCKER_CMD="sudo docker"
+      COMPOSE_CMD="sudo docker compose"
+      success "Docker kuruldu (sudo ile çalışıyor)."
+    else
+      error "Docker kuruldu ama başlatılamadı. Sistemi yeniden başlatıp tekrar deneyin."
+    fi
+  else
+    success "Docker kuruldu ve hazır."
+  fi
+}
 
-# ── 5. .env dosyasını oluştur ────────────────────────────
+ensure_git() {
+  if has git; then
+    return 0
+  fi
+  info "git bulunamadı, kuruluyor..."
+  detect_os
+  case "$OS_FAMILY" in
+    *debian*|*ubuntu*) sudo apt-get install -y -qq git ;;
+    *fedora*|*rhel*|*centos*) sudo dnf -y install git 2>/dev/null || sudo yum -y install git ;;
+    *arch*) sudo pacman -Sy --noconfirm git ;;
+    darwin) xcode-select --install 2>/dev/null || true ;;
+    *) error "git kurulamadı. Lütfen manuel kurun: https://git-scm.com" ;;
+  esac
+  has git || error "git kurulumu başarısız."
+  success "git kuruldu."
+}
 
-if [[ -f ".env" ]]; then
-    warn ".env zaten mevcut, üzerine yazılmıyor. Sıfırlamak için .env dosyasını silin."
-else
-    cat > .env << EOF
-# Postgrify — otomatik oluşturuldu $(date +%Y-%m-%d)
-# Bu dosyayı silmeden önce yedekleyin.
+ensure_openssl() {
+  if has openssl; then
+    return 0
+  fi
+  # openssl yoksa /dev/urandom'dan üret
+  OPENSSL_MISSING=1
+}
 
+# Random hex string üretimi — openssl varsa güvenli, yoksa /dev/urandom
+gen_secret() {
+  local len="${1:-32}"
+  if has openssl; then
+    openssl rand -hex "$len"
+  else
+    # POSIX uyumlu /dev/urandom okuma
+    LC_ALL=C tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c $((len * 2))
+  fi
+}
+
+# ─── Banner ───────────────────────────────────────────────────────────────────
+print_banner() {
+  echo ""
+  echo -e "${BOLD}${BLUE}"
+  echo "  ██████╗  ██████╗ ███████╗████████╗ ██████╗ ██████╗ ██╗███████╗██╗   ██╗"
+  echo "  ██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝██╔════╝ ██╔══██╗██║██╔════╝╚██╗ ██╔╝"
+  echo "  ██████╔╝██║   ██║███████╗   ██║   ██║  ███╗██████╔╝██║█████╗   ╚████╔╝ "
+  echo "  ██╔═══╝ ██║   ██║╚════██║   ██║   ██║   ██║██╔══██╗██║██╔══╝    ╚██╔╝  "
+  echo "  ██║     ╚██████╔╝███████║   ██║   ╚██████╔╝██║  ██║██║██║        ██║   "
+  echo "  ╚═╝      ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝        ╚═╝  "
+  echo -e "${NC}"
+  echo -e "  ${BOLD}Multi-database PostgreSQL Gateway${NC}"
+  echo ""
+}
+
+# ─── Ana kurulum ──────────────────────────────────────────────────────────────
+main() {
+  print_banner
+
+  # docker/compose komutları — permission durumuna göre ayarlanır
+  DOCKER_CMD="docker"
+  COMPOSE_CMD="docker compose"
+  OPENSSL_MISSING=0
+
+  detect_os
+  ensure_git
+  ensure_openssl
+  ensure_docker
+
+  # Docker Compose v2 kontrolü (plugin olarak)
+  if ! $DOCKER_CMD compose version >/dev/null 2>&1; then
+    # v1 standalone docker-compose dene
+    if has docker-compose; then
+      COMPOSE_CMD="docker-compose"
+      warn "Docker Compose v2 bulunamadı, v1 kullanılıyor."
+    else
+      error "Docker Compose bulunamadı. 'docker compose version' çalışmıyor.\nDocker'ı güncelleyin: https://docs.docker.com/compose/install/"
+    fi
+  fi
+
+  # ─── Kurulum dizini ─────────────────────────────────────────────────────────
+  INSTALL_DIR="${POSTGRIFY_DIR:-$HOME/.postgrify}"
+  info "Kurulum dizini: $INSTALL_DIR"
+
+  if [ -d "$INSTALL_DIR" ]; then
+    if [ -f "$INSTALL_DIR/packages/docker-compose.yml" ]; then
+      warn "Postgrify zaten kurulu: $INSTALL_DIR"
+      warn "Güncellemek için: cd $INSTALL_DIR && git pull && cd packages && $COMPOSE_CMD up -d --build"
+      echo ""
+      warn "Sıfırdan kurmak için: rm -rf $INSTALL_DIR ve tekrar çalıştırın."
+      exit 0
+    fi
+    # Dizin var ama eksik — temizle
+    rm -rf "$INSTALL_DIR"
+  fi
+
+  # ─── Repo klonla ────────────────────────────────────────────────────────────
+  info "Postgrify indiriliyor..."
+  git clone --depth 1 https://github.com/parsherr/postgrify.git "$INSTALL_DIR" 2>&1 | \
+    grep -v "^remote:" | grep -v "^Cloning" || true
+  success "İndirildi: $INSTALL_DIR"
+
+  # ─── .env oluştur ───────────────────────────────────────────────────────────
+  info "Ortam değişkenleri oluşturuluyor..."
+
+  local PG_PASSWORD JWT_SECRET ADMIN_SECRET
+  PG_PASSWORD=$(gen_secret 24)
+  JWT_SECRET=$(gen_secret 32)
+  ADMIN_SECRET=$(gen_secret 16)
+
+  cat > "$INSTALL_DIR/packages/.env" <<EOF
+# Postgrify — otomatik oluşturuldu: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Bu dosyayı silmeyin — tüm servisler buraya bağlı.
+
+# ── PostgreSQL (container) ───────────────────────────────────────────────────
 PG_HOST=postgres
 PG_PORT=5432
-PG_USER=postgres
+PG_USER=postgrify
 PG_PASSWORD=${PG_PASSWORD}
 PG_SSL=false
-PG_MAX_POOL_SIZE=10
-PG_POOL_IDLE_TIMEOUT=30000
-PG_POOL_MAX_LIFETIME=3600000
 
+# ── Güvenlik ─────────────────────────────────────────────────────────────────
 JWT_SECRET=${JWT_SECRET}
-JWT_EXPIRY=24h
-
 ADMIN_SECRET=${ADMIN_SECRET}
 
-RATE_LIMIT_GLOBAL=1000
-RATE_LIMIT_DB=500
-RATE_LIMIT_ADMIN=200
+# ── Redis ────────────────────────────────────────────────────────────────────
+REDIS_URL=redis://redis:6379
 
-PORT=3000
+# ── Uygulama ─────────────────────────────────────────────────────────────────
 NODE_ENV=production
 LOG_LEVEL=info
+APP_URL=http://localhost:5173
 CORS_ORIGINS=http://localhost:5173
 
-ALLOW_RAW_SQL_ADMIN=true
-QUERY_LOG_ENABLED=false
-SLOW_QUERY_THRESHOLD_MS=500
+# ── Özellikler ────────────────────────────────────────────────────────────────
+ALLOW_RAW_SQL_ADMIN=false
 EOF
-    success ".env oluşturuldu."
-fi
 
-# ── 6. docker-compose.yml oluştur ───────────────────────
+  success ".env oluşturuldu."
 
-cat > docker-compose.yml << 'COMPOSE'
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
+  # ─── Servisleri başlat ──────────────────────────────────────────────────────
+  info "Docker imajları derleniyor ve servisler başlatılıyor..."
+  info "(Bu işlem ilk seferinde 3-10 dakika sürebilir)"
+  echo ""
 
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
+  cd "$INSTALL_DIR/packages"
 
-  api:
-    build:
-      context: .
-      dockerfile: packages/api/Dockerfile.monorepo
-          ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
-    restart: unless-stopped
+  if ! $COMPOSE_CMD up -d --build 2>&1; then
+    echo ""
+    error "Docker Compose başarısız. Logları görmek için:\n  cd $INSTALL_DIR/packages && ${COMPOSE_CMD} logs"
+  fi
 
-  gui:
-    build:
-      context: .
-      dockerfile: packages/gui/Dockerfile.monorepo
-      args:
-        VITE_API_URL: /api
-    ports:
-      - "5173:80"
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
+  # ─── Servis hazır olmasını bekle ────────────────────────────────────────────
+  info "Servisler hazır olana kadar bekleniyor..."
+  local max_wait=120
+  local elapsed=0
+  local ready=0
 
-volumes:
-  postgres_data:
-  redis_data:
-COMPOSE
-
-success "docker-compose.yml oluşturuldu."
-
-# ── 7. Kaynak kodu çek ──────────────────────────────────
-
-if [[ ! -d "packages" ]]; then
-    info "Kaynak kod indiriliyor..."
-    if ! command -v git &>/dev/null; then
-        error "git bulunamadı. Kurmak için: sudo apt install git (Ubuntu) veya brew install git (macOS)"
-    fi
-    git clone --depth=1 https://github.com/parsherr/postgrify.git _src
-    # Tüm packages/ klasörünü kopyala (Dockerfile'lar monorepo context ile çalışıyor)
-    # Tüm repoyu kopyala — Dockerfile'lar monorepo root context ile çalışıyor
-    cp -r _src/. .
-    rm -rf _src
-    success "Kaynak kod indirildi."
-fi
-
-# ── 8. Build & başlat ───────────────────────────────────
-
-echo ""
-info "Container'lar build ediliyor ve başlatılıyor (ilk seferde birkaç dakika sürebilir)..."
-docker compose up -d --build
-
-# ── 9. Sağlık kontrolü ──────────────────────────────────
-
-echo ""
-info "Servislerin hazır olması bekleniyor..."
-for i in $(seq 1 30); do
+  while [ $elapsed -lt $max_wait ]; do
     if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
-        break
+      ready=1
+      break
     fi
-    sleep 2
-done
+    printf "."
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  echo ""
 
-# ── 10. Özet ─────────────────────────────────────────────
+  if [ $ready -eq 0 ]; then
+    warn "API $max_wait saniye içinde hazır olmadı."
+    warn "Logları kontrol edin: cd $INSTALL_DIR/packages && ${COMPOSE_CMD} logs api"
+  fi
 
-echo ""
-echo -e "${GREEN}${BOLD}  ✓ Postgrify kuruldu!${NC}"
-echo "  ────────────────────────────────────────"
-echo ""
-echo -e "  ${BOLD}GUI${NC}          →  http://localhost:5173"
-echo -e "  ${BOLD}API${NC}          →  http://localhost:3000"
-echo -e "  ${BOLD}API Docs${NC}     →  http://localhost:3000/api-docs"
-echo ""
-echo -e "  ${BOLD}Admin Secret${NC} →  ${ADMIN_SECRET}"
-echo ""
-echo -e "  ${YELLOW}Bu bilgileri kaydedin! ADMIN_SECRET daha sonra gösterilmez.${NC}"
-echo -e "  ${YELLOW}Tüm ayarlar: ${INSTALL_DIR}/.env${NC}"
-echo ""
-echo "  Durdurmak için:   cd ~/.postgrify && docker compose down"
-echo "  Başlatmak için:   cd ~/.postgrify && docker compose up -d"
-echo "  Loglar için:      cd ~/.postgrify && docker compose logs -f"
-echo ""
+  # ─── Tamamlandı ─────────────────────────────────────────────────────────────
+  echo ""
+  echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${BOLD}${GREEN}  Postgrify kurulumu tamamlandı!${NC}"
+  echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+  echo -e "  ${BOLD}Web arayüzü:${NC}  http://localhost:5173"
+  echo -e "  ${BOLD}API:${NC}          http://localhost:3000"
+  echo ""
+  echo -e "  ${BOLD}İlk adım:${NC} Tarayıcıda http://localhost:5173/setup adresini"
+  echo -e "           açın ve admin hesabınızı oluşturun."
+  echo ""
+  echo -e "  ${BOLD}Komutlar:${NC}"
+  echo -e "    Durdur:   cd $INSTALL_DIR/packages && ${COMPOSE_CMD} down"
+  echo -e "    Başlat:   cd $INSTALL_DIR/packages && ${COMPOSE_CMD} up -d"
+  echo -e "    Güncelle: cd $INSTALL_DIR && git pull && cd packages && ${COMPOSE_CMD} up -d --build"
+  echo -e "    Loglar:   cd $INSTALL_DIR/packages && ${COMPOSE_CMD} logs -f"
+  echo ""
+  echo -e "  ${BOLD}Kurulum dizini:${NC} $INSTALL_DIR"
+  echo ""
+}
+
+main "$@"

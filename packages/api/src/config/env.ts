@@ -9,7 +9,7 @@ const envSchema = z.object({
   // PostgreSQL
   PG_HOST: z.string().default("localhost"),
   PG_PORT: z.coerce.number().default(5432),
-  PG_USER: z.string().default("postgres"),
+  PG_USER: z.string().default("postgrify"),
   PG_PASSWORD: z.string().default(""),
   PG_SSL: z
     .string()

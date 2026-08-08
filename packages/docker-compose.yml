@@ -1,8 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgrify
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: postgrify
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgrify -d postgrify"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -20,22 +33,17 @@ services:
       - "3000:3000"
     env_file:
       - .env
-    environment:
-      # argon2 hash icindeki $ Docker Compose'da $$ ile escape edilir.
-      # Hash'i degistirmek icin: cd packages/api && npx tsx scripts/hash-password.ts "sifre"
-      # Ciktidaki her $ isaretini $$ yaparak buraya yapistir.
-      ADMIN_PASSWORD_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$x6GWQgBkGnPjBPlNYxfn+g$$cyHdYctixJW/olyFQdvFAI9UEXwm1AAu9jghzhyLUds"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
-      start_period: 15s
-      retries: 3
+      start_period: 30s
+      retries: 5
     restart: unless-stopped
 
   gui:
@@ -52,4 +60,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres_data:
   redis_data:
