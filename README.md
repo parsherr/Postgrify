@@ -2,218 +2,129 @@
   <img src="images/mid-size-logo.png.png" alt="Postgrify Logo" style="width:100%;max-width:100%;" />
 </p>
 
-# Postgrify
+<p align="center">
+  A multi-database PostgreSQL REST API gateway that installs with a single command.
+</p>
 
-Tek bir PostgreSQL sunucusu üzerinde birden fazla veritabanını tek bir HTTP/REST API üzerinden yöneten servis. Her proje kendi izole veritabanını kullanır; doğrudan PostgreSQL bağlantısı gerekmez.
-
-## Özellikler
-
-- **Çok veritabanı desteği** — tek API, istek başına DB seçimi (URL / header / query param)
-- **JWT tabanlı auth** — DB bazlı token (scope ile kısıtlanabilir) + admin token
-- **Rate limiting** — global IP, per-DB token, admin katmanları
-- **Cache** — Redis (opsiyonel) veya otomatik in-memory LRU fallback
-- **Lazy connection pool** — DB başına, kullanılmayanda otomatik kapanır
-- **Web GUI** — tablo editörü, şema yönetimi, SQL editörü, API docs
-- **OpenAPI 3.1** — Scalar UI ile `/api-docs`
-
-## Hızlı Başlangıç
-
-```bash
-# 1. Repoyu klonla
-git clone https://github.com/yourname/postgrify
-cd postgrify
-
-# 2. Ortam değişkenlerini ayarla
-cp packages/.env.example packages/.env
-# packages/.env içinde şu üç değeri mutlaka doldur:
-#   PG_PASSWORD   — PostgreSQL şifresi
-#   JWT_SECRET    — en az 32 karakter  →  openssl rand -hex 32
-#   ADMIN_SECRET  — en az 16 karakter  →  openssl rand -base64 18
-# Ayrıca POSTGRES_PASSWORD değerini PG_PASSWORD ile aynı yap.
-
-# 3. Başlat
-cd packages
-docker compose up -d --build
-```
-
-Servisler ayağa kalktıktan sonra:
-
-| Servis   | URL                              |
-|----------|----------------------------------|
-| GUI      | http://localhost:5173            |
-| API      | http://localhost:3000            |
-| API Docs | http://localhost:3000/api-docs   |
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#services">Services</a> •
+  <a href="#quick-api-usage">API Usage</a> •
+  <a href="#update--management">Management</a>
+</p>
 
 ---
 
-## Docker ile Yönetim
+## What is it?
 
-### Başlatma
+Postgrify manages multiple PostgreSQL databases through a single HTTP/REST API. Each project uses its own isolated database — no direct PostgreSQL connection required.
 
-```bash
-cd packages
+- Multi-database support — single API, per-request DB selection
+- JWT-based auth — per-DB scoped tokens + admin token
+- Web GUI — table editor, schema management, SQL editor
+- Automatically restarts after reboot
 
-# İlk kurulum veya Dockerfile değiştikten sonra (image yeniden build eder)
-docker compose up -d --build
+---
 
-# Sadece durmuş servisleri başlat (build etmez, hızlı)
-docker compose up -d
+## Installation
 
-# Tek bir servisi yeniden build edip başlat
-docker compose up -d --build api
-docker compose up -d --build gui
-```
+### Requirements
 
-### Durdurma
+- Linux or macOS
+- `curl` and `git` (Docker is installed automatically if missing)
+- A fresh server or local machine
 
-```bash
-# Servisleri durdur, volume'lar korunur (veriler silinmez)
-docker compose down
-
-# Servisleri durdur VE volume'ları sil (postgres + redis verileri tamamen silinir)
-docker compose down -v
-```
-
-### Yeniden Deploy (kod değişikliği sonrası)
+### Single command
 
 ```bash
-cd packages
-
-# Tüm stack'i yeniden build edip ayağa kaldır
-docker compose up -d --build
-
-# Sadece API değiştiyse
-docker compose up -d --build api
-
-# Sadece GUI değiştiyse
-docker compose up -d --build gui
+curl -fsSL https://raw.githubusercontent.com/parsherr/postgrify/main/install.sh | bash
 ```
 
-### Loglar
+The script will:
+1. Install Docker if not present
+2. Create `~/.postgrify/` and set up required files
+3. Auto-generate `JWT_SECRET` and `ADMIN_SECRET`
+4. Ask only for a PostgreSQL password (the only interactive step)
+5. Start all services and print the URLs + Admin Secret
+
+> **Note:** Save the `ADMIN_SECRET` printed at the end of installation — it will not be shown again. It is also stored in `~/.postgrify/.env`.
+
+---
+
+## Services
+
+Once installation is complete:
+
+| Service  | URL                            |
+|----------|--------------------------------|
+| GUI      | http://localhost:5173          |
+| API      | http://localhost:3000          |
+| API Docs | http://localhost:3000/api-docs |
+
+---
+
+## Quick API Usage
+
+### Get an admin token
 
 ```bash
-# Tüm servislerin loglarını canlı takip et
-docker compose logs -f
-
-# Sadece API logları
-docker compose logs -f api
-
-# Sadece son 50 satır
-docker compose logs --tail=50 api
+curl -X POST http://localhost:3000/auth/token/admin   -H "Content-Type: application/json"   -d '{"secret": "YOUR_ADMIN_SECRET"}'
 ```
 
-### Durum kontrolü
+### Add a database
 
 ```bash
-# Tüm servislerin durumunu gör (Up / healthy / starting)
-docker compose ps
-
-# Belirli bir servisin health durumu
-docker inspect packages-api-1 --format='{{.State.Health.Status}}'
+curl -X POST http://localhost:3000/admin/databases   -H "Authorization: Bearer ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"name": "myproject"}'
 ```
 
-### Temiz yeniden kurulum
+### Get a DB token and use it
 
 ```bash
-cd packages
+# Get a scoped token
+curl -X POST http://localhost:3000/auth/token   -H "Content-Type: application/json"   -d '{"database": "myproject", "secret": "YOUR_ADMIN_SECRET", "scopes": ["read","write"]}'
 
-# Her şeyi sil: container, image, volume, network
-docker compose down -v --rmi all
-
-# Sıfırdan build et ve başlat
-docker compose up -d --build
+# List tables
+curl http://localhost:3000/db/myproject/tables   -H "Authorization: Bearer DB_TOKEN"
 ```
 
-## API Kullanımı
+For all endpoints: **http://localhost:3000/api-docs**
 
-### Token alma
+---
+
+## Update & Management
 
 ```bash
-# Admin token
-curl -X POST http://localhost:3000/auth/token/admin \
-  -H "Content-Type: application/json" \
-  -d '{"adminSecret": "your-admin-secret"}'
+# Stop
+cd ~/.postgrify && docker compose down
 
-# DB token (sadece project1'e erişim)
-curl -X POST http://localhost:3000/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"database": "project1", "secret": "your-secret", "scope": ["read", "write"]}'
+# Start
+cd ~/.postgrify && docker compose up -d
+
+# Follow logs
+cd ~/.postgrify && docker compose logs -f
+
+# Rebuild (after updating source code)
+cd ~/.postgrify && docker compose up -d --build
 ```
 
-### Tablo oluşturma
+---
 
-```bash
-curl -X POST http://localhost:3000/db/project1/tables \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "users",
-    "columns": [
-      { "name": "id", "type": "serial", "primaryKey": true },
-      { "name": "name", "type": "text", "nullable": false },
-      { "name": "email", "type": "text", "unique": true },
-      { "name": "created_at", "type": "timestamptz", "default": "now()" }
-    ]
-  }'
-```
+## Configuration
 
-### Satır ekleme
+All settings are in `~/.postgrify/.env`. After making changes, run `docker compose up -d`.
 
-```bash
-curl -X POST http://localhost:3000/db/project1/users \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Alice", "email": "alice@example.com"}'
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PG_PASSWORD` | PostgreSQL password | set during installation |
+| `JWT_SECRET` | Token signing key (>=32 chars) | auto-generated |
+| `ADMIN_SECRET` | Admin token password | auto-generated |
+| `JWT_EXPIRY` | Token validity duration | `24h` |
+| `RATE_LIMIT_GLOBAL` | Requests per minute per IP | `1000` |
 
-### Satır sorgulama
+For all variables: [`exampleenv.md`](exampleenv.md)
 
-```bash
-# Filtreleme + sıralama + sayfalama
-curl "http://localhost:3000/db/project1/users?where=name.like.Ali%25&order=created_at.desc&limit=20" \
-  -H "Authorization: Bearer <token>"
-```
+---
 
-### DB seçim yöntemleri
-
-```bash
-# 1. URL prefix (önerilen)
-GET /db/project1/users
-
-# 2. Header
-GET /db/users
-X-Database: project1
-
-# 3. Query param
-GET /db/users?database=project1
-```
-
-## Yerel Geliştirme (Docker olmadan)
-
-```bash
-# API (hot-reload, http://localhost:3000)
-cd packages/api
-npm install
-npm run dev
-
-# GUI (hot-reload, http://localhost:5173)
-cd packages/gui
-npm install
-npm run dev
-```
-
-> Yerel geliştirmede `packages/.env` içinde `PG_HOST=localhost` ve `REDIS_URL=redis://localhost:6379` olmalı (Docker Compose'da `PG_HOST=postgres`).
-
-## Ortam Değişkenleri
-
-`exampleenv.md` dosyasına bakın (kopyalayıp `.env` yapın). Zorunlu değişkenler:
-
-| Değişken | Açıklama |
-|---|---|
-| `PG_PASSWORD` | PostgreSQL şifresi |
-| `JWT_SECRET` | En az 32 karakter (token imzalama) |
-| `ADMIN_SECRET` | Admin token almak için |
-
-## Lisans
+## License
 
 MIT

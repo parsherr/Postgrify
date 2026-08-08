@@ -6,9 +6,24 @@
 import fp from "fastify-plugin";
 import swagger from "@fastify/swagger";
 import scalarFastify from "@scalar/fastify-api-reference";
+import { createReadStream } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { FastifyInstance } from "fastify";
 
+// ESM'de __dirname karşılığı
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Derleme sonrası dist/ altından iki üst dizin → packages/api/public/
+const FAVICON_PATH = join(__dirname, "../../public/favicon.png");
+
 export const openApiPlugin = fp(async (server: FastifyInstance) => {
+  // Brand favicon'u /favicon.png üzerinden serve et
+  server.get("/favicon.png", async (_req, reply) => {
+    reply.header("Content-Type", "image/png");
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.send(createReadStream(FAVICON_PATH));
+  });
+
   await server.register(swagger, {
     openapi: {
       openapi: "3.1.0",
@@ -34,7 +49,8 @@ export const openApiPlugin = fp(async (server: FastifyInstance) => {
   await server.register(scalarFastify, {
     routePrefix: "/api-docs",
     configuration: {
-      title: "Postgrify API Reference",
+      title: "Postgrify API Docs",
+      favicon: "/favicon.png",
     },
   });
 });
