@@ -225,7 +225,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
             <span className="font-mono text-2xs text-muted-foreground/40">
               v{VERSION}
             </span>
-            <img src="/logo.png" alt="" className="h-5 w-5 object-contain" />
+            <img src="/black-white-logo.png" alt="" className="h-5 w-5 object-contain" />
           </div>
         )}
       </div>

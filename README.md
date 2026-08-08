@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/big-logo.png" alt="Postgrify" width="600"/>
+  <img src="images/mid-size-logo.png.png" alt="Postgrify Logo" style="width:100%;max-width:100%;" />
 </p>
 
 # Postgrify

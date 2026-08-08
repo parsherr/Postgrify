@@ -263,7 +263,7 @@ export default function LoginPage() {
 
         {/* ── Sağ panel — GrainGradient (referans tasarım) ──────────────── */}
         <div className="relative hidden overflow-hidden rounded-md bg-black text-white lg:block">
-          {/* Turuncu grain gradient — köşelerden akan efekt */}
+          {/* Sarı grain gradient — köşelerden akan efekt */}
           <GrainGradient
             speed={0.3}
             scale={1}
@@ -275,7 +275,7 @@ export default function LoginPage() {
             noise={0.25}
             shape="corners"
             frame={2854.5}
-            colors={["#FFFFFF", "#FC7819", "#FC7819", "#FFFFFF"]}
+            colors={["#FFFFFF", "#EFFF12", "#EFFF12", "#FFFFFF"]}
             colorBack="#00000000"
             className="absolute inset-0 bg-black"
           />
