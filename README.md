@@ -28,37 +28,43 @@ Postgrify manages multiple PostgreSQL databases through a single HTTP/REST API. 
 
 ## Installation
 
-> **Windows users:** Native installation is not supported. Use WSL2 instead — run `wsl --install` in PowerShell (requires restart), then open the WSL terminal and run the command below.
+No configuration files to edit. All secrets are auto-generated. The only user input happens in the browser after installation.
 
-### Requirements
-
-- **Linux** (Ubuntu, Debian, Fedora, CentOS, Arch) or **macOS**
-- `curl` — everything else (git, Docker) is installed automatically if missing
-- `sudo` access for Docker installation
-
-### Single command (Linux / macOS / WSL2)
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/parsherr/postgrify/main/install.sh | bash
 ```
 
-The script will:
+**Requirements:** `curl` (everything else — git, Docker — is installed automatically if missing), `sudo` access.
 
-1. Install Docker if not present
-2. Clone the repo into `~/.postgrify/`
-3. Auto-generate all secrets (`JWT_SECRET`, `ADMIN_SECRET`, `PG_PASSWORD`) — no prompts, no interaction
-4. Start all services (PostgreSQL, Redis, API, GUI)
-5. Print the URL where you finish setup
+### Windows (PowerShell)
 
-**After the script finishes**, open http://localhost:5173/setup in your browser and create your admin account. That's the only step that requires user input.
+```powershell
+irm https://raw.githubusercontent.com/parsherr/postgrify/main/install.ps1 | iex
+```
 
-> All generated secrets are saved in `~/.postgrify/packages/.env`. Keep this file safe.
+**Requirements:** Windows 10/11, PowerShell 5.1+. Docker Desktop and git are installed automatically via winget.
+
+> **Note:** If Docker Desktop needs to be installed, a system restart may be required. After restarting, run the command again — the existing installation will be detected and the process will continue.
+
+> **WSL2 alternative:** If you have WSL2 installed, you can use the Linux command inside WSL instead — it is faster and more reliable.
+
+### What the installer does
+
+1. Checks for Docker (installs if missing)
+2. Clones the repo into `~/.postgrify/` (Linux/macOS) or `%USERPROFILE%\.postgrify\` (Windows)
+3. Auto-generates all secrets (`JWT_SECRET`, `ADMIN_SECRET`, `PG_PASSWORD`) — no prompts
+4. Starts all services (PostgreSQL, Redis, API, GUI)
+5. Opens http://localhost:5173/setup in your browser
+
+**After installation**, create your admin account at http://localhost:5173/setup. That is the only step requiring user input.
+
+> All generated secrets are saved in `packages/.env` inside the install directory. Keep this file safe — deleting it will break the installation.
 
 ---
 
 ## Services
-
-Once installation is complete:
 
 | Service  | URL                            |
 |----------|--------------------------------|
@@ -106,6 +112,8 @@ For all endpoints: **http://localhost:3000/api-docs**
 
 ## Update & Management
 
+### Linux / macOS
+
 ```bash
 # Stop
 cd ~/.postgrify/packages && docker compose down
@@ -120,20 +128,40 @@ cd ~/.postgrify/packages && docker compose logs -f
 cd ~/.postgrify && git pull && cd packages && docker compose up -d --build
 ```
 
+### Windows (PowerShell)
+
+```powershell
+# Stop
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose down
+
+# Start
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose up -d
+
+# Follow logs
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose logs -f
+
+# Update to latest version
+cd "$env:USERPROFILE\.postgrify"; git pull; cd packages; docker compose up -d --build
+```
+
 ---
 
 ## Configuration
 
-All settings are in `~/.postgrify/packages/.env`. After making changes, run:
+All settings are in `packages/.env` inside the install directory. After making changes, restart the services:
 
 ```bash
+# Linux/macOS
 cd ~/.postgrify/packages && docker compose up -d
+
+# Windows
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose up -d
 ```
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PG_PASSWORD` | PostgreSQL password | auto-generated |
-| `JWT_SECRET` | Token signing key (>=32 chars) | auto-generated |
+| `JWT_SECRET` | Token signing key (32+ chars) | auto-generated |
 | `ADMIN_SECRET` | Admin token password | auto-generated |
 | `JWT_EXPIRY` | Token validity duration | `24h` |
 | `RATE_LIMIT_GLOBAL` | Requests per minute per IP | `1000` |
