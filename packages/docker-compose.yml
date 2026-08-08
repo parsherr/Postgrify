@@ -41,7 +41,7 @@ services:
   gui:
     build:
       context: ..
-      dockerfile: packages/gui/Dockerfile.monorepo
+      dockerfile: packages/gui/Dockerfile
       args:
         VITE_API_URL: /api
     ports:

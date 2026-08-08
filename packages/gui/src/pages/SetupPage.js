@@ -1,127 +1,138 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 /**
- * SetupPage — ilk kurulum sihirbazı.
+ * SetupPage — ilk çalıştırma sihirbazı.
  *
- * 3 adım:
- *  1. Admin hesabı (email + şifre)
- *  2. PostgreSQL bağlantısı
- *  3. Özet + Tamamla
+ * Görsel dil LoginPage ile aynı: siyah zemin, GrainGradient sağ panel,
+ * floating-label input'lar. 3 adım arası slide+fade animasyonu.
  *
- * POST /setup başarılı olursa /login'e yönlendirir.
- * API yeniden başlatılması gerektiği kullanıcıya bildirilir.
+ * Adımlar:
+ *  1 — Admin hesabı (e-posta + şifre + tekrar)
+ *  2 — PostgreSQL bağlantısı (host + port + kullanıcı + şifre)
+ *  3 — Özet + tamamla
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GrainGradient } from "@paper-design/shaders-react";
 import { postSetup } from "../lib/api";
-const STEP_LABELS = {
-    1: "Admin Hesabı",
-    2: "PostgreSQL Bağlantısı",
-    3: "Özet",
-};
+function FieldBox({ label, value, onChange, type = "text", required, placeholder }) {
+    const [focused, setFocused] = useState(false);
+    const lifted = focused || value.length > 0;
+    return (_jsxs("div", { className: "relative", children: [_jsx("input", { type: type, value: value, onChange: onChange, onFocus: () => setFocused(true), onBlur: () => setFocused(false), required: required, placeholder: placeholder ?? "", className: "peer h-16 w-full rounded-[10px] border border-zinc-700 bg-zinc-900 px-5 pt-6 pb-2 text-base text-white outline-none transition-colors placeholder:text-transparent focus:border-zinc-500" }), _jsx("label", { className: `pointer-events-none absolute left-5 text-zinc-400 transition-all duration-150 ${lifted ? "top-2 text-[11px]" : "top-1/2 -translate-y-1/2 text-base"}`, children: label })] }));
+}
+// ── Step indicator ────────────────────────────────────────────────────────────
+const STEP_LABELS = ["Admin Hesabı", "Veritabanı", "Özet"];
 function StepIndicator({ current }) {
-    return (_jsx("div", { className: "flex items-center justify-center gap-0 mb-8", children: [1, 2, 3].map((step, idx) => (_jsxs("div", { className: "flex items-center", children: [_jsxs("div", { className: "flex flex-col items-center", children: [_jsx("div", { className: [
-                                "h-8 w-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors",
-                                current === step
-                                    ? "bg-foreground text-background"
-                                    : current > step
-                                        ? "bg-foreground/30 text-foreground"
-                                        : "bg-muted text-muted-foreground",
-                            ].join(" "), children: current > step ? (_jsx("svg", { viewBox: "0 0 16 16", fill: "currentColor", className: "h-4 w-4", children: _jsx("path", { d: "M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" }) })) : (step) }), _jsx("span", { className: "mt-1 text-xs text-muted-foreground whitespace-nowrap", children: STEP_LABELS[step] })] }), idx < 2 && (_jsx("div", { className: [
-                        "h-px w-16 mx-2 mb-5 transition-colors",
-                        current > step ? "bg-foreground/30" : "bg-border",
-                    ].join(" ") }))] }, step))) }));
+    return (_jsx("div", { className: "flex items-center gap-0", children: STEP_LABELS.map((label, i) => {
+            const idx = i + 1;
+            const done = idx < current;
+            const active = idx === current;
+            return (_jsxs("div", { className: "flex items-center", children: [_jsxs("div", { className: "flex flex-col items-center", children: [_jsx("div", { className: `flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 ${active
+                                    ? "bg-white text-black"
+                                    : done
+                                        ? "bg-zinc-700 text-white"
+                                        : "bg-zinc-800 text-zinc-500"}`, children: done ? (
+                                // Tik ikonu
+                                _jsx("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", children: _jsx("path", { d: "M2.5 7L5.5 10L11.5 4", stroke: "white", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }) })) : (idx) }), _jsx("span", { className: `mt-1.5 text-[10px] tracking-wide transition-colors duration-300 ${active ? "text-zinc-300" : "text-zinc-600"}`, children: label })] }), i < STEP_LABELS.length - 1 && (_jsx("div", { className: `mb-5 h-px w-12 transition-colors duration-300 ${done ? "bg-zinc-600" : "bg-zinc-800"}` }))] }, idx));
+        }) }));
 }
-function Field({ label, id, type = "text", value, onChange, error, placeholder, autoComplete, }) {
-    return (_jsxs("div", { className: "flex flex-col gap-1", children: [_jsx("label", { htmlFor: id, className: "text-sm font-medium text-foreground", children: label }), _jsx("input", { id: id, type: type, value: value, onChange: (e) => onChange(e.target.value), placeholder: placeholder, autoComplete: autoComplete, className: [
-                    "h-9 rounded-md border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground",
-                    "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-shadow",
-                    error ? "border-destructive focus:ring-destructive" : "border-border",
-                ].join(" ") }), error && _jsx("p", { className: "text-xs text-destructive", children: error })] }));
-}
+// ── Adım başlıkları ────────────────────────────────────────────────────────────
+const STEP_HEADINGS = {
+    1: { title: "Admin hesabını\noluştur", sub: "Sisteme giriş için kullanacağın hesap." },
+    2: { title: "Veritabanını\nbağla", sub: "PostgreSQL bağlantı bilgilerini gir." },
+    3: { title: "Her şey\nhazır", sub: "Ayarları gözden geçir ve tamamla." },
+};
+// ── Ana bileşen ────────────────────────────────────────────────────────────────
 export default function SetupPage() {
     const navigate = useNavigate();
+    // Adım durumu
     const [step, setStep] = useState(1);
-    const [submitting, setSubmitting] = useState(false);
-    const [globalError, setGlobalError] = useState(null);
-    const [done, setDone] = useState(false);
-    // Step 1 state
-    const [adminEmail, setAdminEmail] = useState("");
-    const [adminPassword, setAdminPassword] = useState("");
-    const [adminPasswordConfirm, setAdminPasswordConfirm] = useState("");
-    const [step1Errors, setStep1Errors] = useState({});
-    // Step 2 state
+    const [direction, setDirection] = useState("forward");
+    // Adım 1 — Admin hesabı
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [passwordConfirm, setPasswordConfirm] = useState("");
+    // Adım 2 — PostgreSQL
     const [pgHost, setPgHost] = useState("localhost");
     const [pgPort, setPgPort] = useState("5432");
     const [pgUser, setPgUser] = useState("postgres");
     const [pgPassword, setPgPassword] = useState("");
-    const [step2Errors, setStep2Errors] = useState({});
-    // ── Validation ────────────────────────────────────────────────
+    // UI durumu
+    const [error, setError] = useState("");
+    const [isPending, setIsPending] = useState(false);
+    const [done, setDone] = useState(false);
+    // ── Validasyon ──────────────────────────────────────────────────────────────
     function validateStep1() {
-        const errs = {};
-        if (!adminEmail.trim())
-            errs.adminEmail = "Email gerekli";
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail))
-            errs.adminEmail = "Geçerli bir email girin";
-        if (!adminPassword)
-            errs.adminPassword = "Şifre gerekli";
-        else if (adminPassword.length < 8)
-            errs.adminPassword = "Şifre en az 8 karakter olmalı";
-        if (adminPassword !== adminPasswordConfirm)
-            errs.adminPasswordConfirm = "Şifreler eşleşmiyor";
-        setStep1Errors(errs);
-        return Object.keys(errs).length === 0;
+        if (!email.includes("@"))
+            return "Geçerli bir e-posta gir.";
+        if (password.length < 8)
+            return "Şifre en az 8 karakter olmalı.";
+        if (password !== passwordConfirm)
+            return "Şifreler eşleşmiyor.";
+        return "";
     }
     function validateStep2() {
-        const errs = {};
+        const port = Number(pgPort);
         if (!pgHost.trim())
-            errs.pgHost = "Host gerekli";
-        const portNum = Number(pgPort);
-        if (!pgPort || isNaN(portNum) || portNum < 1 || portNum > 65535)
-            errs.pgPort = "Geçerli bir port girin (1-65535)";
+            return "Host alanı boş olamaz.";
         if (!pgUser.trim())
-            errs.pgUser = "Kullanıcı adı gerekli";
-        setStep2Errors(errs);
-        return Object.keys(errs).length === 0;
+            return "Kullanıcı adı boş olamaz.";
+        if (!pgPassword.trim())
+            return "Şifre boş olamaz.";
+        if (!Number.isInteger(port) || port < 1 || port > 65535)
+            return "Port 1–65535 arasında olmalı.";
+        return "";
     }
-    // ── Step handlers ─────────────────────────────────────────────
-    function handleNext() {
-        if (step === 1 && validateStep1())
-            setStep(2);
-        else if (step === 2 && validateStep2())
-            setStep(3);
-    }
-    function handleBack() {
-        if (step === 2)
-            setStep(1);
-        else if (step === 3)
-            setStep(2);
-    }
-    async function handleSubmit() {
-        setGlobalError(null);
-        setSubmitting(true);
-        try {
-            const payload = {
-                adminEmail: adminEmail.trim(),
-                adminPassword,
-                pgHost: pgHost.trim(),
-                pgPort: Number(pgPort),
-                pgUser: pgUser.trim(),
-                pgPassword,
-            };
-            await postSetup(payload);
-            setDone(true);
+    // ── Adım geçişleri ──────────────────────────────────────────────────────────
+    function goNext() {
+        setError("");
+        const err = step === 1 ? validateStep1() : step === 2 ? validateStep2() : "";
+        if (err) {
+            setError(err);
+            return;
         }
-        catch (err) {
-            setGlobalError(err instanceof Error ? err.message : "Kurulum başarısız");
+        setDirection("forward");
+        setStep(s => s + 1);
+    }
+    function goBack() {
+        setError("");
+        setDirection("back");
+        setStep(s => s - 1);
+    }
+    // ── Submit ──────────────────────────────────────────────────────────────────
+    async function handleSubmit() {
+        setError("");
+        setIsPending(true);
+        try {
+            await postSetup({
+                adminEmail: email,
+                adminPassword: password,
+                pgHost,
+                pgPort: Number(pgPort),
+                pgUser,
+                pgPassword,
+            });
+            setDone(true);
+            setTimeout(() => navigate("/login"), 3000);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : "Kurulum başarısız.";
+            setError(msg);
         }
         finally {
-            setSubmitting(false);
+            setIsPending(false);
         }
     }
-    // ── Done screen ───────────────────────────────────────────────
-    if (done) {
-        return (_jsx("div", { className: "flex min-h-screen items-center justify-center bg-background px-4", children: _jsxs("div", { className: "w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm text-center", children: [_jsx("div", { className: "mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-foreground/10", children: _jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", className: "h-6 w-6 text-foreground", children: _jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M5 13l4 4L19 7" }) }) }), _jsx("h2", { className: "text-xl font-semibold text-foreground mb-2", children: "Kurulum Tamamland\u0131" }), _jsxs("p", { className: "text-sm text-muted-foreground mb-6", children: ["Ayarlar ", _jsx("code", { className: "bg-muted px-1 rounded text-xs", children: ".env" }), " dosyas\u0131na kaydedildi. De\u011Fi\u015Fikliklerin ge\u00E7erli olmas\u0131 i\u00E7in API sunucusunu yeniden ba\u015Flat\u0131n."] }), _jsxs("div", { className: "rounded-md bg-muted/50 border border-border p-3 mb-6 text-left", children: [_jsx("p", { className: "text-xs font-mono text-muted-foreground", children: "docker compose restart api" }), _jsx("p", { className: "text-xs font-mono text-muted-foreground mt-1", children: "# veya: npm run dev (packages/api)" })] }), _jsx("button", { onClick: () => navigate("/login"), className: "w-full h-9 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors", children: "Giri\u015F Yap" })] }) }));
-    }
-    // ── Main wizard ───────────────────────────────────────────────
-    return (_jsx("div", { className: "flex min-h-screen items-center justify-center bg-background px-4", children: _jsxs("div", { className: "w-full max-w-md", children: [_jsxs("div", { className: "mb-8 text-center", children: [_jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Postgrify Kurulum" }), _jsx("p", { className: "mt-1 text-sm text-muted-foreground", children: "\u0130lk kullan\u0131m i\u00E7in temel ayarlar\u0131 yap\u0131land\u0131r\u0131n" })] }), _jsxs("div", { className: "rounded-xl border border-border bg-card p-8 shadow-sm", children: [_jsx(StepIndicator, { current: step }), step === 1 && (_jsxs("div", { className: "flex flex-col gap-4", children: [_jsx(Field, { label: "Admin Email", id: "adminEmail", type: "email", value: adminEmail, onChange: setAdminEmail, error: step1Errors.adminEmail, placeholder: "admin@example.com", autoComplete: "email" }), _jsx(Field, { label: "\u015Eifre", id: "adminPassword", type: "password", value: adminPassword, onChange: setAdminPassword, error: step1Errors.adminPassword, placeholder: "En az 8 karakter", autoComplete: "new-password" }), _jsx(Field, { label: "\u015Eifre Tekrar", id: "adminPasswordConfirm", type: "password", value: adminPasswordConfirm, onChange: setAdminPasswordConfirm, error: step1Errors.adminPasswordConfirm, placeholder: "\u015Eifreyi tekrar girin", autoComplete: "new-password" })] })), step === 2 && (_jsxs("div", { className: "flex flex-col gap-4", children: [_jsxs("div", { className: "grid grid-cols-3 gap-3", children: [_jsx("div", { className: "col-span-2", children: _jsx(Field, { label: "Host", id: "pgHost", value: pgHost, onChange: setPgHost, error: step2Errors.pgHost, placeholder: "localhost" }) }), _jsx(Field, { label: "Port", id: "pgPort", type: "number", value: pgPort, onChange: setPgPort, error: step2Errors.pgPort, placeholder: "5432" })] }), _jsx(Field, { label: "Kullan\u0131c\u0131 Ad\u0131", id: "pgUser", value: pgUser, onChange: setPgUser, error: step2Errors.pgUser, placeholder: "postgres", autoComplete: "username" }), _jsx(Field, { label: "\u015Eifre", id: "pgPassword", type: "password", value: pgPassword, onChange: setPgPassword, placeholder: "PostgreSQL \u015Fifresi", autoComplete: "current-password" })] })), step === 3 && (_jsxs("div", { className: "flex flex-col gap-4", children: [_jsxs("div", { className: "rounded-md bg-muted/50 border border-border p-4 text-sm space-y-2", children: [_jsx("p", { className: "font-medium text-foreground mb-3", children: "Kurulum \u00D6zeti" }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "Admin Email" }), _jsx("span", { className: "font-mono text-foreground", children: adminEmail })] }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "\u015Eifre" }), _jsx("span", { className: "font-mono text-foreground", children: "•".repeat(Math.min(adminPassword.length, 8)) })] }), _jsx("hr", { className: "border-border" }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "PG Host" }), _jsx("span", { className: "font-mono text-foreground", children: pgHost })] }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "PG Port" }), _jsx("span", { className: "font-mono text-foreground", children: pgPort })] }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "PG Kullan\u0131c\u0131" }), _jsx("span", { className: "font-mono text-foreground", children: pgUser })] }), _jsxs("div", { className: "flex justify-between text-muted-foreground", children: [_jsx("span", { children: "PG \u015Eifre" }), _jsx("span", { className: "font-mono text-foreground", children: pgPassword ? "•".repeat(Math.min(pgPassword.length, 8)) : "(boş)" })] })] }), globalError && (_jsx("p", { className: "text-sm text-destructive rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2", children: globalError }))] })), _jsxs("div", { className: "mt-6 flex justify-between gap-3", children: [step > 1 ? (_jsx("button", { onClick: handleBack, disabled: submitting, className: "h-9 px-4 rounded-md border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50", children: "Geri" })) : (_jsx("div", {})), step < 3 ? (_jsx("button", { onClick: handleNext, className: "h-9 px-6 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors", children: "\u0130leri" })) : (_jsxs("button", { onClick: handleSubmit, disabled: submitting, className: "h-9 px-6 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors disabled:opacity-50 flex items-center gap-2", children: [submitting && (_jsx("span", { className: "h-3 w-3 rounded-full border-2 border-background/40 border-t-background animate-spin" })), "Kurulumu Tamamla"] }))] })] })] }) }));
+    // ── Sağ panel sloganı ───────────────────────────────────────────────────────
+    const heading = STEP_HEADINGS[step];
+    const slideClass = direction === "forward"
+        ? "animate-in fade-in slide-in-from-right-4 duration-300"
+        : "animate-in fade-in slide-in-from-left-4 duration-300";
+    // ── Render ──────────────────────────────────────────────────────────────────
+    return (_jsx("section", { className: "min-h-screen bg-black p-3 text-white antialiased [font-synthesis:none]", children: _jsxs("div", { className: "grid min-h-[calc(100vh-1.5rem)] rounded-md lg:grid-cols-2 lg:gap-3", children: [_jsxs("div", { className: "flex flex-col justify-center px-8 sm:px-16 lg:px-20", children: [_jsx("div", { className: "mb-10", children: _jsx("img", { src: "/black-white-logo.png", alt: "Postgrify", className: "h-8 w-8 object-contain invert" }) }), done ? (
+                        /* ── Tamamlandı ekranı ───────────────────────────── */
+                        _jsxs("div", { className: "animate-in fade-in slide-in-from-bottom-4 duration-500", children: [_jsx("div", { className: "mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800", children: _jsx("svg", { width: "28", height: "28", viewBox: "0 0 28 28", fill: "none", children: _jsx("path", { d: "M5 14L11 20L23 8", stroke: "#EFFF12", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }) }) }), _jsx("h1", { className: "text-4xl font-medium tracking-[-0.04em] text-white", children: "Kurulum tamamland\u0131!" }), _jsx("p", { className: "mt-3 text-base text-zinc-400", children: "API sunucusunu yeniden ba\u015Flat, ard\u0131ndan giri\u015F yapabilirsin." }), _jsx("p", { className: "mt-6 text-[11px] tracking-wide text-zinc-600", children: "Giri\u015F sayfas\u0131na y\u00F6nlendiriliyorsun\u2026" })] })) : (_jsxs(_Fragment, { children: [_jsx("div", { className: "mb-8", children: _jsx(StepIndicator, { current: step }) }), _jsxs("div", { className: slideClass, children: [_jsx("h1", { className: "whitespace-pre-line text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:text-[64px] lg:leading-[0.98]", children: heading.title }), _jsx("p", { className: "mt-2 text-sm text-zinc-400", children: heading.sub })] }, `heading-${step}`), _jsxs("div", { className: `mt-8 space-y-5 ${slideClass}`, children: [step === 1 && (_jsxs(_Fragment, { children: [_jsx(FieldBox, { label: "E-posta", value: email, onChange: e => setEmail(e.target.value), type: "email", required: true }), _jsx(FieldBox, { label: "\u015Eifre", value: password, onChange: e => setPassword(e.target.value), type: "password", required: true }), _jsx(FieldBox, { label: "\u015Eifre tekrar", value: passwordConfirm, onChange: e => setPasswordConfirm(e.target.value), type: "password", required: true })] })), step === 2 && (_jsxs(_Fragment, { children: [_jsx(FieldBox, { label: "Host", value: pgHost, onChange: e => setPgHost(e.target.value), required: true }), _jsxs("div", { className: "grid grid-cols-3 gap-3", children: [_jsx("div", { className: "col-span-1", children: _jsx(FieldBox, { label: "Port", value: pgPort, onChange: e => setPgPort(e.target.value), required: true }) }), _jsx("div", { className: "col-span-2", children: _jsx(FieldBox, { label: "Kullan\u0131c\u0131", value: pgUser, onChange: e => setPgUser(e.target.value), required: true }) })] }), _jsx(FieldBox, { label: "\u015Eifre", value: pgPassword, onChange: e => setPgPassword(e.target.value), type: "password", required: true })] })), step === 3 && (_jsxs("div", { className: "space-y-2 rounded-[10px] border border-zinc-800 bg-zinc-900 p-5 text-sm", children: [_jsx(SummaryRow, { label: "E-posta", value: email }), _jsx(SummaryRow, { label: "\u015Eifre", value: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" }), _jsx("div", { className: "my-3 h-px bg-zinc-800" }), _jsx(SummaryRow, { label: "Host", value: pgHost }), _jsx(SummaryRow, { label: "Port", value: pgPort }), _jsx(SummaryRow, { label: "Kullan\u0131c\u0131", value: pgUser }), _jsx(SummaryRow, { label: "DB \u015Eifresi", value: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" })] }))] }, `form-${step}`), error && (_jsx("p", { className: "mt-3 text-sm text-red-400", children: error })), _jsxs("div", { className: "mt-8 flex items-center gap-3", children: [step > 1 && (_jsx("button", { type: "button", onClick: goBack, className: "flex h-[52px] items-center justify-center rounded-[10px] border border-zinc-700 bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-800", children: "Geri" })), step < 3 ? (_jsx("button", { type: "button", onClick: goNext, className: "flex h-[52px] flex-1 items-center justify-center rounded-[10px] border border-zinc-600 bg-white text-base font-medium text-black transition-colors hover:bg-zinc-100", children: "Devam Et" })) : (_jsxs("button", { type: "button", onClick: handleSubmit, disabled: isPending, className: "flex h-[52px] flex-1 items-center justify-center gap-2 rounded-[10px] border border-zinc-600 bg-white text-base font-medium text-black transition-colors hover:bg-zinc-100 disabled:opacity-50", children: [isPending && (_jsxs("svg", { className: "h-4 w-4 animate-spin", viewBox: "0 0 24 24", fill: "none", children: [_jsx("circle", { className: "opacity-25", cx: "12", cy: "12", r: "10", stroke: "currentColor", strokeWidth: "4" }), _jsx("path", { className: "opacity-75", fill: "currentColor", d: "M4 12a8 8 0 018-8v8H4z" })] })), "Kurulumu Tamamla"] }))] }), _jsx("p", { className: "mt-10 text-center text-[11px] tracking-wide text-zinc-600", children: "Argon2id \u00B7 JWT \u00B7 Redis session" })] }))] }), _jsxs("div", { className: "relative hidden overflow-hidden rounded-md bg-black text-white lg:block", children: [_jsx(GrainGradient, { speed: 0.3, scale: 1, rotation: 0, offsetX: 0, offsetY: 0, softness: 0.5, intensity: 0.5, noise: 0.25, shape: "corners", frame: 2854.5, colors: ["#FFFFFF", "#EFFF12", "#EFFF12", "#FFFFFF"], colorBack: "#00000000", className: "absolute inset-0 bg-black" }), _jsx("div", { className: "relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-12", children: _jsxs("h2", { className: "max-w-[520px] pt-0 text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:pt-16 lg:text-[64px] lg:leading-[0.98] xl:text-[70px]", children: ["Setup fast,", _jsx("br", {}), "Scale faster"] }) })] })] }) }));
+}
+// ── Yardımcı: özet satırı ─────────────────────────────────────────────────────
+function SummaryRow({ label, value }) {
+    return (_jsxs("div", { className: "flex items-center justify-between", children: [_jsx("span", { className: "text-zinc-500", children: label }), _jsx("span", { className: "text-zinc-200", children: value })] }));
 }

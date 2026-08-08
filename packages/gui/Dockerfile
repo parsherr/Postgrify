@@ -3,31 +3,33 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Bağımlılık dosyaları — lock dosyası root'tan kopyalanır (monorepo workspace)
+# Monorepo root package.json + lock (workspace bağımlılıkları için)
 COPY package.json package-lock.json* ./
+COPY packages/gui/package.json ./packages/gui/
 
-# npm ci: lock dosyasından hızlı deterministik yükleme
-# --ignore-scripts: postinstall scriptlerini atla (güvenlik + hız)
-RUN npm ci --ignore-scripts
+# Sadece gui workspace bağımlılıklarını yükle
+RUN npm ci --workspace=packages/gui --ignore-scripts
 
 # Config dosyaları
-COPY tsconfig.json tsconfig.node.json ./
-COPY vite.config.ts postcss.config.js tailwind.config.ts ./
-COPY index.html ./
+COPY packages/gui/tsconfig.json packages/gui/tsconfig.node.json ./packages/gui/
+COPY packages/gui/vite.config.ts packages/gui/postcss.config.js packages/gui/tailwind.config.js ./packages/gui/
+COPY packages/gui/index.html ./packages/gui/
 
-# Kaynak kod — en son kopyala (sık değişir, önceki layer'lar cache'lenir)
-COPY src ./src
+# Kaynak kod ve public assets
+COPY packages/gui/src ./packages/gui/src
+COPY packages/gui/public ./packages/gui/public
 
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 
+WORKDIR /app/packages/gui
 RUN npm run build
 
 # ─── Production: nginx ile static serve ───────────────────────────────────────
 FROM nginx:alpine AS runner
 
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/packages/gui/dist /usr/share/nginx/html
+COPY packages/gui/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 

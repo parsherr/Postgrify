@@ -40,10 +40,10 @@ function FieldBox({ label, value, onChange, type = "text", required, placeholder
         onBlur={() => setFocused(false)}
         required={required}
         placeholder={placeholder ?? ""}
-        className="peer h-14 w-full rounded-[10px] border border-white/20 bg-white/5 px-4 pt-5 pb-2 text-base text-white outline-none transition-colors placeholder:text-transparent focus:border-white/50"
+        className="peer h-16 w-full rounded-[10px] border border-zinc-700 bg-zinc-900 px-5 pt-6 pb-2 text-base text-white outline-none transition-colors placeholder:text-transparent focus:border-zinc-500"
       />
       <label
-        className={`pointer-events-none absolute left-4 text-white/50 transition-all duration-150 ${
+        className={`pointer-events-none absolute left-5 text-zinc-400 transition-all duration-150 ${
           lifted ? "top-2 text-[11px]" : "top-1/2 -translate-y-1/2 text-base"
         }`}
       >
@@ -70,12 +70,12 @@ function StepIndicator({ current }: { current: number }) {
             {/* Daire */}
             <div className="flex flex-col items-center">
               <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 ${
+                className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 ${
                   active
                     ? "bg-white text-black"
                     : done
-                    ? "bg-white/20 text-white"
-                    : "bg-white/10 text-white/40"
+                    ? "bg-zinc-700 text-white"
+                    : "bg-zinc-800 text-zinc-500"
                 }`}
               >
                 {done ? (
@@ -87,14 +87,14 @@ function StepIndicator({ current }: { current: number }) {
                   idx
                 )}
               </div>
-              <span className={`mt-1.5 text-[10px] tracking-wide transition-colors duration-300 ${active ? "text-white/70" : "text-white/30"}`}>
+              <span className={`mt-1.5 text-[10px] tracking-wide transition-colors duration-300 ${active ? "text-zinc-300" : "text-zinc-600"}`}>
                 {label}
               </span>
             </div>
 
             {/* Bağlantı çizgisi */}
             {i < STEP_LABELS.length - 1 && (
-              <div className={`mb-5 h-px w-10 transition-colors duration-300 ${done ? "bg-white/30" : "bg-white/10"}`} />
+              <div className={`mb-5 h-px w-12 transition-colors duration-300 ${done ? "bg-zinc-600" : "bg-zinc-800"}`} />
             )}
           </div>
         );
@@ -218,7 +218,7 @@ export default function SetupPage() {
           {done ? (
             /* ── Tamamlandı ekranı ───────────────────────────── */
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
+              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800">
                 <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
                   <path d="M5 14L11 20L23 8" stroke="#EFFF12" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -226,10 +226,10 @@ export default function SetupPage() {
               <h1 className="text-4xl font-medium tracking-[-0.04em] text-white">
                 Kurulum tamamlandı!
               </h1>
-              <p className="mt-3 text-base text-white/50">
+              <p className="mt-3 text-base text-zinc-400">
                 API sunucusunu yeniden başlat, ardından giriş yapabilirsin.
               </p>
-              <p className="mt-6 text-[11px] tracking-wide text-white/25">
+              <p className="mt-6 text-[11px] tracking-wide text-zinc-600">
                 Giriş sayfasına yönlendiriliyorsun…
               </p>
             </div>
@@ -242,14 +242,14 @@ export default function SetupPage() {
 
               {/* Adım başlığı */}
               <div key={`heading-${step}`} className={slideClass}>
-                <h1 className="whitespace-pre-line text-4xl font-medium tracking-[-0.04em] text-white sm:text-5xl">
+                <h1 className="whitespace-pre-line text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:text-[64px] lg:leading-[0.98]">
                   {heading.title}
                 </h1>
-                <p className="mt-2 text-sm text-white/50">{heading.sub}</p>
+                <p className="mt-2 text-sm text-zinc-400">{heading.sub}</p>
               </div>
 
               {/* Form alanları */}
-              <div key={`form-${step}`} className={`mt-8 space-y-4 ${slideClass}`}>
+              <div key={`form-${step}`} className={`mt-8 space-y-5 ${slideClass}`}>
 
                 {step === 1 && (
                   <>
@@ -275,10 +275,10 @@ export default function SetupPage() {
                 )}
 
                 {step === 3 && (
-                  <div className="space-y-2 rounded-[10px] border border-white/10 bg-white/5 p-5 text-sm">
+                  <div className="space-y-2 rounded-[10px] border border-zinc-800 bg-zinc-900 p-5 text-sm">
                     <SummaryRow label="E-posta" value={email} />
                     <SummaryRow label="Şifre" value="••••••••" />
-                    <div className="my-3 h-px bg-white/10" />
+                    <div className="my-3 h-px bg-zinc-800" />
                     <SummaryRow label="Host" value={pgHost} />
                     <SummaryRow label="Port" value={pgPort} />
                     <SummaryRow label="Kullanıcı" value={pgUser} />
@@ -299,7 +299,7 @@ export default function SetupPage() {
                   <button
                     type="button"
                     onClick={goBack}
-                    className="flex h-12 items-center justify-center rounded-[10px] border border-white/20 bg-white/5 px-6 text-base font-medium text-white transition-colors hover:bg-white/10"
+                    className="flex h-[52px] items-center justify-center rounded-[10px] border border-zinc-700 bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-800"
                   >
                     Geri
                   </button>
@@ -309,7 +309,7 @@ export default function SetupPage() {
                   <button
                     type="button"
                     onClick={goNext}
-                    className="flex h-12 flex-1 items-center justify-center rounded-[10px] border border-white/40 bg-white text-base font-medium text-black transition-colors hover:bg-white/85"
+                    className="flex h-[52px] flex-1 items-center justify-center rounded-[10px] border border-zinc-600 bg-white text-base font-medium text-black transition-colors hover:bg-zinc-100"
                   >
                     Devam Et
                   </button>
@@ -318,7 +318,7 @@ export default function SetupPage() {
                     type="button"
                     onClick={handleSubmit}
                     disabled={isPending}
-                    className="flex h-12 flex-1 items-center justify-center gap-2 rounded-[10px] border border-white/40 bg-white text-base font-medium text-black transition-colors hover:bg-white/85 disabled:opacity-50"
+                    className="flex h-[52px] flex-1 items-center justify-center gap-2 rounded-[10px] border border-zinc-600 bg-white text-base font-medium text-black transition-colors hover:bg-zinc-100 disabled:opacity-50"
                   >
                     {isPending && (
                       <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -331,7 +331,7 @@ export default function SetupPage() {
                 )}
               </div>
 
-              <p className="mt-10 text-center text-[11px] tracking-wide text-white/25">
+              <p className="mt-10 text-center text-[11px] tracking-wide text-zinc-600">
                 Argon2id · JWT · Redis session
               </p>
             </>
@@ -377,8 +377,8 @@ export default function SetupPage() {
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-white/40">{label}</span>
-      <span className="text-white/80">{value}</span>
+      <span className="text-zinc-500">{label}</span>
+      <span className="text-zinc-200">{value}</span>
     </div>
   );
 }

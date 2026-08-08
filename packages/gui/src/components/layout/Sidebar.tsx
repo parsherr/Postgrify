@@ -53,8 +53,8 @@ function DbTreeNode({
             className={cn(
               "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
               isActiveDb
-                ? "border-l-2 border-zinc-400 bg-zinc-800/60 pl-1.5 text-foreground"
-                : "border-l-2 border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                ? "border-l-2 border-zinc-400 bg-zinc-800 pl-1.5 text-foreground"
+                : "border-l-2 border-transparent text-zinc-400 hover:bg-zinc-800 hover:text-foreground",
               collapsed && "justify-center px-0"
             )}
           >
@@ -107,8 +107,8 @@ export function Sidebar({ collapsed }: SidebarProps) {
                       className={cn(
                         "flex items-center gap-2 rounded-sm px-2 py-1.5 transition-colors",
                         active
-                          ? "bg-accent/60 text-foreground"
-                          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                          ? "bg-zinc-800 text-foreground"
+                          : "text-zinc-400 hover:bg-zinc-800 hover:text-foreground",
                         collapsed && "justify-center px-0"
                       )}
                     >
@@ -130,7 +130,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
         {/* DB section */}
         {!collapsed && (
           <div className="mb-1 px-3">
-            <span className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground/60">
+            <span className="text-2xs font-semibold uppercase tracking-widest text-zinc-500">
               Databases
             </span>
           </div>
@@ -151,7 +151,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                 <Link
                   to="/databases"
                   className={cn(
-                    "flex items-center gap-2 rounded-sm px-2 py-1.5 text-muted-foreground/50 transition-colors hover:text-muted-foreground",
+                    "flex items-center gap-2 rounded-sm px-2 py-1.5 text-zinc-600 transition-colors hover:text-zinc-400",
                     collapsed && "justify-center px-0"
                   )}
                 >
@@ -181,7 +181,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                   target="_blank"
                   rel="noopener noreferrer"
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-muted-foreground/60 transition-colors hover:text-muted-foreground",
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-300",
                     collapsed && "justify-center px-0"
                   )}
                 >
@@ -204,7 +204,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                 <button
                   onClick={handleLogout}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-muted-foreground/60 transition-colors hover:text-muted-foreground",
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-300",
                     collapsed && "justify-center px-0"
                   )}
                 >
@@ -221,8 +221,8 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
         {/* Version satırı */}
         {!collapsed && (
-          <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
-            <span className="font-mono text-2xs text-muted-foreground/40">
+          <div className="flex items-center justify-between border-t border-zinc-800 px-3 py-1.5">
+            <span className="font-mono text-2xs text-zinc-600">
               v{VERSION}
             </span>
             <img src="/black-white-logo.png" alt="" className="h-5 w-5 object-contain" />

@@ -53,12 +53,12 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-3">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-4">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1 text-sm">
         <Link
           to="/"
-          className="flex items-center gap-1.5 font-semibold text-foreground"
+          className="flex items-center gap-1.5 font-semibold text-white"
         >
           <img src="/black-white-logo.png" alt="Postgrify" className="h-7 w-7 object-contain" />
           <span className="hidden text-sm sm:block">Postgrify</span>
@@ -66,13 +66,13 @@ export function TopBar() {
 
         {crumbs.map((crumb, i) => (
           <span key={crumb.to} className="flex items-center gap-1">
-            <ChevronRight className="h-3 w-3 text-muted-foreground/40" />
+            <ChevronRight className="h-3 w-3 text-zinc-700" />
             {i === crumbs.length - 1 ? (
-              <span className="font-mono text-xs text-foreground">{crumb.label}</span>
+              <span className="font-mono text-xs text-white">{crumb.label}</span>
             ) : (
               <Link
                 to={crumb.to}
-                className="font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+                className="font-mono text-xs text-zinc-400 transition-colors hover:text-white"
               >
                 {crumb.label}
               </Link>
@@ -87,7 +87,7 @@ export function TopBar() {
         {databases && databases.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1.5 rounded border border-border px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:border-zinc-600 hover:text-foreground">
+              <button className="flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white">
                 <Database className="h-3 w-3" />
                 {activeDb ?? "DB seç"}
               </button>
@@ -100,7 +100,7 @@ export function TopBar() {
                   onClick={() => navigate(`/databases/${d.name}`)}
                   className={cn(
                     "font-mono text-xs",
-                    d.name === activeDb && "bg-accent/50"
+                    d.name === activeDb && "bg-zinc-800"
                   )}
                 >
                   <Database className="mr-2 h-3 w-3" />
@@ -125,7 +125,7 @@ export function TopBar() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
           title="Çıkış"
         >
           <LogOut className="h-3.5 w-3.5" />
