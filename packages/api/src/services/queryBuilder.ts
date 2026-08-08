@@ -4,8 +4,17 @@
  * Tüm değerler parametrik ($1, $2, ...) olarak geçirilir — SQL injection imkânsız.
  * Tablo ve kolon adları isValidIdentifier() ile validate edilir.
  *
- * Desteklenen operatörler:
- *   eq, neq, gt, gte, lt, lte, like, ilike, in, is, not
+ * Desteklenen operatörler (where ve or param'larında):
+ *   eq, neq, gt, gte, lt, lte, like, ilike, in, is
+ *
+ * OR desteği:
+ *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
+ *   → WHERE "status" = 'active' AND ("role" = 'admin' OR "role" = 'mod')
+ *
+ * `is` operatörü değerleri:
+ *   field.is.null     → "field" IS NULL
+ *   field.is.not_null → "field" IS NOT NULL
+ *   (Diğer değerler geçersizdir — net hata mesajı döner)
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
@@ -13,6 +22,7 @@ import { isValidIdentifier } from "../utils/identifier.js";
 export interface SelectOptions {
   select?: string;   // "id,name,email"
   where?: string[];  // ["age.gt.18", "status.eq.active"]
+  or?: string[];     // ["role.eq.admin", "role.eq.mod"] → OR ile birleştirilir
   order?: string;    // "name.asc" | "created_at.desc"
   limit?: number;
   offset?: number;
@@ -23,6 +33,8 @@ export interface WhereClause {
   values: unknown[];
 }
 
+// `not` kaldırıldı — `neq` alias'ı olarak davranıyordu ama değer yok sayılıyordu.
+// `neq` kullanın: field.neq.value
 const OPERATORS: Record<string, string> = {
   eq: "=",
   neq: "!=",
@@ -34,52 +46,106 @@ const OPERATORS: Record<string, string> = {
   ilike: "ILIKE",
   in: "IN",
   is: "IS",
-  not: "IS NOT",
+};
+
+// `is` operatörünün kabul ettiği değerler
+const IS_VALUES: Record<string, string> = {
+  null: "NULL",
+  not_null: "NOT NULL",
 };
 
 /**
- * "age.gt.18" → { sql: '"age" > $1', values: [18] }
+ * Tek bir "field.op.value" string'ini parse ederek SQL parçası ve değer üretir.
+ * Değerler values dizisine offset kadar kaydırılmış placeholder ile eklenir.
+ */
+function parseCondition(
+  condition: string,
+  offset: number
+): { sql: string; values: unknown[] } {
+  const dotIndex = condition.indexOf(".");
+  if (dotIndex === -1) {
+    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
+  }
+
+  const rest = condition.slice(dotIndex + 1);
+  const opDotIndex = rest.indexOf(".");
+
+  if (opDotIndex === -1) {
+    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
+  }
+
+  const column = condition.slice(0, dotIndex);
+  const op = rest.slice(0, opDotIndex);
+  const value = rest.slice(opDotIndex + 1);
+
+  if (!isValidIdentifier(column)) {
+    throw new Error(`Invalid column name: ${column}`);
+  }
+
+  const pgOp = OPERATORS[op];
+  if (!pgOp) {
+    throw new Error(
+      `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}`
+    );
+  }
+
+  if (op === "in") {
+    const inValues = value.split(",");
+    const placeholders = inValues.map((_, i) => `$${offset + i + 1}`);
+    return {
+      sql: `"${column}" IN (${placeholders.join(", ")})`,
+      values: inValues,
+    };
+  }
+
+  if (op === "is") {
+    const isTarget = IS_VALUES[value.toLowerCase()];
+    if (!isTarget) {
+      throw new Error(
+        `Invalid value for "is" operator: "${value}". Valid values: null, not_null`
+      );
+    }
+    // IS NULL / IS NOT NULL — değer parametrize edilmez
+    return { sql: `"${column}" IS ${isTarget}`, values: [] };
+  }
+
+  // Standart operatörler
+  return {
+    sql: `"${column}" ${pgOp} $${offset + 1}`,
+    values: [value],
+  };
+}
+
+/**
+ * WHERE koşullarını parse eder.
+ *
+ * @param conditions AND ile birleştirilecek koşullar: ["age.gt.18", "status.eq.active"]
+ * @param orConditions OR ile birleştirilecek koşullar: ["role.eq.admin", "role.eq.mod"]
+ *
+ * Üretilen SQL: WHERE "age" > $1 AND "status" = $2 AND ("role" = $3 OR "role" = $4)
  */
 export function parseWhereConditions(
-  conditions: string[]
+  conditions: string[],
+  orConditions: string[] = []
 ): { sql: string; values: unknown[] } {
   const parts: string[] = [];
   const values: unknown[] = [];
 
   for (const condition of conditions) {
-    const dotIndex = condition.indexOf(".");
-    const rest = condition.slice(dotIndex + 1);
-    const opDotIndex = rest.indexOf(".");
+    const result = parseCondition(condition, values.length);
+    parts.push(result.sql);
+    values.push(...result.values);
+  }
 
-    const column = condition.slice(0, dotIndex);
-    const op = rest.slice(0, opDotIndex);
-    const value = rest.slice(opDotIndex + 1);
-
-    if (!isValidIdentifier(column)) {
-      throw new Error(`Invalid column name: ${column}`);
+  if (orConditions.length > 0) {
+    const orParts: string[] = [];
+    for (const condition of orConditions) {
+      const result = parseCondition(condition, values.length);
+      orParts.push(result.sql);
+      values.push(...result.values);
     }
-
-    const pgOp = OPERATORS[op];
-    if (!pgOp) {
-      throw new Error(
-        `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}`
-      );
-    }
-
-    if (op === "in") {
-      const inValues = value.split(",");
-      const placeholders = inValues.map((_, i) => `$${values.length + i + 1}`);
-      parts.push(`"${column}" IN (${placeholders.join(", ")})`);
-      values.push(...inValues);
-    } else if (op === "is") {
-      // "field.is.null" → field IS NULL (değer yok)
-      parts.push(`"${column}" IS ${value.toUpperCase() === "NULL" ? "NULL" : "NOT NULL"}`);
-    } else if (op === "not") {
-      parts.push(`"${column}" IS NOT NULL`);
-    } else {
-      parts.push(`"${column}" ${pgOp} $${values.length + 1}`);
-      values.push(value);
-    }
+    // OR grubunu parantez içine al — AND ile karışmasın
+    parts.push(`(${orParts.join(" OR ")})`);
   }
 
   return {

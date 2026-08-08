@@ -1,396 +1,384 @@
 /**
- * SetupPage — ilk kurulum sihirbazı.
+ * SetupPage — ilk çalıştırma sihirbazı.
  *
- * 3 adım:
- *  1. Admin hesabı (email + şifre)
- *  2. PostgreSQL bağlantısı
- *  3. Özet + Tamamla
+ * Görsel dil LoginPage ile aynı: siyah zemin, GrainGradient sağ panel,
+ * floating-label input'lar. 3 adım arası slide+fade animasyonu.
  *
- * POST /setup başarılı olursa /login'e yönlendirir.
- * API yeniden başlatılması gerektiği kullanıcıya bildirilir.
+ * Adımlar:
+ *  1 — Admin hesabı (e-posta + şifre + tekrar)
+ *  2 — PostgreSQL bağlantısı (host + port + kullanıcı + şifre)
+ *  3 — Özet + tamamla
  */
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { postSetup, type SetupPayload } from "../lib/api";
+import { GrainGradient } from "@paper-design/shaders-react";
+import { postSetup } from "../lib/api";
 
-type Step = 1 | 2 | 3;
+// ── Floating-label input ──────────────────────────────────────────────────────
 
-const STEP_LABELS: Record<Step, string> = {
-  1: "Admin Hesabı",
-  2: "PostgreSQL Bağlantısı",
-  3: "Özet",
-};
-
-function StepIndicator({ current }: { current: Step }) {
-  return (
-    <div className="flex items-center justify-center gap-0 mb-8">
-      {([1, 2, 3] as Step[]).map((step, idx) => (
-        <div key={step} className="flex items-center">
-          <div className="flex flex-col items-center">
-            <div
-              className={[
-                "h-8 w-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors",
-                current === step
-                  ? "bg-foreground text-background"
-                  : current > step
-                  ? "bg-foreground/30 text-foreground"
-                  : "bg-muted text-muted-foreground",
-              ].join(" ")}
-            >
-              {current > step ? (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                  <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                </svg>
-              ) : (
-                step
-              )}
-            </div>
-            <span className="mt-1 text-xs text-muted-foreground whitespace-nowrap">
-              {STEP_LABELS[step]}
-            </span>
-          </div>
-          {idx < 2 && (
-            <div
-              className={[
-                "h-px w-16 mx-2 mb-5 transition-colors",
-                current > step ? "bg-foreground/30" : "bg-border",
-              ].join(" ")}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
+interface FieldBoxProps {
+  label: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
 }
 
-function Field({
-  label,
-  id,
-  type = "text",
-  value,
-  onChange,
-  error,
-  placeholder,
-  autoComplete,
-}: {
-  label: string;
-  id: string;
-  type?: string;
-  value: string | number;
-  onChange: (v: string) => void;
-  error?: string;
-  placeholder?: string;
-  autoComplete?: string;
-}) {
+function FieldBox({ label, value, onChange, type = "text", required, placeholder }: FieldBoxProps) {
+  const [focused, setFocused] = useState(false);
+  const lifted = focused || value.length > 0;
+
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium text-foreground">
-        {label}
-      </label>
+    <div className="relative">
       <input
-        id={id}
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        className={[
-          "h-9 rounded-md border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground",
-          "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-shadow",
-          error ? "border-destructive focus:ring-destructive" : "border-border",
-        ].join(" ")}
+        onChange={onChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        required={required}
+        placeholder={placeholder ?? ""}
+        className="peer h-14 w-full rounded-[10px] border border-white/20 bg-white/5 px-4 pt-5 pb-2 text-base text-white outline-none transition-colors placeholder:text-transparent focus:border-white/50"
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      <label
+        className={`pointer-events-none absolute left-4 text-white/50 transition-all duration-150 ${
+          lifted ? "top-2 text-[11px]" : "top-1/2 -translate-y-1/2 text-base"
+        }`}
+      >
+        {label}
+      </label>
     </div>
   );
 }
+
+// ── Step indicator ────────────────────────────────────────────────────────────
+
+const STEP_LABELS = ["Admin Hesabı", "Veritabanı", "Özet"];
+
+function StepIndicator({ current }: { current: number }) {
+  return (
+    <div className="flex items-center gap-0">
+      {STEP_LABELS.map((label, i) => {
+        const idx = i + 1;
+        const done = idx < current;
+        const active = idx === current;
+
+        return (
+          <div key={idx} className="flex items-center">
+            {/* Daire */}
+            <div className="flex flex-col items-center">
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 ${
+                  active
+                    ? "bg-white text-black"
+                    : done
+                    ? "bg-white/20 text-white"
+                    : "bg-white/10 text-white/40"
+                }`}
+              >
+                {done ? (
+                  // Tik ikonu
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  idx
+                )}
+              </div>
+              <span className={`mt-1.5 text-[10px] tracking-wide transition-colors duration-300 ${active ? "text-white/70" : "text-white/30"}`}>
+                {label}
+              </span>
+            </div>
+
+            {/* Bağlantı çizgisi */}
+            {i < STEP_LABELS.length - 1 && (
+              <div className={`mb-5 h-px w-10 transition-colors duration-300 ${done ? "bg-white/30" : "bg-white/10"}`} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Adım başlıkları ────────────────────────────────────────────────────────────
+
+const STEP_HEADINGS: Record<number, { title: string; sub: string }> = {
+  1: { title: "Admin hesabını\noluştur", sub: "Sisteme giriş için kullanacağın hesap." },
+  2: { title: "Veritabanını\nbağla", sub: "PostgreSQL bağlantı bilgilerini gir." },
+  3: { title: "Her şey\nhazır", sub: "Ayarları gözden geçir ve tamamla." },
+};
+
+// ── Ana bileşen ────────────────────────────────────────────────────────────────
 
 export default function SetupPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<Step>(1);
-  const [submitting, setSubmitting] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
-  // Step 1 state
-  const [adminEmail, setAdminEmail] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
-  const [adminPasswordConfirm, setAdminPasswordConfirm] = useState("");
-  const [step1Errors, setStep1Errors] = useState<Record<string, string>>({});
+  // Adım durumu
+  const [step, setStep] = useState(1);
+  const [direction, setDirection] = useState<"forward" | "back">("forward");
 
-  // Step 2 state
+  // Adım 1 — Admin hesabı
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+
+  // Adım 2 — PostgreSQL
   const [pgHost, setPgHost] = useState("localhost");
   const [pgPort, setPgPort] = useState("5432");
   const [pgUser, setPgUser] = useState("postgres");
   const [pgPassword, setPgPassword] = useState("");
-  const [step2Errors, setStep2Errors] = useState<Record<string, string>>({});
 
-  // ── Validation ────────────────────────────────────────────────
-  function validateStep1(): boolean {
-    const errs: Record<string, string> = {};
-    if (!adminEmail.trim()) errs.adminEmail = "Email gerekli";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail))
-      errs.adminEmail = "Geçerli bir email girin";
-    if (!adminPassword) errs.adminPassword = "Şifre gerekli";
-    else if (adminPassword.length < 8)
-      errs.adminPassword = "Şifre en az 8 karakter olmalı";
-    if (adminPassword !== adminPasswordConfirm)
-      errs.adminPasswordConfirm = "Şifreler eşleşmiyor";
-    setStep1Errors(errs);
-    return Object.keys(errs).length === 0;
+  // UI durumu
+  const [error, setError] = useState("");
+  const [isPending, setIsPending] = useState(false);
+  const [done, setDone] = useState(false);
+
+  // ── Validasyon ──────────────────────────────────────────────────────────────
+
+  function validateStep1(): string {
+    if (!email.includes("@")) return "Geçerli bir e-posta gir.";
+    if (password.length < 8) return "Şifre en az 8 karakter olmalı.";
+    if (password !== passwordConfirm) return "Şifreler eşleşmiyor.";
+    return "";
   }
 
-  function validateStep2(): boolean {
-    const errs: Record<string, string> = {};
-    if (!pgHost.trim()) errs.pgHost = "Host gerekli";
-    const portNum = Number(pgPort);
-    if (!pgPort || isNaN(portNum) || portNum < 1 || portNum > 65535)
-      errs.pgPort = "Geçerli bir port girin (1-65535)";
-    if (!pgUser.trim()) errs.pgUser = "Kullanıcı adı gerekli";
-    setStep2Errors(errs);
-    return Object.keys(errs).length === 0;
+  function validateStep2(): string {
+    const port = Number(pgPort);
+    if (!pgHost.trim()) return "Host alanı boş olamaz.";
+    if (!pgUser.trim()) return "Kullanıcı adı boş olamaz.";
+    if (!pgPassword.trim()) return "Şifre boş olamaz.";
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return "Port 1–65535 arasında olmalı.";
+    return "";
   }
 
-  // ── Step handlers ─────────────────────────────────────────────
-  function handleNext() {
-    if (step === 1 && validateStep1()) setStep(2);
-    else if (step === 2 && validateStep2()) setStep(3);
+  // ── Adım geçişleri ──────────────────────────────────────────────────────────
+
+  function goNext() {
+    setError("");
+    const err = step === 1 ? validateStep1() : step === 2 ? validateStep2() : "";
+    if (err) { setError(err); return; }
+    setDirection("forward");
+    setStep(s => s + 1);
   }
 
-  function handleBack() {
-    if (step === 2) setStep(1);
-    else if (step === 3) setStep(2);
+  function goBack() {
+    setError("");
+    setDirection("back");
+    setStep(s => s - 1);
   }
+
+  // ── Submit ──────────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    setGlobalError(null);
-    setSubmitting(true);
+    setError("");
+    setIsPending(true);
     try {
-      const payload: SetupPayload = {
-        adminEmail: adminEmail.trim(),
-        adminPassword,
-        pgHost: pgHost.trim(),
+      await postSetup({
+        adminEmail: email,
+        adminPassword: password,
+        pgHost,
         pgPort: Number(pgPort),
-        pgUser: pgUser.trim(),
+        pgUser,
         pgPassword,
-      };
-      await postSetup(payload);
+      });
       setDone(true);
-    } catch (err) {
-      setGlobalError(err instanceof Error ? err.message : "Kurulum başarısız");
+      setTimeout(() => navigate("/login"), 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Kurulum başarısız.";
+      setError(msg);
     } finally {
-      setSubmitting(false);
+      setIsPending(false);
     }
   }
 
-  // ── Done screen ───────────────────────────────────────────────
-  if (done) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-foreground/10">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 text-foreground">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Kurulum Tamamlandı</h2>
-          <p className="text-sm text-muted-foreground mb-6">
-            Ayarlar <code className="bg-muted px-1 rounded text-xs">.env</code> dosyasına kaydedildi.
-            Değişikliklerin geçerli olması için API sunucusunu yeniden başlatın.
-          </p>
-          <div className="rounded-md bg-muted/50 border border-border p-3 mb-6 text-left">
-            <p className="text-xs font-mono text-muted-foreground">
-              docker compose restart api
-            </p>
-            <p className="text-xs font-mono text-muted-foreground mt-1">
-              # veya: npm run dev (packages/api)
-            </p>
-          </div>
-          <button
-            onClick={() => navigate("/login")}
-            className="w-full h-9 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
-          >
-            Giriş Yap
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // ── Sağ panel sloganı ───────────────────────────────────────────────────────
 
-  // ── Main wizard ───────────────────────────────────────────────
+  const heading = STEP_HEADINGS[step];
+  const slideClass = direction === "forward"
+    ? "animate-in fade-in slide-in-from-right-4 duration-300"
+    : "animate-in fade-in slide-in-from-left-4 duration-300";
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-foreground">Postgrify Kurulum</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            İlk kullanım için temel ayarları yapılandırın
-          </p>
+    <section className="min-h-screen bg-black p-3 text-white antialiased [font-synthesis:none]">
+      <div className="grid min-h-[calc(100vh-1.5rem)] rounded-md lg:grid-cols-2 lg:gap-3">
+
+        {/* ── Sol panel — form ──────────────────────────────────────────── */}
+        <div className="flex flex-col justify-center px-8 sm:px-16 lg:px-20">
+
+          {/* Logo */}
+          <div className="mb-10">
+            <img src="/black-white-logo.png" alt="Postgrify" className="h-8 w-8 object-contain invert" />
+          </div>
+
+          {done ? (
+            /* ── Tamamlandı ekranı ───────────────────────────── */
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                  <path d="M5 14L11 20L23 8" stroke="#EFFF12" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h1 className="text-4xl font-medium tracking-[-0.04em] text-white">
+                Kurulum tamamlandı!
+              </h1>
+              <p className="mt-3 text-base text-white/50">
+                API sunucusunu yeniden başlat, ardından giriş yapabilirsin.
+              </p>
+              <p className="mt-6 text-[11px] tracking-wide text-white/25">
+                Giriş sayfasına yönlendiriliyorsun…
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Step indicator */}
+              <div className="mb-8">
+                <StepIndicator current={step} />
+              </div>
+
+              {/* Adım başlığı */}
+              <div key={`heading-${step}`} className={slideClass}>
+                <h1 className="whitespace-pre-line text-4xl font-medium tracking-[-0.04em] text-white sm:text-5xl">
+                  {heading.title}
+                </h1>
+                <p className="mt-2 text-sm text-white/50">{heading.sub}</p>
+              </div>
+
+              {/* Form alanları */}
+              <div key={`form-${step}`} className={`mt-8 space-y-4 ${slideClass}`}>
+
+                {step === 1 && (
+                  <>
+                    <FieldBox label="E-posta" value={email} onChange={e => setEmail(e.target.value)} type="email" required />
+                    <FieldBox label="Şifre" value={password} onChange={e => setPassword(e.target.value)} type="password" required />
+                    <FieldBox label="Şifre tekrar" value={passwordConfirm} onChange={e => setPasswordConfirm(e.target.value)} type="password" required />
+                  </>
+                )}
+
+                {step === 2 && (
+                  <>
+                    <FieldBox label="Host" value={pgHost} onChange={e => setPgHost(e.target.value)} required />
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="col-span-1">
+                        <FieldBox label="Port" value={pgPort} onChange={e => setPgPort(e.target.value)} required />
+                      </div>
+                      <div className="col-span-2">
+                        <FieldBox label="Kullanıcı" value={pgUser} onChange={e => setPgUser(e.target.value)} required />
+                      </div>
+                    </div>
+                    <FieldBox label="Şifre" value={pgPassword} onChange={e => setPgPassword(e.target.value)} type="password" required />
+                  </>
+                )}
+
+                {step === 3 && (
+                  <div className="space-y-2 rounded-[10px] border border-white/10 bg-white/5 p-5 text-sm">
+                    <SummaryRow label="E-posta" value={email} />
+                    <SummaryRow label="Şifre" value="••••••••" />
+                    <div className="my-3 h-px bg-white/10" />
+                    <SummaryRow label="Host" value={pgHost} />
+                    <SummaryRow label="Port" value={pgPort} />
+                    <SummaryRow label="Kullanıcı" value={pgUser} />
+                    <SummaryRow label="DB Şifresi" value="••••••••" />
+                  </div>
+                )}
+
+              </div>
+
+              {/* Hata mesajı */}
+              {error && (
+                <p className="mt-3 text-sm text-red-400">{error}</p>
+              )}
+
+              {/* Butonlar */}
+              <div className="mt-8 flex items-center gap-3">
+                {step > 1 && (
+                  <button
+                    type="button"
+                    onClick={goBack}
+                    className="flex h-12 items-center justify-center rounded-[10px] border border-white/20 bg-white/5 px-6 text-base font-medium text-white transition-colors hover:bg-white/10"
+                  >
+                    Geri
+                  </button>
+                )}
+
+                {step < 3 ? (
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    className="flex h-12 flex-1 items-center justify-center rounded-[10px] border border-white/40 bg-white text-base font-medium text-black transition-colors hover:bg-white/85"
+                  >
+                    Devam Et
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={isPending}
+                    className="flex h-12 flex-1 items-center justify-center gap-2 rounded-[10px] border border-white/40 bg-white text-base font-medium text-black transition-colors hover:bg-white/85 disabled:opacity-50"
+                  >
+                    {isPending && (
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                    )}
+                    Kurulumu Tamamla
+                  </button>
+                )}
+              </div>
+
+              <p className="mt-10 text-center text-[11px] tracking-wide text-white/25">
+                Argon2id · JWT · Redis session
+              </p>
+            </>
+          )}
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-8 shadow-sm">
-          <StepIndicator current={step} />
+        {/* ── Sağ panel — GrainGradient ─────────────────────────────────── */}
+        <div className="relative hidden overflow-hidden rounded-md bg-black text-white lg:block">
+          {/* Sarı grain gradient — köşelerden akan efekt */}
+          <GrainGradient
+            speed={0.3}
+            scale={1}
+            rotation={0}
+            offsetX={0}
+            offsetY={0}
+            softness={0.5}
+            intensity={0.5}
+            noise={0.25}
+            shape="corners"
+            frame={2854.5}
+            colors={["#FFFFFF", "#EFFF12", "#EFFF12", "#FFFFFF"]}
+            colorBack="#00000000"
+            className="absolute inset-0 bg-black"
+          />
 
-          {/* Step 1 — Admin hesabı */}
-          {step === 1 && (
-            <div className="flex flex-col gap-4">
-              <Field
-                label="Admin Email"
-                id="adminEmail"
-                type="email"
-                value={adminEmail}
-                onChange={setAdminEmail}
-                error={step1Errors.adminEmail}
-                placeholder="admin@example.com"
-                autoComplete="email"
-              />
-              <Field
-                label="Şifre"
-                id="adminPassword"
-                type="password"
-                value={adminPassword}
-                onChange={setAdminPassword}
-                error={step1Errors.adminPassword}
-                placeholder="En az 8 karakter"
-                autoComplete="new-password"
-              />
-              <Field
-                label="Şifre Tekrar"
-                id="adminPasswordConfirm"
-                type="password"
-                value={adminPasswordConfirm}
-                onChange={setAdminPasswordConfirm}
-                error={step1Errors.adminPasswordConfirm}
-                placeholder="Şifreyi tekrar girin"
-                autoComplete="new-password"
-              />
-            </div>
-          )}
-
-          {/* Step 2 — PostgreSQL */}
-          {step === 2 && (
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2">
-                  <Field
-                    label="Host"
-                    id="pgHost"
-                    value={pgHost}
-                    onChange={setPgHost}
-                    error={step2Errors.pgHost}
-                    placeholder="localhost"
-                  />
-                </div>
-                <Field
-                  label="Port"
-                  id="pgPort"
-                  type="number"
-                  value={pgPort}
-                  onChange={setPgPort}
-                  error={step2Errors.pgPort}
-                  placeholder="5432"
-                />
-              </div>
-              <Field
-                label="Kullanıcı Adı"
-                id="pgUser"
-                value={pgUser}
-                onChange={setPgUser}
-                error={step2Errors.pgUser}
-                placeholder="postgres"
-                autoComplete="username"
-              />
-              <Field
-                label="Şifre"
-                id="pgPassword"
-                type="password"
-                value={pgPassword}
-                onChange={setPgPassword}
-                placeholder="PostgreSQL şifresi"
-                autoComplete="current-password"
-              />
-            </div>
-          )}
-
-          {/* Step 3 — Özet */}
-          {step === 3 && (
-            <div className="flex flex-col gap-4">
-              <div className="rounded-md bg-muted/50 border border-border p-4 text-sm space-y-2">
-                <p className="font-medium text-foreground mb-3">Kurulum Özeti</p>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Admin Email</span>
-                  <span className="font-mono text-foreground">{adminEmail}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Şifre</span>
-                  <span className="font-mono text-foreground">{"•".repeat(Math.min(adminPassword.length, 8))}</span>
-                </div>
-                <hr className="border-border" />
-                <div className="flex justify-between text-muted-foreground">
-                  <span>PG Host</span>
-                  <span className="font-mono text-foreground">{pgHost}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>PG Port</span>
-                  <span className="font-mono text-foreground">{pgPort}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>PG Kullanıcı</span>
-                  <span className="font-mono text-foreground">{pgUser}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>PG Şifre</span>
-                  <span className="font-mono text-foreground">
-                    {pgPassword ? "•".repeat(Math.min(pgPassword.length, 8)) : "(boş)"}
-                  </span>
-                </div>
-              </div>
-              {globalError && (
-                <p className="text-sm text-destructive rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
-                  {globalError}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Navigation */}
-          <div className="mt-6 flex justify-between gap-3">
-            {step > 1 ? (
-              <button
-                onClick={handleBack}
-                disabled={submitting}
-                className="h-9 px-4 rounded-md border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Geri
-              </button>
-            ) : (
-              <div />
-            )}
-
-            {step < 3 ? (
-              <button
-                onClick={handleNext}
-                className="h-9 px-6 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
-              >
-                İleri
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="h-9 px-6 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {submitting && (
-                  <span className="h-3 w-3 rounded-full border-2 border-background/40 border-t-background animate-spin" />
-                )}
-                Kurulumu Tamamla
-              </button>
-            )}
+          {/* İçerik */}
+          <div className="relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-12">
+            <h2 className="max-w-[520px] pt-0 text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:pt-16 lg:text-[64px] lg:leading-[0.98] xl:text-[70px]">
+              Setup fast,
+              <br />
+              Scale faster
+            </h2>
           </div>
         </div>
+
       </div>
+    </section>
+  );
+}
+
+// ── Yardımcı: özet satırı ─────────────────────────────────────────────────────
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-white/40">{label}</span>
+      <span className="text-white/80">{value}</span>
     </div>
   );
 }

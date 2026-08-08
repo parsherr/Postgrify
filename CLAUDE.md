@@ -28,7 +28,8 @@ Monorepo structure:
 - `packages/api/` — Fastify + TypeScript REST API
 - `packages/gui/` — React + Vite + Tailwind CSS frontend
 - `packages/auth-js/` — `@postgrify/auth-js` SDK (zero-dep, browser + Node)
-- `packages/docker-compose.yml` — canonical way to run everything
+- `packages/docker-compose.yml` — canonical way to run everything locally (dev)
+- `docker-compose.prod.yml` / `docker-compose.yml` at repo root — production/CI variants; use the `packages/` one for development
 
 ## Commands
 
@@ -91,7 +92,7 @@ npm run typecheck
 | Admin DB mgmt | `/admin` | `routes/admin/{databases,stats}.ts` |
 | DB data | `/db/:database` | `routes/db/{tables,rows,query,meta,backup}.ts` — requires `authenticate` + `dbResolver` |
 | DB auth | `/db/:database/auth` | `routes/db/auth/` — see Per-DB Auth section below |
-| Terminal | `/terminal` | `routes/terminal.ts` — WebSocket shell via `node-pty`; requires admin token |
+| Terminal | `/terminal` | `routes/terminal.ts` — WebSocket shell via `node-pty`; requires admin token; uses Fastify's `websocket: true` route option |
 
 All `/db/:database/*` data routes run `authenticate` → `dbResolver` as Fastify hooks at group level.
 DB auth routes skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; admin-gated routes add `authenticate` + `scopeGuard("schema")` per-handler.
@@ -181,7 +182,7 @@ Internals: `client.ts` (main class + `createClient` factory), `session.ts` (Sess
 ### Test setup
 Tests use Vitest. `test/setup.ts` overrides all env vars (`NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.
 
-Test files under `packages/api/test/` mirror `src/` layout. `packages/test/` at monorepo level is reserved for future integration tests.
+Test files under `packages/api/test/` mirror `src/` layout — `test/routes/` for route handlers, `test/services/` for service unit tests. `test/setup.ts` runs as `setupFiles` (per-test-file env reset). `packages/test/` at monorepo level is reserved for future integration tests.
 
 ## Environment variables
 

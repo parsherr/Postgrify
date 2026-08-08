@@ -223,3 +223,84 @@ describe("GET /db/:database/:table — read-only transaction", () => {
     expect(sqlFn?.begin).toHaveBeenCalledWith("read only", expect.any(Function));
   });
 });
+
+describe("GET /db/:database/:table/:id — ?pk= parametresi", () => {
+  it("varsayılan pk=id ile 200 döner (geriye uyumluluk)", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/users/1",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    // Mock tek satır dönüyor — 200 bekliyoruz
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("?pk=user_id ile farklı PK kolonu kullanılır — 200", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/users/abc-uuid?pk=user_id",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("?pk ile SQL injection kolon adı reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/users/1?pk=drop",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("?pk ile boşluk içeren geçersiz kolon adı reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/users/1?pk=bad%20col",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("PUT /db/:database/:table/:id — ?pk= parametresi", () => {
+  it("?pk=uuid_col ile güncelleme — 200", async () => {
+    const res = await server.inject({
+      method: "PUT",
+      url: "/db/project1/products/some-uuid?pk=uuid_col",
+      headers: { Authorization: `Bearer ${dbToken}` },
+      payload: { price: 99 },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("?pk ile geçersiz kolon adı reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "PUT",
+      url: "/db/project1/products/1?pk=select",
+      headers: { Authorization: `Bearer ${dbToken}` },
+      payload: { price: 99 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("DELETE /db/:database/:table/:id — ?pk= parametresi", () => {
+  it("?pk=custom_pk ile silme — 200", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/orders/order-123?pk=order_id",
+      headers: { Authorization: `Bearer ${dbToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("?pk ile geçersiz kolon adı reddedilir — 400", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/orders/1?pk=1invalid",
+      headers: { Authorization: `Bearer ${dbToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});

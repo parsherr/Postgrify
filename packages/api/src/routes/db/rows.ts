@@ -4,9 +4,9 @@
  *   POST   /db/:database/:table          — Satır ekle (tekil veya dizi)
  *   PATCH  /db/:database/:table          — Toplu güncelle
  *   DELETE /db/:database/:table          — Toplu sil
- *   GET    /db/:database/:table/:id      — Tekil satır
- *   PUT    /db/:database/:table/:id      — Satır güncelle
- *   DELETE /db/:database/:table/:id      — Satır sil
+ *   GET    /db/:database/:table/:id      — Tekil satır (?pk=kolon ile PK kolonu seçilebilir)
+ *   PUT    /db/:database/:table/:id      — Satır güncelle (?pk=kolon ile PK kolonu seçilebilir)
+ *   DELETE /db/:database/:table/:id      — Satır sil (?pk=kolon ile PK kolonu seçilebilir)
  */
 
 import type { FastifyInstance } from "fastify";
@@ -35,6 +35,16 @@ function queryCacheKey(
   return cache.buildKey(dbName, "rows", table, hash);
 }
 
+/**
+ * ?pk= query parametresinden primary key kolon adını okur.
+ * Belirtilmezse "id" döner. Geçersiz identifier ise hata fırlatır.
+ */
+function resolvePkColumn(pk: string | undefined): string {
+  const col = pk ?? "id";
+  assertIdentifier(col, "pk");
+  return col;
+}
+
 export async function rowsRoute(server: FastifyInstance) {
   // GET /db/:database/:table
   server.get(
@@ -49,6 +59,13 @@ export async function rowsRoute(server: FastifyInstance) {
           properties: {
             select: { type: "string" },
             where: { type: "array", items: { type: "string" } },
+            or: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+              description: "OR-grouped conditions: role.eq.admin,role.eq.mod",
+            },
             order: { type: "string" },
             limit: { type: "integer", default: 100, maximum: 1000 },
             offset: { type: "integer", default: 0 },
@@ -64,6 +81,7 @@ export async function rowsRoute(server: FastifyInstance) {
       const query = req.query as {
         select?: string;
         where?: string | string[];
+        or?: string | string[];
         order?: string;
         limit?: number;
         offset?: number;
@@ -75,13 +93,21 @@ export async function rowsRoute(server: FastifyInstance) {
         ? [query.where]
         : [];
 
+      // ?or=role.eq.admin,role.eq.mod → ["role.eq.admin", "role.eq.mod"]
+      // ya da ?or=role.eq.admin&or=role.eq.mod → ["role.eq.admin", "role.eq.mod"]
+      const orRaw = Array.isArray(query.or)
+        ? query.or
+        : query.or
+        ? [query.or]
+        : [];
+      const orList = orRaw.flatMap((s) => s.split(",").map((c) => c.trim()).filter(Boolean));
+
       const cacheKey = queryCacheKey(server.cache, dbName, table, { ...query });
       const cached = await server.cache.get(cacheKey);
       if (cached) return reply.send(JSON.parse(cached));
 
       const cols = parseSelectColumns(query.select);
-      const { sql: whereSql, values: whereValues } =
-        parseWhereConditions(whereList);
+      const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList, orList);
       const orderSql = parseOrderBy(query.order);
       const limit = Math.min(query.limit ?? 100, 1000);
       const offset = query.offset ?? 0;
@@ -182,8 +208,7 @@ export async function rowsRoute(server: FastifyInstance) {
       }
 
       const updates = req.body as Record<string, unknown>;
-      const { sql: whereSql, values: whereValues } =
-        parseWhereConditions(whereList);
+      const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList);
 
       const sql = server.poolManager.getPool(dbName);
       const setCols = Object.keys(updates)
@@ -236,8 +261,7 @@ export async function rowsRoute(server: FastifyInstance) {
         });
       }
 
-      const { sql: whereSql, values: whereValues } =
-        parseWhereConditions(whereList);
+      const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList);
 
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -257,17 +281,29 @@ export async function rowsRoute(server: FastifyInstance) {
     {
       preHandler: [scopeGuard("read")],
       schema: {
-        description: "Get a single row by primary key (id column)",
+        description: "Get a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
+        querystring: {
+          type: "object",
+          properties: {
+            pk: { type: "string", description: "Primary key column name (default: id)" },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
       const dbName = req.dbName!;
       const { table, id } = req.params as { table: string; id: string };
+      const { pk } = req.query as { pk?: string };
       assertIdentifier(table, "table");
+      const pkCol = resolvePkColumn(pk);
 
       const sql = server.poolManager.getPool(dbName);
-      const [row] = await sql`SELECT * FROM ${sql(table)} WHERE id = ${id} LIMIT 1`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [row] = await sql.unsafe(
+        `SELECT * FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
+        [id] as any[]
+      );
 
       if (!row) return reply.status(404).send({ error: "Row not found" });
       return reply.send(row);
@@ -280,21 +316,38 @@ export async function rowsRoute(server: FastifyInstance) {
     {
       preHandler: [scopeGuard("write")],
       schema: {
-        description: "Replace a row by id",
+        description: "Replace a row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
+        querystring: {
+          type: "object",
+          properties: {
+            pk: { type: "string", description: "Primary key column name (default: id)" },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
       const dbName = req.dbName!;
       const { table, id } = req.params as { table: string; id: string };
+      const { pk } = req.query as { pk?: string };
       assertIdentifier(table, "table");
+      const pkCol = resolvePkColumn(pk);
 
       const updates = req.body as Record<string, unknown>;
       const sql = server.poolManager.getPool(dbName);
 
-      const [updated] = await sql`
-        UPDATE ${sql(table)} SET ${sql(updates)} WHERE id = ${id} RETURNING *
-      `;
+      const setCols = Object.keys(updates)
+        .map((k, i) => {
+          assertIdentifier(k, "column");
+          return `"${k}" = $${i + 2}`;
+        })
+        .join(", ");
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [updated] = await sql.unsafe(
+        `UPDATE "${table}" SET ${setCols} WHERE "${pkCol}" = $1 RETURNING *`,
+        [id, ...Object.values(updates)] as any[]
+      );
 
       if (!updated) return reply.status(404).send({ error: "Row not found" });
 
@@ -312,19 +365,29 @@ export async function rowsRoute(server: FastifyInstance) {
     {
       preHandler: [scopeGuard("delete")],
       schema: {
-        description: "Delete a single row by id",
+        description: "Delete a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
+        querystring: {
+          type: "object",
+          properties: {
+            pk: { type: "string", description: "Primary key column name (default: id)" },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
       const dbName = req.dbName!;
       const { table, id } = req.params as { table: string; id: string };
+      const { pk } = req.query as { pk?: string };
       assertIdentifier(table, "table");
+      const pkCol = resolvePkColumn(pk);
 
       const sql = server.poolManager.getPool(dbName);
-      const [deleted] = await sql`
-        DELETE FROM ${sql(table)} WHERE id = ${id} RETURNING *
-      `;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [deleted] = await sql.unsafe(
+        `DELETE FROM "${table}" WHERE "${pkCol}" = $1 RETURNING *`,
+        [id] as any[]
+      );
 
       if (!deleted) return reply.status(404).send({ error: "Row not found" });
 

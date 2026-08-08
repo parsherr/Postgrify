@@ -1,8 +1,10 @@
 /**
- * GET /:database/auth/me — Geçerli DB kullanıcısının bilgilerini döner.
+ * GET  /:database/auth/me — Geçerli DB kullanıcısının bilgilerini döner.
+ * PATCH /:database/auth/me — Profil alanlarını günceller (full_name, avatar_url, metadata).
  *
- * Authorization: Bearer <db-user-access-token> gerektirir.
- * password_hash döndürülmez.
+ * Her iki endpoint de Authorization: Bearer <db-user-access-token> gerektirir.
+ * password_hash hiçbir zaman döndürülmez.
+ * Şifre değişikliği için PATCH /:database/auth/me/password kullanılır.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -35,7 +37,8 @@ export async function authMeRoute(server: FastifyInstance) {
               provider:       { type: "string" },
               created_at:     { type: "string" },
               last_login:     { type: ["string", "null"] },
-              metadata:       { type: "object" },
+              // metadata dinamik key'ler içerebilir — serializasyon sırasında kırpılmasın
+              metadata:       { type: "object", additionalProperties: true },
             },
           },
         },
@@ -78,6 +81,111 @@ export async function authMeRoute(server: FastifyInstance) {
       }
 
       return reply.send(user);
+    })
+  );
+
+  // PATCH /:database/auth/me — profil güncelle
+  server.patch(
+    "/:database/auth/me",
+    {
+      schema: {
+        description:
+          "Update the current DB user's profile. " +
+          "Only full_name, avatar_url, and metadata can be changed here. " +
+          "Use PATCH /:database/auth/me/password for password changes.",
+        tags: ["db-auth"],
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            full_name:  { type: ["string", "null"], maxLength: 255 },
+            avatar_url: { type: ["string", "null"], maxLength: 2048 },
+            // Metadata gönderilirse mevcut JSONB ile merge edilir (üstüne yazılmaz)
+            metadata:   { type: "object" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id:             { type: "string" },
+              email:          { type: "string" },
+              role:           { type: "string" },
+              full_name:      { type: ["string", "null"] },
+              avatar_url:     { type: ["string", "null"] },
+              email_verified: { type: "boolean" },
+              is_active:      { type: "boolean" },
+              provider:       { type: "string" },
+              created_at:     { type: "string" },
+              last_login:     { type: ["string", "null"] },
+              // metadata dinamik key'ler içerebilir — serializasyon sırasında kırpılmasın
+              metadata:       { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { database } = req.params as { database: string };
+
+      const auth = req.headers.authorization;
+      if (!auth?.startsWith("Bearer ")) {
+        return reply.status(401).send({ error: "Missing authorization token" });
+      }
+
+      const payload = await jwtService.verifyDbUser(auth.slice(7));
+      if (!payload) {
+        return reply.status(401).send({ error: "Invalid or expired token" });
+      }
+
+      if (payload.db !== database) {
+        return reply.status(403).send({ error: "Token database mismatch" });
+      }
+
+      const body = req.body as {
+        full_name?: string | null;
+        avatar_url?: string | null;
+        metadata?: Record<string, unknown>;
+      };
+
+      if (!body || Object.keys(body).length === 0) {
+        return reply.status(400).send({ error: "Request body is empty — nothing to update" });
+      }
+
+      const sql = server.poolManager.getPool(database);
+      await ensureAuthSchema(sql);
+
+      // "full_name" veya "avatar_url" body'de varsa (undefined değil) güncelle,
+      // yoksa mevcut değeri koru. null göndermek alanı temizler.
+      // Metadata varsa mevcut JSONB ile merge et (|| operatörü PostgreSQL'de JSONB merge).
+      const hasFullName  = "full_name"  in body;
+      const hasAvatarUrl = "avatar_url" in body;
+      const hasMetadata  = "metadata"   in body;
+
+      const [updated] = await sql`
+        UPDATE _postgrify_auth.users
+        SET
+          full_name  = ${hasFullName  ? (body.full_name  ?? null) : sql`full_name`},
+          avatar_url = ${hasAvatarUrl ? (body.avatar_url ?? null) : sql`avatar_url`},
+          metadata   = ${hasMetadata
+            ? sql`metadata || ${JSON.stringify(body.metadata)}::JSONB`
+            : sql`metadata`}
+        WHERE id = ${payload.sub}
+        RETURNING
+          id, email, role, full_name, avatar_url,
+          email_verified, is_active, provider,
+          created_at, last_login,
+          metadata - 'verification_token' - 'verification_exp'
+            - 'reset_token' - 'reset_token_exp'
+            - 'magic_token' - 'magic_token_exp' AS metadata
+      `;
+
+      if (!updated) {
+        return reply.status(404).send({ error: "User not found" });
+      }
+
+      return reply.send(updated);
     })
   );
 }

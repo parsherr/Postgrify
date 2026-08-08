@@ -9,7 +9,8 @@
  * Kısıtlamalar:
  *   - Sadece public schema
  *   - View, sequence, index, foreign key, trigger dahil değil (temel dump)
- *   - Büyük tablolar için chunked streaming değil, tek response (dev/test amaçlı)
+ *   - Satırlar cursor ile 100'erli batch'lerde okunur (OOM riski düşürülmüştür)
+ *   - Response tek seferde gönderilir; streaming HTTP response sonraki versiyona bırakılmıştır
  */
 
 import type { FastifyInstance } from "fastify";
@@ -151,12 +152,13 @@ export async function backupRoute(server: FastifyInstance) {
         lines.push(colDefs.join(",\n") + "\n);");
         lines.push("");
 
-        // Satırları çek ve INSERT'e dönüştür
-        const rows = await sql`SELECT * FROM ${sql(tbl)}`;
-
-        if (rows.length > 0) {
-          const colNames = cols.map((c) => quoteIdent(c.column_name)).join(", ");
-          for (const row of rows) {
+        // Satırları cursor ile 100'erli batch'lerde oku — büyük tablolarda peak memory düşer
+        const colNames = cols.map((c) => quoteIdent(c.column_name)).join(", ");
+        let hasRows = false;
+        const cursor = await sql`SELECT * FROM ${sql(tbl)}`.cursor(100);
+        for await (const batch of cursor) {
+          for (const row of batch) {
+            hasRows = true;
             const vals = cols
               .map((c) => toSqlLiteral((row as Record<string, unknown>)[c.column_name]))
               .join(", ");
@@ -164,8 +166,8 @@ export async function backupRoute(server: FastifyInstance) {
               `INSERT INTO ${quoteIdent("public")}.${quoteIdent(tbl)} (${colNames}) VALUES (${vals});`
             );
           }
-          lines.push("");
         }
+        if (hasRows) lines.push("");
       }
 
       lines.push("COMMIT;");
