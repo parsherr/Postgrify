@@ -105,11 +105,13 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
   // Eski kurulumlar IF NOT EXISTS'li ALTER'larla güncellenir.
   await sql.unsafe(`
     ALTER TABLE _postgrify_auth.users
-      ADD COLUMN IF NOT EXISTS email_verified  BOOLEAN     NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS full_name        TEXT,
-      ADD COLUMN IF NOT EXISTS avatar_url       TEXT,
-      ADD COLUMN IF NOT EXISTS provider         TEXT        NOT NULL DEFAULT 'email',
-      ADD COLUMN IF NOT EXISTS provider_id      TEXT;
+      ADD COLUMN IF NOT EXISTS email_verified   BOOLEAN     NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS full_name         TEXT,
+      ADD COLUMN IF NOT EXISTS avatar_url        TEXT,
+      ADD COLUMN IF NOT EXISTS provider          TEXT        NOT NULL DEFAULT 'email',
+      ADD COLUMN IF NOT EXISTS provider_id       TEXT,
+      ADD COLUMN IF NOT EXISTS failed_attempts   INTEGER     NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS locked_until      TIMESTAMPTZ;
 
     -- password_hash NOT NULL kısıtını kaldır (OAuth kullanıcıları için)
     -- Bu sadece mevcut kısıt varsa çalışır; IF NOT EXISTS olmadığı için
@@ -121,13 +123,19 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
   // Varsayılan auth ayarlarını yükle (INSERT OR IGNORE)
   await sql.unsafe(`
     INSERT INTO _postgrify_auth.auth_settings (key, value) VALUES
-      ('email_signup_enabled',  'true'),
-      ('magic_link_enabled',    'false'),
-      ('email_verify_required', 'false'),
-      ('oauth_enabled',         'false'),
-      ('signup_redirect_url',   ''),
-      ('token_expiry',          '15m'),
-      ('refresh_token_expiry',  '7d')
+      ('email_signup_enabled',       'true'),
+      ('magic_link_enabled',         'false'),
+      ('email_verify_required',      'false'),
+      ('oauth_enabled',              'false'),
+      ('signup_redirect_url',        ''),
+      ('token_expiry',               '15m'),
+      ('refresh_token_expiry',       '7d'),
+      ('min_password_length',        '8'),
+      ('password_require_uppercase', 'false'),
+      ('password_require_number',    'false'),
+      ('password_require_special',   'false'),
+      ('account_lockout_attempts',   '5'),
+      ('account_lockout_minutes',    '15')
     ON CONFLICT (key) DO NOTHING;
   `);
 }
@@ -170,10 +178,18 @@ export type AuditEvent =
   | "oauth_login"
   | "oauth_signup"
   | "account_disabled"
-  | "password_changed";
+  | "password_changed"
+  | "raw_sql_exec";
 
 /**
  * Per-DB auth ayarını okur. Yoksa default değeri döner.
+ */
+/**
+ * Per-DB auth ayarını okur. Yoksa default değeri döner.
+ *
+ * Dönen değer küçük harfe normalize edilir — karşılaştırmalar case-insensitive çalışır.
+ * Örn: DB'de "TRUE", "True", "true" değerleri aynı şekilde değerlendirilir.
+ * Bu normalizasyon boolean flag karşılaştırmalarında bypass riskini ortadan kaldırır.
  */
 export async function getAuthSetting(
   sql: postgres.Sql,
@@ -183,7 +199,8 @@ export async function getAuthSetting(
   const rows = await sql`
     SELECT value FROM _postgrify_auth.auth_settings WHERE key = ${key}
   `;
-  return (rows[0]?.value as string) ?? defaultValue;
+  const raw = (rows[0]?.value as string) ?? defaultValue;
+  return raw.toLowerCase();
 }
 
 /**

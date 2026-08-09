@@ -87,6 +87,27 @@ export async function authSettingsRoute(server: FastifyInstance) {
 
       for (const [key, value] of Object.entries(body)) {
         if (!AUTH_SETTING_KEYS.includes(key as AuthSettingKey)) continue;
+
+        // Güvenlik: signup_redirect_url için URL format doğrulaması.
+        // Geçersiz veya tehlikeli protokol (javascript:, data:) içeren URL'ler reddedilir.
+        // Bu, oauth.ts callback'teki origin whitelist'e ek olarak savunma derinliği sağlar.
+        if (key === "signup_redirect_url" && value) {
+          let parsedUrl: URL;
+          try {
+            parsedUrl = new URL(value);
+          } catch {
+            return reply.status(400).send({
+              error: "Invalid signup_redirect_url: must be a valid URL",
+            });
+          }
+          const allowedProtocols = ["http:", "https:"];
+          if (!allowedProtocols.includes(parsedUrl.protocol)) {
+            return reply.status(400).send({
+              error: "Invalid signup_redirect_url: only http: and https: protocols are allowed",
+            });
+          }
+        }
+
         await sql`
           INSERT INTO _postgrify_auth.auth_settings (key, value, updated_at)
           VALUES (${key}, ${value!}, now())

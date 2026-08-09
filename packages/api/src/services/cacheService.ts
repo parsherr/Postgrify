@@ -87,7 +87,15 @@ export class CacheService {
     return this.redis;
   }
 
+  /**
+   * Cache key oluşturur. Her part'tan `:` ve `*` karakterleri sıyrılır.
+   *
+   * Güvenlik: `buildKey("db:evil", "table")` → `postgrify:dbevil:table`
+   * Cache poisoning/traversal saldırısını önler.
+   * Örn: Redis SCAN pattern'ında `*` wildcard inject edilemez.
+   */
   buildKey(...parts: string[]): string {
-    return `postgrify:${parts.join(":")}`;
+    const safeParts = parts.map((p) => p.replace(/[:\s*]/g, ""));
+    return `postgrify:${safeParts.join(":")}`;
   }
 }

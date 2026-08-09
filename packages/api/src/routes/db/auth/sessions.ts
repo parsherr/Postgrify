@@ -87,13 +87,22 @@ export async function authSessionsRoute(server: FastifyInstance) {
     },
     asyncHandler(async (req, reply) => {
       const { id } = req.params as { id: string };
+
+      // UUID format doğrulaması — PostgreSQL'e geçersiz UUID gönderilmesini önle.
+      // Saldırı örneği: id="'; DROP TABLE sessions; --" → parametre zaten güvenli ama
+      // UUID validation hatalı input için açıklayıcı 400 döndürür.
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_REGEX.test(id)) {
+        return reply.status(400).send({ error: "Invalid session ID format" });
+      }
+
       const sql = server.poolManager.getPool(req.dbName!);
       await ensureAuthSchema(sql);
 
       await sql`
         UPDATE _postgrify_auth.sessions
         SET revoked = true
-        WHERE id = ${id}
+        WHERE id = ${id}::uuid
       `;
 
       return reply.status(204).send();
@@ -120,6 +129,12 @@ export async function authSessionsRoute(server: FastifyInstance) {
     },
     asyncHandler(async (req, reply) => {
       const { user_id } = req.query as { user_id: string };
+
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_REGEX.test(user_id)) {
+        return reply.status(400).send({ error: "Invalid user_id format" });
+      }
+
       const sql = server.poolManager.getPool(req.dbName!);
       await ensureAuthSchema(sql);
 

@@ -14,7 +14,7 @@ export const corsPlugin = fp(async (server: FastifyInstance) => {
   await server.register(cors, {
     origin: config.NODE_ENV === "development" ? true : origins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Database"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Database", "X-API-Key"],
     credentials: true,
   });
 });

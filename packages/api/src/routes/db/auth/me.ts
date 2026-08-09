@@ -14,11 +14,12 @@ import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 
 export async function authMeRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   server.get(
     "/:database/auth/me",
     {
+      config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
       schema: {
         description: "Get current DB user profile from access token.",
         tags: ["db-auth"],
@@ -88,6 +89,7 @@ export async function authMeRoute(server: FastifyInstance) {
   server.patch(
     "/:database/auth/me",
     {
+      config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
       schema: {
         description:
           "Update the current DB user's profile. " +
@@ -158,10 +160,28 @@ export async function authMeRoute(server: FastifyInstance) {
 
       // "full_name" veya "avatar_url" body'de varsa (undefined değil) güncelle,
       // yoksa mevcut değeri koru. null göndermek alanı temizler.
-      // Metadata varsa mevcut JSONB ile merge et (|| operatörü PostgreSQL'de JSONB merge).
+      // Metadata varsa mevcut JSONB ile merge et — ama hassas alanlar korunur.
       const hasFullName  = "full_name"  in body;
       const hasAvatarUrl = "avatar_url" in body;
       const hasMetadata  = "metadata"   in body;
+
+      // Güvenlik: kullanıcı metadata merge ile token/auth alanlarını overwrite edemez.
+      // Saldırı örneği: {"reset_token":"evil_hash"} → DB'deki gerçek reset token override.
+      // Çözüm: merge SONRASI hassas alanları DB JSONB - operatörüyle sil.
+      const PROTECTED_METADATA_KEYS = [
+        "reset_token", "reset_token_exp",
+        "magic_token", "magic_token_exp",
+        "verification_token", "verification_exp",
+      ];
+
+      // Sanitize: body.metadata'dan korunan alanları kaldır
+      let safeMetadata: Record<string, unknown> = {};
+      if (hasMetadata && body.metadata) {
+        safeMetadata = { ...body.metadata };
+        for (const key of PROTECTED_METADATA_KEYS) {
+          delete safeMetadata[key];
+        }
+      }
 
       const [updated] = await sql`
         UPDATE _postgrify_auth.users
@@ -169,7 +189,10 @@ export async function authMeRoute(server: FastifyInstance) {
           full_name  = ${hasFullName  ? (body.full_name  ?? null) : sql`full_name`},
           avatar_url = ${hasAvatarUrl ? (body.avatar_url ?? null) : sql`avatar_url`},
           metadata   = ${hasMetadata
-            ? sql`metadata || ${JSON.stringify(body.metadata)}::JSONB`
+            ? sql`(metadata || ${JSON.stringify(safeMetadata)}::JSONB)
+                  - 'reset_token' - 'reset_token_exp'
+                  - 'magic_token' - 'magic_token_exp'
+                  - 'verification_token' - 'verification_exp'`
             : sql`metadata`}
         WHERE id = ${payload.sub}
         RETURNING

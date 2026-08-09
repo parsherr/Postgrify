@@ -6,7 +6,7 @@
 
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { JwtService } from "../services/jwtService.js";
+import { JwtService, jtiBlacklist } from "../services/jwtService.js";
 import { config } from "../config/env.js";
 import type { JwtPayload } from "../types/auth.js";
 
@@ -26,10 +26,22 @@ declare module "fastify" {
 }
 
 export const authPlugin = fp(async (server: FastifyInstance) => {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   // JwtService'i tüm route'lardan erişilebilir kıl (DRY: inline new JwtService() gerekmez)
   server.decorate("jwtService", jwtService);
+
+  // JTI blacklist'e Redis client bağla (Redis varsa distributed revocation).
+  // Redis yoksa in-memory fallback — process restart'ta sıfırlanır.
+  server.addHook("onReady", async () => {
+    const redisClient = server.cache?.redisClient;
+    if (redisClient) {
+      jtiBlacklist.setRedis(redisClient as Parameters<typeof jtiBlacklist.setRedis>[0]);
+      server.log.info("JTI blacklist connected to Redis");
+    } else {
+      server.log.warn("JTI blacklist using in-memory store (no Redis) — token revocation resets on restart");
+    }
+  });
 
   // request.user ve request.dbName'i her request'te null ile başlat
   server.decorateRequest("user", null);

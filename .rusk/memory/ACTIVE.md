@@ -6,22 +6,24 @@ metadata:
 ---
 
 # Now
-Terminal panel implementasyonu tamamlandı.
+Güvenlik düzeltmeleri tamamlandı — 444/444 test geçiyor, TypeScript hatasız.
 
-# Done
-- packages/.env oluşturuldu
-- Setup wizard tamamlandı (GET /setup/status + POST /setup)
-- Terminal panel: Quick SQL kaldırıldı, tab'lı terminal sistemi eklendi
-  - API: @fastify/websocket + node-pty → routes/terminal.ts (WS PTY)
-  - API: plugins/websocket.ts eklendi, plugins/index.ts güncellendi
-  - GUI: @xterm/xterm + @xterm/addon-fit + @xterm/addon-web-links kuruldu
-  - GUI: components/terminal/{terminalStore,ShellTerminal,SqlTerminal,TerminalPanel}.tsx
-  - GUI: AppShell SidebarBottomPanel → TerminalPanel swap edildi
-  - nginx.conf: /api/terminal/ WebSocket proxy eklendi
-  - Dockerfile: node-pty için python3/make/g++ eklendi
-- 215 test geçiyor
+# Done (Güvenlik)
+- KRIT-4: env.ts — production'da placeholder JWT_SECRET/ADMIN_SECRET → process.exit(1)
+- KRIT-3: databases.ts:141 — pg_terminate_backend $1 parametrik query
+- KRIT-2: rateLimit.ts — ioredis backend (Redis varsa distributed, yoksa in-memory fallback)
+- KRIT-1: terminal.ts — TERMINAL_ENABLED flag, env cleanup (JWT_SECRET/PG_PASSWORD temizlendi), token ilk WS mesajından alınıyor
+- HIGH-3: passwordReset.ts + magicLink.ts — SHA-256 hash token storage; users.ts metadata filtreleme
+- HIGH-1 + HIGH-2: oauth.ts — token URL fragment'a taşındı, open redirect origin whitelist eklendi
+- HIGH-4: oauth.ts — Redis-backed state store (in-memory fallback)
+- MED-5: nginx.conf — X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP, Permissions-Policy
+- MED-6: docker-compose.yml — Redis requirepass, env.ts TERMINAL_ENABLED flag
+- MED-3: query.ts — QUERY_LOG_ENABLED raw SQL audit log
+- VERI-1: scripts/reset-admin.ts — emergency admin CLI aracı
+- Güvenlik test suite: test/security/ (7 dosya, 104 güvenlik testi)
+- 444 test geçiyor (37 test dosyası)
 
 # Next
 - docker compose up -d --build ile uçtan uca test
-- Shell terminal: WS bağlantısı, PTY çıktısı, resize doğrulanacak
-- SQL terminal: DB seçimi, sorgu çalıştırma doğrulanacak
+- .env.example REDIS_PASSWORD, TERMINAL_ENABLED alanlarını güncelle
+- packages/.env'e REDIS_PASSWORD ekle

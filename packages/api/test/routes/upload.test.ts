@@ -76,7 +76,12 @@ vi.mock("../../src/services/cacheService.js", () => ({
 }));
 
 // ── Test state for req.file() simulation ─────────────────────────────────────
-const fakeBuffer = Buffer.from("fake-image-data");
+// Gerçek JPEG magic bytes — upload.ts magic bytes kontrolünü geçmek için zorunlu.
+// Buffer.from("fake-image-data") 0xFF ile başlamaz, magic check 415 döndürür.
+const fakeBuffer = Buffer.concat([
+  Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]), // JPEG magic
+  Buffer.from("fake-image-data"),
+]);
 
 type FakeFile = {
   mimetype: string;
@@ -161,6 +166,18 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
+/** MIME tipine göre doğru magic bytes başlangıcı içeren buffer üretir. */
+function makeMagicBuffer(mime: string): Buffer {
+  const magicMap: Record<string, number[]> = {
+    "image/jpeg": [0xFF, 0xD8, 0xFF, 0xE0],
+    "image/png":  [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+    "image/gif":  [0x47, 0x49, 0x46, 0x38, 0x39, 0x61],
+    "image/bmp":  [0x42, 0x4D],
+  };
+  const magic = magicMap[mime] ?? [0xFF, 0xD8, 0xFF, 0xE0];
+  return Buffer.concat([Buffer.from(magic), Buffer.from("fake-image-data")]);
+}
+
 function resetMocks(opts?: { fileMimetype?: string; noFile?: boolean }) {
   mockTaggedResults = [];
   mockUnsafeResults = [];
@@ -168,11 +185,13 @@ function resetMocks(opts?: { fileMimetype?: string; noFile?: boolean }) {
     mockFileFactory = () => Promise.resolve(null);
   } else {
     const mime = opts?.fileMimetype ?? "image/jpeg";
+    // magic bytes mime ile eşleşmeli — yoksa upload.ts magic check 415 döndürür
+    const buf = makeMagicBuffer(mime);
     mockFileFactory = () =>
       Promise.resolve({
         mimetype: mime,
         filename: "test.jpg",
-        toBuffer: () => Promise.resolve(fakeBuffer),
+        toBuffer: () => Promise.resolve(buf),
       });
   }
 }
@@ -189,6 +208,14 @@ describe("POST /db/:database/:table/:column/upload", () => {
     mockUnsafeResults = [[{ id: "42" }]];
 
     const boundary = "----TestBoundary";
+    // Gerçek JPEG magic bytes (FF D8 FF E0 ...) — magic bytes kontrolünü geçmek için zorunlu
+    const jpegMagic = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]);
+    const partHeader = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`
+    );
+    const partFooter = Buffer.from(`\r\n--${boundary}--`);
+    const payload = Buffer.concat([partHeader, jpegMagic, partFooter]);
+
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/products/photo/upload?id=42",
@@ -196,12 +223,7 @@ describe("POST /db/:database/:table/:column/upload", () => {
         Authorization: `Bearer ${adminToken}`,
         "content-type": `multipart/form-data; boundary=${boundary}`,
       },
-      payload:
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="photo.jpg"\r\n` +
-        `Content-Type: image/jpeg\r\n\r\n` +
-        `fake-image-data\r\n` +
-        `--${boundary}--`,
+      payload,
     });
 
     expect(res.statusCode).toBe(200);
@@ -222,6 +244,14 @@ describe("POST /db/:database/:table/:column/upload", () => {
     mockUnsafeResults = [[{ id: "7" }]];
 
     const boundary = "----MimeBoundary";
+    // Gerçek PNG magic bytes (89 50 4E 47 0D 0A 1A 0A) — magic bytes kontrolünü geçmek için zorunlu
+    const pngMagic = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00]);
+    const partHeader = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="img.png"\r\nContent-Type: image/png\r\n\r\n`
+    );
+    const partFooter = Buffer.from(`\r\n--${boundary}--`);
+    const payload = Buffer.concat([partHeader, pngMagic, partFooter]);
+
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/products/photo/upload?id=7",
@@ -229,12 +259,7 @@ describe("POST /db/:database/:table/:column/upload", () => {
         Authorization: `Bearer ${adminToken}`,
         "content-type": `multipart/form-data; boundary=${boundary}`,
       },
-      payload:
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="img.png"\r\n` +
-        `Content-Type: image/png\r\n\r\n` +
-        `fake-png\r\n` +
-        `--${boundary}--`,
+      payload,
     });
 
     expect(res.statusCode).toBe(200);

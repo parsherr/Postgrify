@@ -18,7 +18,7 @@ import crypto from "node:crypto";
 const MAGIC_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 dakika
 
 export async function authMagicLinkRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   // ── POST /:database/auth/magic-link ─────────────────────────────────────
   server.post(
@@ -95,12 +95,14 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
       }
 
       const magicToken = crypto.randomBytes(32).toString("hex");
+      // Güvenlik: token hash'i sakla, raw token'ı değil.
+      const magicTokenHash = crypto.createHash("sha256").update(magicToken).digest("hex");
       const magicExp = new Date(Date.now() + MAGIC_TOKEN_TTL_MS);
 
       await sql`
         UPDATE _postgrify_auth.users
         SET metadata = jsonb_set(
-          jsonb_set(metadata, '{magic_token}', ${JSON.stringify(magicToken)}::jsonb),
+          jsonb_set(metadata, '{magic_token}', ${JSON.stringify(magicTokenHash)}::jsonb),
           '{magic_token_exp}', ${JSON.stringify(magicExp.toISOString())}::jsonb
         )
         WHERE id = ${user.id}
@@ -165,20 +167,29 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
+      // Gelen token'ı hash'leyip DB'deki hash ile karşılaştır
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
       const [user] = await sql`
         SELECT id, email, role, is_active,
-               metadata->>'magic_token'     AS magic_token,
                metadata->>'magic_token_exp' AS magic_token_exp
         FROM _postgrify_auth.users
-        WHERE metadata->>'magic_token' = ${token}
+        WHERE metadata->>'magic_token' = ${tokenHash}
       `;
 
       if (!user) {
         return reply.status(400).send({ error: "Invalid or already used magic link token" });
       }
 
-      const exp = new Date(user.magic_token_exp as string);
-      if (exp < new Date()) {
+      // Savunma: magic_token_exp NULL veya parse edilemezse token geçersiz say.
+      // new Date(undefined) = Invalid Date → isNaN kontrolü kritik; bu olmadan
+      // NULL expiry olan bir token geçerli sayılabilir.
+      const rawExp = user.magic_token_exp as string | null | undefined;
+      if (!rawExp) {
+        return reply.status(400).send({ error: "Invalid or expired magic link token" });
+      }
+      const exp = new Date(rawExp);
+      if (isNaN(exp.getTime()) || exp < new Date()) {
         return reply.status(400).send({ error: "Magic link token has expired" });
       }
 
@@ -204,12 +215,14 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
+      // Yeni session — DB'de refresh token hash'ini sakla, client'a ham token gönder
       const refreshToken = crypto.randomBytes(48).toString("hex");
+      const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
       const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
-        VALUES (${user.id}, ${refreshToken}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
+        VALUES (${user.id}, ${refreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
       `;
 
       await insertAuditLog(sql, "magic_link_login", user.id as string, {

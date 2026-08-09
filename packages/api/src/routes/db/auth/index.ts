@@ -11,6 +11,7 @@
 import type { FastifyInstance } from "fastify";
 import { dbResolverHook } from "../../../middleware/dbResolver.js";
 import { apiKeyGuard } from "../../../middleware/apiKeyGuard.js";
+import { createIpAllowlistGuard } from "../../../middleware/ipAllowlist.js";
 import { authUsersRoute } from "./users.js";
 import { authTokensRoute } from "./tokens.js";
 import { authSignupRoute } from "./signup.js";
@@ -27,6 +28,9 @@ export async function authDbRoutes(server: FastifyInstance) {
   // Sıra önemli: önce DB adını çöz, sonra API key'i doğrula.
   // apiKeyGuard; Bearer token varsa atlanır — admin/GUI erişimlerine dokunmaz.
   server.addHook("preHandler", dbResolverHook);
+  // IP kontrol dbResolver'dan sonra — req.dbName gerekli.
+  // login/signup dahil tüm auth endpoint'leri DB'nin IP kısıtlamasına tabi.
+  server.addHook("preHandler", createIpAllowlistGuard(server));
   server.addHook("preHandler", apiKeyGuard);
 
   // Public auth endpoint'leri (rate-limited)

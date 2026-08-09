@@ -115,11 +115,17 @@ For all endpoints: **http://localhost:3000/api-docs**
 ### Linux / macOS
 
 ```bash
-# Stop
+# First-time start (or after code update)
+cd ~/.postgrify/packages && docker compose up -d --build
+
+# Restart (config change, no rebuild needed)
+cd ~/.postgrify/packages && docker compose restart
+
+# Stop (keep all data)
 cd ~/.postgrify/packages && docker compose down
 
-# Start
-cd ~/.postgrify/packages && docker compose up -d
+# Fresh start — WIPES ALL DATA (databases, users, setup)
+cd ~/.postgrify/packages && docker compose down -v && docker compose up -d --build
 
 # Follow logs
 cd ~/.postgrify/packages && docker compose logs -f
@@ -131,11 +137,17 @@ cd ~/.postgrify && git pull && cd packages && docker compose up -d --build
 ### Windows (PowerShell)
 
 ```powershell
-# Stop
+# First-time start (or after code update)
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose up -d --build
+
+# Restart (config change, no rebuild needed)
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose restart
+
+# Stop (keep all data)
 cd "$env:USERPROFILE\.postgrify\packages"; docker compose down
 
-# Start
-cd "$env:USERPROFILE\.postgrify\packages"; docker compose up -d
+# Fresh start — WIPES ALL DATA (databases, users, setup)
+cd "$env:USERPROFILE\.postgrify\packages"; docker compose down -v; docker compose up -d --build
 
 # Follow logs
 cd "$env:USERPROFILE\.postgrify\packages"; docker compose logs -f
@@ -143,6 +155,8 @@ cd "$env:USERPROFILE\.postgrify\packages"; docker compose logs -f
 # Update to latest version
 cd "$env:USERPROFILE\.postgrify"; git pull; cd packages; docker compose up -d --build
 ```
+
+> **Note:** `docker compose down -v` removes all volumes — this permanently deletes your PostgreSQL data, user accounts, and setup configuration. You will need to run the setup wizard again. Use this only to start completely fresh.
 
 ---
 

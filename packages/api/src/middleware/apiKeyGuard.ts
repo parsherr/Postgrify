@@ -13,6 +13,7 @@
  */
 
 import type { FastifyRequest, FastifyReply, FastifyInstance } from "fastify";
+import crypto from "node:crypto";
 import { getApiKey } from "../routes/db/auth/provision.js";
 
 export async function apiKeyGuard(
@@ -46,7 +47,12 @@ export async function apiKeyGuard(
     });
   }
 
-  if (providedKey !== storedKey) {
+  // timingSafeEqual ile karşılaştır — zamanlama saldırısını engeller.
+  // Buffer uzunlukları eşit olmalı; değilse zaten geçersiz.
+  const a = Buffer.from(providedKey, "utf8");
+  const b = Buffer.from(storedKey,   "utf8");
+  const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!valid) {
     return reply.status(401).send({ error: "Invalid API key" });
   }
 }

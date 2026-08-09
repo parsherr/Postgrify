@@ -55,6 +55,8 @@ export class PoolManager {
       idle_timeout: Math.floor(this.cfg.idleTimeout / 1000),
       max_lifetime: Math.floor(this.cfg.maxLifetime / 1000),
       connect_timeout: 10,
+      keep_alive: 10,          // TCP keepalive: host PG bağlantıyı idle'da kesmez
+      prepare: false,           // PgBouncer uyumluluğu + reconnect kolaylığı
       onnotice: () => {}, // gürültüyü bastır
     });
 
@@ -88,14 +90,28 @@ export class PoolManager {
   }
 
   /**
-   * IDLE_TIMEOUT süresini aşan pool'ları kapatır.
+   * IDLE_TIMEOUT süresini aşan pool'ları graceful olarak kapatır.
+   *
+   * Graceful drain: `end({ timeout: 30 })` ile aktif sorguların 30 saniyeye kadar
+   * bitmesini bekler. Bu süre aşılırsa bağlantı zorla kapatılır; in-flight sorgu
+   * kaybolabilir ama minimum kaybı hedefler. Timeout'u 5 yerine 30 saniye olarak
+   * ayarlamak kısa transaction'ların tamamlanmasını sağlar.
+   *
+   * Not: postgres.js bağlantı başına aktif transaction sayısını programatik
+   * olarak sorgulamaya izin vermiyor. Güvenli eviction için önerilen pattern:
+   *   - İdleTimeout'u yüksek tutun (varsayılan 10 dakika)
+   *   - closeAll() graceful shutdown'da zaten tüm bağlantıları drainer
    */
   private async evictIdlePools(): Promise<void> {
     const now = Date.now();
     for (const [dbName, entry] of this.pools.entries()) {
       if (now - entry.lastUsed > this.cfg.idleTimeout) {
-        await entry.sql.end({ timeout: 5 });
+        // Önce map'ten çıkar — yeni gelen istekler yeni pool alır, race condition olmaz
         this.pools.delete(dbName);
+        // Graceful drain: 30 saniye timeout ile aktif sorguların bitmesini bekle
+        entry.sql.end({ timeout: 30 }).catch(() => {
+          // Zorla kapatma sessizce başarısız olabilir — bu beklenen durum
+        });
       }
     }
   }

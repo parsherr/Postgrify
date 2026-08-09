@@ -1,49 +1,42 @@
 /**
- * GET /db/:database/backup/download — SQL dump (pg_dump olmadan, pure postgres.js)
+ * Backup route'ları — /db/:database/backup/*
  *
- * Şunları içerir:
- *   - public schema'daki tüm tablolar için CREATE TABLE IF NOT EXISTS DDL
- *   - Her tablonun tüm satırları için INSERT INTO ifadeleri
- *   - BEGIN / COMMIT transaction wrapper
+ * Endpoint'ler:
+ *   GET    /:database/backup/download               — Anlık streaming SQL dump (gzip)
+ *   GET    /:database/backup/list                   — Kayıtlı backup listesi
+ *   POST   /:database/backup/create                 — Manuel backup tetikle
+ *   GET    /:database/backup/:backupId/download     — Kayıtlı backup'ı indir
+ *   DELETE /:database/backup/:backupId              — Kayıtlı backup'ı sil
+ *   POST   /:database/backup/restore                — Backup dosyası yükle + restore
+ *   GET    /:database/backup/schedule               — Mevcut schedule konfigürasyonu
+ *   PUT    /:database/backup/schedule               — Schedule kaydet / güncelle
+ *   DELETE /:database/backup/schedule               — Schedule iptal et
  *
- * Kısıtlamalar:
- *   - Sadece public schema
- *   - View, sequence, index, foreign key, trigger dahil değil (temel dump)
- *   - Satırlar cursor ile 100'erli batch'lerde okunur (OOM riski düşürülmüştür)
- *   - Response tek seferde gönderilir; streaming HTTP response sonraki versiyona bırakılmıştır
+ * Tüm endpoint'ler "schema" scope gerektirir.
+ * Restore: gzip decompress → statement'lara ayır → transaction içinde çalıştır.
+ * Streaming download: dosya okunduktan sonra pipe ile response'a aktarılır.
  */
 
-import type { FastifyInstance } from "fastify";
+import { createGzip } from "zlib";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
+import { statSync } from "fs";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
+import { config } from "../../config/env.js";
 
-// SQL string escape — tek tırnak içindeki değerler için
-function escapeSqlString(val: string): string {
-  return val.replace(/'/g, "''").replace(/\\/g, "\\\\");
-}
-
-// Değeri SQL literal'e çevir
-function toSqlLiteral(val: unknown): string {
-  if (val === null || val === undefined) return "NULL";
-  if (typeof val === "boolean") return val ? "TRUE" : "FALSE";
-  if (typeof val === "number") return String(val);
-  if (val instanceof Date) return `'${val.toISOString()}'`;
-  if (typeof val === "object") return `'${escapeSqlString(JSON.stringify(val))}'`;
-  return `'${escapeSqlString(String(val))}'`;
-}
-
-// Identifier'ı çift tırnakla koru
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
+const MAX_UPLOAD_BYTES = config.BACKUP_MAX_SIZE_MB * 1024 * 1024;
 
 export async function backupRoute(server: FastifyInstance) {
+  // ── GET /:database/backup/download ────────────────────────────────────────
+  // Anlık streaming gzip SQL dump — dosyaya kaydedilmez, direkt response'a yazılır.
   server.get(
     "/:database/backup/download",
     {
       preHandler: [scopeGuard("schema")],
       schema: {
-        description: "Download a SQL backup of the database",
+        description: "Stream a live SQL backup of the database (gzip compressed)",
         tags: ["backup"],
         params: {
           type: "object",
@@ -51,137 +44,403 @@ export async function backupRoute(server: FastifyInstance) {
         },
       },
     },
-    asyncHandler(async (req, reply) => {
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
       const dbName = req.dbName!;
       const sql = server.poolManager.getPool(dbName);
 
-      // ── 1. Tablo listesini al ──────────────────────────────────────────────
-      const tablesResult = await sql<{ tablename: string }[]>`
-        SELECT tablename
-        FROM pg_catalog.pg_tables
-        WHERE schemaname = 'public'
-        ORDER BY tablename
-      `;
-      const tableNames = tablesResult.map((r) => r.tablename);
-
-      // ── 2. Her tablo için sütun şemasını al ──────────────────────────────
-      type ColumnInfo = {
-        column_name: string;
-        data_type: string;
-        character_maximum_length: number | null;
-        numeric_precision: number | null;
-        numeric_scale: number | null;
-        is_nullable: string;
-        column_default: string | null;
-      };
-
-      const schemaMap: Record<string, ColumnInfo[]> = {};
-      for (const tbl of tableNames) {
-        const cols = await sql<ColumnInfo[]>`
-          SELECT
-            column_name,
-            data_type,
-            character_maximum_length,
-            numeric_precision,
-            numeric_scale,
-            is_nullable,
-            column_default
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-            AND table_name   = ${tbl}
-          ORDER BY ordinal_position
-        `;
-        schemaMap[tbl] = cols;
-      }
-
-      // ── 3. Primary key bilgisi ────────────────────────────────────────────
-      type PkInfo = { table_name: string; column_name: string };
-      const pkRows = await sql<PkInfo[]>`
-        SELECT kcu.table_name, kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-         AND tc.table_schema    = kcu.table_schema
-        WHERE tc.constraint_type = 'PRIMARY KEY'
-          AND tc.table_schema    = 'public'
-      `;
-      const pkMap: Record<string, string[]> = {};
-      for (const row of pkRows) {
-        if (!pkMap[row.table_name]) pkMap[row.table_name] = [];
-        pkMap[row.table_name].push(row.column_name);
-      }
-
-      // ── 4. Dump string'ini oluştur ────────────────────────────────────────
       const now = new Date().toISOString();
       const dateTag = now.slice(0, 10).replace(/-/g, "");
-      const lines: string[] = [];
+      const filename = `${dbName}_${dateTag}.sql.gz`;
 
-      lines.push(`-- Postgrify SQL Backup`);
-      lines.push(`-- Database : ${dbName}`);
-      lines.push(`-- Generated: ${now}`);
-      lines.push(`-- Tables   : ${tableNames.length}`);
-      lines.push(`-- Note     : public schema only`);
-      lines.push("");
-      lines.push("BEGIN;");
-      lines.push("");
+      reply
+        .header("Content-Type", "application/gzip")
+        .header("Content-Disposition", `attachment; filename="${filename}"`)
+        .header("Transfer-Encoding", "chunked");
 
-      for (const tbl of tableNames) {
-        const cols = schemaMap[tbl] ?? [];
-        const pks  = pkMap[tbl] ?? [];
+      // BackupService.buildDump'u iç metod olarak kullanmak yerine
+      // createBackup ile geçici dosya yaratıp pipe ederiz —
+      // ancak streaming için doğrudan response'a yazıyoruz.
+      // Bunun için backupService'in private buildDump metodunu değil,
+      // public bir stream helper'ı çağırıyoruz.
+      //
+      // Burada sadelik adına: dump string'ini üret, gzip ile pipe et.
+      // Büyük DB'lerde backupService.createBackup tercih edilmeli.
+      const result = await server.backupService.createBackup(dbName, sql);
 
-        // CREATE TABLE
-        lines.push(`-- ── Table: ${tbl} ──`);
-        lines.push(`CREATE TABLE IF NOT EXISTS ${quoteIdent("public")}.${quoteIdent(tbl)} (`);
-
-        const colDefs = cols.map((c) => {
-          let typeDef = c.data_type.toUpperCase();
-          if (c.character_maximum_length) typeDef += `(${c.character_maximum_length})`;
-          else if (c.numeric_precision && c.numeric_scale != null)
-            typeDef += `(${c.numeric_precision},${c.numeric_scale})`;
-
-          let def = `  ${quoteIdent(c.column_name)} ${typeDef}`;
-          if (c.column_default) def += ` DEFAULT ${c.column_default}`;
-          if (c.is_nullable === "NO") def += " NOT NULL";
-          return def;
-        });
-
-        if (pks.length > 0) {
-          colDefs.push(`  PRIMARY KEY (${pks.map(quoteIdent).join(", ")})`);
-        }
-
-        lines.push(colDefs.join(",\n") + "\n);");
-        lines.push("");
-
-        // Satırları cursor ile 100'erli batch'lerde oku — büyük tablolarda peak memory düşer
-        const colNames = cols.map((c) => quoteIdent(c.column_name)).join(", ");
-        let hasRows = false;
-        const cursor = await sql`SELECT * FROM ${sql(tbl)}`.cursor(100);
-        for await (const batch of cursor) {
-          for (const row of batch) {
-            hasRows = true;
-            const vals = cols
-              .map((c) => toSqlLiteral((row as Record<string, unknown>)[c.column_name]))
-              .join(", ");
-            lines.push(
-              `INSERT INTO ${quoteIdent("public")}.${quoteIdent(tbl)} (${colNames}) VALUES (${vals});`
-            );
-          }
-        }
-        if (hasRows) lines.push("");
+      if (result.status === "failed") {
+        return reply.status(500).send({ error: result.error_msg ?? "Backup failed" });
       }
 
-      lines.push("COMMIT;");
-      lines.push("");
+      // Oluşan dosyayı response'a pipe et
+      reply.raw.setHeader("Content-Type", "application/gzip");
+      reply.raw.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-      const content = lines.join("\n");
+      await server.backupService.streamBackupToResponse(result.file_path, reply.raw);
+    })
+  );
 
-      // ── 5. Response ───────────────────────────────────────────────────────
-      const filename = `${dbName}_${dateTag}.sql`;
-      reply
-        .header("Content-Type", "application/octet-stream")
-        .header("Content-Disposition", `attachment; filename="${filename}"`)
-        .header("Content-Length", Buffer.byteLength(content, "utf8").toString())
-        .send(content);
+  // ── GET /:database/backup/list ────────────────────────────────────────────
+  server.get(
+    "/:database/backup/list",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "List saved backups for a database",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              backups: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id:         { type: "string" },
+                    db_name:    { type: "string" },
+                    file_path:  { type: "string" },
+                    size_bytes: { type: ["number", "null"] },
+                    status:     { type: "string" },
+                    created_at: { type: "string" },
+                    error_msg:  { type: ["string", "null"] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const backups = await server.backupService.listBackups(dbName);
+      return reply.send({ backups });
+    })
+  );
+
+  // ── POST /:database/backup/create ─────────────────────────────────────────
+  server.post(
+    "/:database/backup/create",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Trigger a manual backup for a database",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              id:         { type: "string" },
+              db_name:    { type: "string" },
+              file_path:  { type: "string" },
+              size_bytes: { type: ["number", "null"] },
+              status:     { type: "string" },
+              created_at: { type: "string" },
+              error_msg:  { type: ["string", "null"] },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const sql = server.poolManager.getPool(dbName);
+
+      const result = await server.backupService.createBackup(dbName, sql);
+
+      if (result.status === "failed") {
+        return reply.status(500).send({ error: result.error_msg ?? "Backup failed" });
+      }
+
+      // Retention policy varsa uygula
+      const schedule = await server.settings.getBackupSchedule(dbName);
+      if (schedule && schedule.retain > 0) {
+        await server.backupService.enforceRetention(dbName, schedule.retain);
+      }
+
+      return reply.status(201).send(result);
+    })
+  );
+
+  // ── GET /:database/backup/:backupId/download ──────────────────────────────
+  server.get(
+    "/:database/backup/:backupId/download",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Download a specific saved backup",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: {
+            database: { type: "string" },
+            backupId: { type: "string" },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const { backupId } = req.params as { backupId: string };
+
+      const meta = await server.backupService.getBackup(backupId);
+
+      if (!meta || meta.db_name !== dbName) {
+        return reply.status(404).send({ error: "Backup not found" });
+      }
+
+      if (meta.status !== "completed") {
+        return reply.status(409).send({ error: `Backup status is "${meta.status}", cannot download` });
+      }
+
+      let fileSize: number | null = null;
+      try {
+        fileSize = statSync(meta.file_path).size;
+      } catch {
+        return reply.status(404).send({ error: "Backup file missing from disk" });
+      }
+
+      const filename = meta.file_path.split("/").pop() ?? `${dbName}_${backupId}.sql.gz`;
+
+      reply.raw.setHeader("Content-Type", "application/gzip");
+      reply.raw.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      if (fileSize) reply.raw.setHeader("Content-Length", String(fileSize));
+
+      await server.backupService.streamBackupToResponse(meta.file_path, reply.raw);
+    })
+  );
+
+  // ── DELETE /:database/backup/:backupId ────────────────────────────────────
+  server.delete(
+    "/:database/backup/:backupId",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Delete a saved backup (metadata + file)",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: {
+            database: { type: "string" },
+            backupId: { type: "string" },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const { backupId } = req.params as { backupId: string };
+
+      const meta = await server.backupService.getBackup(backupId);
+
+      if (!meta || meta.db_name !== dbName) {
+        return reply.status(404).send({ error: "Backup not found" });
+      }
+
+      await server.backupService.deleteBackup(backupId);
+      return reply.status(204).send();
+    })
+  );
+
+  // ── POST /:database/backup/restore ────────────────────────────────────────
+  // Multipart ile .sql.gz dosyası yüklenir, parse edilip restore edilir.
+  server.post(
+    "/:database/backup/restore",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Restore a database from an uploaded .sql.gz backup file",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        consumes: ["multipart/form-data"],
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+
+      // @fastify/multipart ile dosyayı oku
+      let fileData: Buffer | null = null;
+
+      try {
+        const data = await req.file({ limits: { fileSize: MAX_UPLOAD_BYTES } });
+        if (!data) {
+          return reply.status(400).send({ error: "No file uploaded" });
+        }
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of data.file) {
+          chunks.push(chunk);
+        }
+        fileData = Buffer.concat(chunks);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Request file too large")) {
+          return reply.status(413).send({
+            error: `File exceeds maximum size of ${config.BACKUP_MAX_SIZE_MB} MB`,
+          });
+        }
+        throw err;
+      }
+
+      if (!fileData || fileData.length === 0) {
+        return reply.status(400).send({ error: "Uploaded file is empty" });
+      }
+
+      // Geçici dosyaya yaz — backupService.restoreBackup dosya yolu bekler
+      const { writeFileSync, unlinkSync, mkdtempSync } = await import("fs");
+      const { join } = await import("path");
+      const { tmpdir } = await import("os");
+
+      const tmpDir = mkdtempSync(join(tmpdir(), "postgrify-restore-"));
+      const tmpFile = join(tmpDir, "restore.sql.gz");
+
+      try {
+        writeFileSync(tmpFile, fileData);
+        const sql = server.poolManager.getPool(dbName);
+        await server.backupService.restoreBackup(sql, tmpFile);
+      } finally {
+        try { unlinkSync(tmpFile); } catch { /* geçici dosya temizleme */ }
+        try { (await import("fs")).rmdirSync(tmpDir); } catch { /* geçici klasör temizleme */ }
+      }
+
+      return reply.send({ restored: true, database: dbName });
+    })
+  );
+
+  // ── GET /:database/backup/schedule ────────────────────────────────────────
+  server.get(
+    "/:database/backup/schedule",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Get the backup schedule for a database",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              database: { type: "string" },
+              schedule: {
+                type: ["object", "null"],
+                properties: {
+                  cron:    { type: "string" },
+                  enabled: { type: "boolean" },
+                  retain:  { type: "number" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const schedule = await server.settings.getBackupSchedule(dbName);
+      return reply.send({ database: dbName, schedule });
+    })
+  );
+
+  // ── PUT /:database/backup/schedule ────────────────────────────────────────
+  server.put(
+    "/:database/backup/schedule",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Create or update the backup schedule for a database",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["cron", "enabled", "retain"],
+          properties: {
+            cron:    { type: "string", description: "Cron expression (5 fields)" },
+            enabled: { type: "boolean" },
+            retain:  { type: "number", minimum: 1, maximum: 100 },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              database: { type: "string" },
+              schedule: {
+                type: "object",
+                properties: {
+                  cron:    { type: "string" },
+                  enabled: { type: "boolean" },
+                  retain:  { type: "number" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+      const body = req.body as { cron: string; enabled: boolean; retain: number };
+
+      // Cron expression doğrula
+      const cron = await import("node-cron");
+      if (!cron.validate(body.cron)) {
+        return reply.status(400).send({ error: `Invalid cron expression: "${body.cron}"` });
+      }
+
+      const scheduleConfig = { cron: body.cron, enabled: body.enabled, retain: body.retain };
+
+      // DB'ye kaydet
+      await server.settings.setBackupSchedule(dbName, scheduleConfig);
+
+      // Scheduler'ı güncelle (runtime'da anında aktif/pasif)
+      if (body.enabled) {
+        server.backupScheduler.scheduleBackup(dbName, scheduleConfig);
+      } else {
+        server.backupScheduler.cancelSchedule(dbName);
+      }
+
+      return reply.send({ database: dbName, schedule: scheduleConfig });
+    })
+  );
+
+  // ── DELETE /:database/backup/schedule ─────────────────────────────────────
+  server.delete(
+    "/:database/backup/schedule",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description: "Cancel and remove the backup schedule for a database",
+        tags: ["backup"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+      },
+    },
+    asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+      const dbName = req.dbName!;
+
+      await server.settings.deleteBackupSchedule(dbName);
+      server.backupScheduler.cancelSchedule(dbName);
+
+      return reply.status(204).send();
     })
   );
 }

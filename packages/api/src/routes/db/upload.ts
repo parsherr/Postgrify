@@ -24,6 +24,71 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
 
+/**
+ * Magic bytes (dosya imzası) tablosu.
+ * Her MIME tipi için dosyanın başındaki byte dizileri tanımlanır.
+ * Birden fazla imza desteklenir (örn. JPEG birkaç farklı başlangıçla gelebilir).
+ */
+const MAGIC_BYTES: Record<string, Uint8Array[]> = {
+  "image/jpeg": [
+    new Uint8Array([0xFF, 0xD8, 0xFF]),
+  ],
+  "image/png": [
+    new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+  ],
+  "image/webp": [
+    // RIFF....WEBP — byte 0-3 = RIFF, byte 8-11 = WEBP
+    new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+  ],
+  "image/gif": [
+    new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]), // GIF87a
+    new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), // GIF89a
+  ],
+  "image/bmp": [
+    new Uint8Array([0x42, 0x4D]),
+  ],
+  "image/tiff": [
+    new Uint8Array([0x49, 0x49, 0x2A, 0x00]), // little-endian
+    new Uint8Array([0x4D, 0x4D, 0x00, 0x2A]), // big-endian
+  ],
+  // SVG: XML-based — magic bytes yok; sadece metin içeriği kontrol edilir
+  "image/svg+xml": [],
+};
+
+/**
+ * Buffer'ın başındaki byte'ların beklenen magic bytes ile eşleşip eşleşmediğini kontrol eder.
+ * SVG gibi metin tabanlı formatlar için imza kontrolü yapılmaz (boş dizi → geç).
+ */
+function isValidMagicBytes(buffer: Buffer, mime: string): boolean {
+  const signatures = MAGIC_BYTES[mime];
+
+  // Bilinen MIME tiplerinden biri ama imza listesi boşsa (SVG) → geç
+  if (signatures !== undefined && signatures.length === 0) return true;
+
+  // MIME tipi tabloda yoksa → reddet
+  if (!signatures) return false;
+
+  // WebP özel: RIFF header + offset 8'de WEBP kontrolü
+  if (mime === "image/webp") {
+    if (buffer.length < 12) return false;
+    const riff = buffer.slice(0, 4);
+    const webp = buffer.slice(8, 12);
+    return (
+      riff[0] === 0x52 && riff[1] === 0x49 && riff[2] === 0x46 && riff[3] === 0x46 &&
+      webp[0] === 0x57 && webp[1] === 0x45 && webp[2] === 0x42 && webp[3] === 0x50
+    );
+  }
+
+  // Genel prefix karşılaştırma
+  return signatures.some((sig) => {
+    if (buffer.length < sig.length) return false;
+    for (let i = 0; i < sig.length; i++) {
+      if (buffer[i] !== sig[i]) return false;
+    }
+    return true;
+  });
+}
+
 /** İzin verilen MIME tipleri */
 const ALLOWED_MIME = new Set([
   "image/jpeg",
@@ -146,6 +211,16 @@ export async function uploadRoute(server: FastifyInstance) {
 
       // Dosyayı tamamen belleğe al
       const buffer = await fileData.toBuffer();
+
+      // Magic bytes kontrolü — istemci Content-Type header'ına güvenme.
+      // Saldırgan image/jpeg header'ı ile PHP/shell dosyası yükleyebilir.
+      // İlk byte'ları gerçek format ile karşılaştır.
+      if (!isValidMagicBytes(buffer, mime)) {
+        return reply.status(415).send({
+          error: "File content does not match declared MIME type",
+          message: "Upload rejected: file magic bytes do not match the Content-Type header.",
+        });
+      }
 
       const sql = server.poolManager.getPool(dbName);
 

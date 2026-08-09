@@ -22,7 +22,7 @@ function assertExpiresIn(value: string, maxHours: number): void {
 }
 
 export async function adminTokenRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   server.post(
     "/token/admin",

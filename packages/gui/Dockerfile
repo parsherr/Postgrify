@@ -19,6 +19,9 @@ COPY packages/gui/index.html ./packages/gui/
 COPY packages/gui/src ./packages/gui/src
 COPY packages/gui/public ./packages/gui/public
 
+# Repo root CHANGELOG.md — GUI build'inde ?raw import ile bundle'a gömülür
+COPY CHANGELOG.md ./
+
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 

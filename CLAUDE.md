@@ -38,11 +38,15 @@ Monorepo structure:
 ### Docker (recommended — runs full stack)
 ```bash
 cd packages
-docker compose up -d --build      # build + start all services
-docker compose down               # stop (add -v to also remove volumes)
+docker compose up -d --build      # first start or after code changes
+docker compose restart            # restart without rebuild (config changes)
+docker compose down               # stop, preserve volumes (data intact)
+docker compose down -v && docker compose up -d --build  # full reset — DELETES ALL DATA
 docker compose up -d api --build  # rebuild only the API
 docker logs packages-api-1 -f     # follow API logs
 ```
+
+> **Note:** `down -v` removes the postgres volume — setup wizard will run again on next start. Use plain `down` for a restart that keeps data.
 
 ### API (local dev)
 ```bash
@@ -87,7 +91,7 @@ npm run typecheck
 | Group | Prefix | Files |
 |-------|--------|-------|
 | Health | `/health` | `routes/health.ts` |
-| Setup | `/setup` | `routes/setup.ts` — first-run admin account creation; becomes no-op once setup is done |
+| Setup | `/setup` | `routes/setup.ts` — first-run admin account creation; returns 409 once done; writes `ADMIN_EMAIL`/`ADMIN_PASSWORD_HASH` to `.env` (skipped silently in Docker — env vars take precedence) |
 | Admin auth | `/auth` | `routes/auth/{token,adminToken,adminLogin,logout,refresh,me,sessions}.ts` |
 | Admin DB mgmt | `/admin` | `routes/admin/{databases,stats}.ts` |
 | DB data | `/db/:database` | `routes/db/{tables,rows,query,meta,backup}.ts` — requires `authenticate` + `dbResolver` |
@@ -96,6 +100,19 @@ npm run typecheck
 
 All `/db/:database/*` data routes run `authenticate` → `dbResolver` as Fastify hooks at group level.
 DB auth routes skip the group-level `authenticate` — login/logout/refresh are public and rate-limited; admin-gated routes add `authenticate` + `scopeGuard("schema")` per-handler.
+
+### Server decorators (FastifyInstance extensions)
+Plugins register these on `server` — route handlers access them as `server.<name>`:
+
+| Decorator | Registered by | Type |
+|-----------|--------------|------|
+| `server.jwtService` | `plugins/auth.ts` | `JwtService` |
+| `server.authenticate` / `server.authenticateAdmin` | `plugins/auth.ts` | preHandler functions |
+| `server.poolManager` | `plugins/pool.ts` | `PoolManager` |
+| `server.cache` | `plugins/cache.ts` | `CacheService` |
+| `server.backupService` | `plugins/pool.ts` | `BackupService` |
+| `server.backupScheduler` | `plugins/pool.ts` | `BackupScheduler` |
+| `server.settings` | `plugins/pool.ts` | `SettingsService` |
 
 ### Auth model
 Two token types, both JWT signed with `JWT_SECRET`:
@@ -120,6 +137,13 @@ Per-DB secrets override `ADMIN_SECRET` for token issuance: set `DB_SECRET_<DBNAM
 
 ### Query builder
 `services/queryBuilder.ts` converts HTTP query parameters into safe parameterized SQL. Filter syntax: `where=field.op.value`. Supported operators: `eq neq gt gte lt lte like ilike in is not`. All column names are validated with `isValidIdentifier` before use.
+
+### Backup system
+`services/backupService.ts` — pg_dump/pg_restore wrapper. Stores metadata in `_postgrify_backups` table (auto-provisioned per-DB on first use). Backup files go to `BACKUP_DIR` (default `/tmp/postgrify-backups`).
+
+`services/backupScheduler.ts` — in-memory cron runner (node-cron). Schedules persist via `services/settingsService.ts` (`backup_schedules` key). Loaded at startup via `onReady` hook in `plugins/pool.ts`.
+
+Backup endpoints are under `/db/:database/backup/` — list, create, download (token as query param for `<a>` download), delete, restore (multipart), and schedule CRUD.
 
 ### Per-database auth system
 
@@ -183,6 +207,8 @@ Internals: `client.ts` (main class + `createClient` factory), `session.ts` (Sess
 Tests use Vitest. `test/setup.ts` overrides all env vars (`NODE_ENV=test`, `LOG_LEVEL=silent`) before any test file runs. Tests do **not** require a running database — they mock at the service layer.
 
 Test files under `packages/api/test/` mirror `src/` layout — `test/routes/` for route handlers, `test/services/` for service unit tests. `test/setup.ts` runs as `setupFiles` (per-test-file env reset). `packages/test/` at monorepo level is reserved for future integration tests.
+
+Route tests build a minimal Fastify instance with `app.decorate(...)` mocks for each server dependency the route under test uses — no real DB or Redis needed. See `test/routes/rows.test.ts` for the canonical pattern.
 
 ## Environment variables
 

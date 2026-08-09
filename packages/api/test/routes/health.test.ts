@@ -1,6 +1,11 @@
 /**
  * Health endpoint integration testi.
- * Fastify sunucusu gerçek olarak ayağa kaldırılır; DB mock'lanır.
+ *
+ * GET /health → public, minimal { ok: true }
+ * GET /admin/health → admin token gerektirir, detaylı bilgi döner
+ *
+ * Güvenlik değişikliği: public /health artık uptime/activePools açıklamıyor.
+ * Detaylar admin-only /admin/health endpoint'ine taşındı.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -35,11 +40,11 @@ let server: FastifyInstance;
 beforeAll(async () => {
   server = Fastify({ logger: false });
 
-  // Dekoratörleri elle ekle (plugin'ler yerine)
   const { PoolManager } = await import("../../src/services/poolManager.js");
   const { CacheService } = await import("../../src/services/cacheService.js");
   server.decorate("poolManager", new PoolManager({} as never));
   server.decorate("cache", new CacheService());
+  // authenticateAdmin kasıtlı eklenmedi — healthRoute bu durumu graceful handle etmeli
 
   const { healthRoute } = await import("../../src/routes/health.js");
   await server.register(healthRoute);
@@ -51,23 +56,24 @@ afterAll(async () => {
 });
 
 describe("GET /health", () => {
-  it("200 ve status:ok döner", async () => {
+  it("200 ve ok:true döner", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.status).toBe("ok");
+    expect(body.ok).toBe(true);
   });
 
-  it("uptime sayı döner", async () => {
+  it("uptime veya activePools bilgisi açıklanmaz (güvenlik)", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     const body = res.json();
-    expect(typeof body.uptime).toBe("number");
-    expect(body.uptime).toBeGreaterThan(0);
+    // Public endpoint servis detaylarını sızdırmamalı
+    expect(body.uptime).toBeUndefined();
+    expect(body.activePools).toBeUndefined();
+    expect(body.status).toBeUndefined();
   });
 
-  it("activePools değerini döner", async () => {
+  it("JSON Content-Type döner", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
-    const body = res.json();
-    expect(body.activePools).toBe(2);
+    expect(res.headers["content-type"]).toMatch(/application\/json/);
   });
 });

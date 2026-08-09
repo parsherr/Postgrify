@@ -1,6 +1,6 @@
 {
   "name": "@postgrify/api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Postgrify REST API — multi-database PostgreSQL gateway",
   "type": "module",
   "main": "dist/index.js",

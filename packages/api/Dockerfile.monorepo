@@ -27,8 +27,8 @@ RUN npm run build
 # ─── Production aşaması ───────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-# Runtime araçlar
-RUN apk update && apk add --no-cache bash libstdc++ curl jq wget
+# Runtime araçlar + su-exec (root → postgrify geçişi için entrypoint'te kullanılır)
+RUN apk update && apk add --no-cache bash libstdc++ curl jq wget su-exec
 # postgresql-client: paket adı Alpine versiyonuna göre değişir
 RUN apk add --no-cache postgresql-client 2>/dev/null || \
     apk add --no-cache postgresql16-client 2>/dev/null || \
@@ -52,7 +52,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/api/node_modules ./packages/api/node_modules
 COPY --from=builder /app/packages/api/dist ./packages/api/dist
 
-USER postgrify
+# Entrypoint: /data/backups dizinini oluşturup postgrify'a geçer
+COPY packages/api/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 WORKDIR /app/packages/api
 
@@ -61,4 +63,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-CMD ["node", "dist/index.js"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

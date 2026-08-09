@@ -1,24 +1,38 @@
 /**
- * POST /auth/admin/logout — Refresh token'ı revoke eder.
+ * POST /auth/admin/logout — Admin oturumunu sonlandır.
  *
- * Authorization: Bearer <accessToken> header'ı zorunludur.
- * Body'deki refreshToken Redis'ten silinir.
- * Redis yoksa 204 döner (idempotent).
+ * Hem Redis'teki refresh token'ı revoke eder
+ * hem de access token JTI'sini kara listeye ekler.
+ * Bu sayede access token süresi dolmadan da geçersiz kılınmış olur.
  */
 
 import type { FastifyInstance } from "fastify";
+import { jtiBlacklist } from "../../services/jwtService.js";
+import { config } from "../../config/env.js";
+import { JwtService } from "../../services/jwtService.js";
+
+/** "15m", "1h", "7d" → saniye cinsinden. */
+function expiryToSeconds(expiry: string): number {
+  const match = expiry.match(/^(\d+)([smhd])$/);
+  if (!match) return 3600;
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+  const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return value * (multipliers[unit] ?? 3600);
+}
 
 export async function adminLogoutRoute(server: FastifyInstance) {
+  const jwtService = new JwtService(() => config.JWT_SECRET);
+
   server.post(
     "/admin/logout",
     {
       schema: {
-        description: "Revoke the refresh token and end the session.",
+        description: "Logout: revoke refresh token + blacklist current access token JTI.",
         tags: ["auth"],
         security: [{ bearerAuth: [] }],
         body: {
           type: "object",
-          required: ["refreshToken"],
           properties: {
             refreshToken: { type: "string" },
           },
@@ -26,19 +40,24 @@ export async function adminLogoutRoute(server: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const auth = req.headers.authorization;
-      if (!auth?.startsWith("Bearer ")) {
-        return reply.status(401).send({ error: "Missing authorization token" });
+      // Access token JTI'sini kara listeye ekle
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.slice(7);
+        const payload = await jwtService.verifyAdminOrDb(token);
+        if (payload?.jti) {
+          // Token'ın kalan TTL'ini hesapla
+          const exp = (payload as { exp?: number }).exp;
+          const ttl = exp ? Math.max(0, exp - Math.floor(Date.now() / 1000)) : expiryToSeconds(config.ACCESS_TOKEN_EXPIRY);
+          await jtiBlacklist.add(payload.jti as string, ttl);
+        }
       }
 
-      const token = auth.slice(7);
-      const payload = await server.jwtService.verifyAdminOrDb(token);
-      if (!payload || payload.role !== "admin") {
-        return reply.status(403).send({ error: "Admin access required" });
+      // Refresh token revoke et (varsa)
+      const { refreshToken } = (req.body ?? {}) as { refreshToken?: string };
+      if (refreshToken && server.sessionService.isAvailable) {
+        await server.sessionService.revoke(refreshToken);
       }
-
-      const { refreshToken } = req.body as { refreshToken: string };
-      await server.sessionService.revoke(refreshToken);
 
       return reply.status(204).send();
     }

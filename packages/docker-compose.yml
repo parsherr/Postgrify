@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgrify
+      POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: postgrify
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgrify -d postgrify"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -16,10 +16,17 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Güvenlik: requirepass ile şifre koruması zorunlu.
+    # REDIS_PASSWORD .env'den okunur — boş bırakmayın.
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --save 60 1
+      --loglevel warning
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,6 +40,8 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    volumes:
+      - ./backups:/data/backups
     depends_on:
       postgres:
         condition: service_healthy

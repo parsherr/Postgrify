@@ -13,8 +13,17 @@ import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 import crypto from "node:crypto";
 
+/**
+ * Gelen plain-text token'ı SHA-256 ile hash'ler.
+ * Signup sırasında hash saklanır; doğrulama sırasında hash karşılaştırılır.
+ * Bu sayede DB dump'ı veya admin API sızıntısında ham token kullanılamaz.
+ */
+function hashVerificationToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 export async function authVerifyRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   server.get(
     "/:database/auth/verify",
@@ -50,13 +59,15 @@ export async function authVerifyRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Token'ı metadata'dan ara
+      // Gelen token'ı hash'leyip DB'deki hash ile karşılaştır.
+      // DB'de plain text token saklanmaz — yalnızca SHA-256 hash'i tutulur.
+      const tokenHash = hashVerificationToken(token);
+
       const [user] = await sql`
         SELECT id, email, role, is_active,
-               metadata->>'verification_token' AS verification_token,
-               metadata->>'verification_exp'   AS verification_exp
+               metadata->>'verification_exp' AS verification_exp
         FROM _postgrify_auth.users
-        WHERE metadata->>'verification_token' = ${token}
+        WHERE metadata->>'verification_token' = ${tokenHash}
           AND email_verified = false
       `;
 
@@ -64,8 +75,14 @@ export async function authVerifyRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid or already used verification token" });
       }
 
-      const exp = new Date(user.verification_exp as string);
-      if (exp < new Date()) {
+      // Savunma: verification_exp NULL veya parse edilemezse token geçersiz say.
+      // new Date(undefined) = Invalid Date → exp < new Date() = false → token geçerli sayılabilir!
+      const rawExp = user.verification_exp as string | null | undefined;
+      if (!rawExp) {
+        return reply.status(400).send({ error: "Invalid or expired verification token" });
+      }
+      const exp = new Date(rawExp);
+      if (isNaN(exp.getTime()) || exp < new Date()) {
         return reply.status(400).send({ error: "Verification token has expired" });
       }
 
@@ -94,12 +111,14 @@ export async function authVerifyRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
+      // Yeni session — DB'de refresh token hash'ini sakla, client'a ham token gönder
       const refreshToken = crypto.randomBytes(48).toString("hex");
+      const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
       const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
-        VALUES (${user.id}, ${refreshToken}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
+        VALUES (${user.id}, ${refreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
       `;
 
       await insertAuditLog(sql, "email_verified", user.id as string, {

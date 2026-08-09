@@ -156,13 +156,17 @@ describe("GET /:database/auth/sessions", () => {
   });
 });
 
+// UUID v4 formatında test değerleri — UUID validation artık zorunlu
+const TEST_SESSION_UUID = "550e8400-e29b-41d4-a716-446655440000";
+const TEST_USER_UUID    = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+
 describe("DELETE /:database/auth/sessions/:id", () => {
   it("Admin token ile belirli session revoke → 204", async () => {
     sqlFnRef.mockResolvedValue([]);
 
     const res = await server.inject({
       method: "DELETE",
-      url: "/testdb/auth/sessions/sess-1",
+      url: `/testdb/auth/sessions/${TEST_SESSION_UUID}`,
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
@@ -170,10 +174,20 @@ describe("DELETE /:database/auth/sessions/:id", () => {
     expect(res.body).toBe("");
   });
 
+  it("geçersiz UUID formatı → 400", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/testdb/auth/sessions/not-a-uuid",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
   it("schema scope yok → 403", async () => {
     const res = await server.inject({
       method: "DELETE",
-      url: "/testdb/auth/sessions/sess-1",
+      url: `/testdb/auth/sessions/${TEST_SESSION_UUID}`,
       headers: { authorization: `Bearer ${noSchemaToken}` },
     });
 
@@ -187,10 +201,20 @@ describe("DELETE /:database/auth/sessions?user_id=", () => {
 
     const res = await server.inject({
       method: "DELETE",
-      url: "/testdb/auth/sessions?user_id=user-uuid-1",
+      url: `/testdb/auth/sessions?user_id=${TEST_USER_UUID}`,
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
     expect(res.statusCode).toBe(204);
+  });
+
+  it("geçersiz user_id UUID formatı → 400", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/testdb/auth/sessions?user_id=user-uuid-1",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(res.statusCode).toBe(400);
   });
 });

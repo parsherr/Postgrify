@@ -19,6 +19,8 @@ import TablePage from "./pages/TablePage";
 import CreateTablePage from "./pages/CreateTablePage";
 import QueryPage from "./pages/QueryPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
+import ChangelogPage from "./pages/ChangelogPage";
+import { UpdateModal } from "./components/UpdateModal";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,18 +63,29 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <AppShell>{children}</AppShell>;
+  return (
+    <AppShell>
+      <UpdateModal />
+      {children}
+    </AppShell>
+  );
 }
 
 /**
  * SetupGuard — uygulama ilk yüklendiğinde /setup/status kontrol eder.
  * configured=false ise tüm route'ları /setup'a yönlendirir.
  * configured=true ise normal akış devam eder.
+ *
+ * isLoading ve isError (API henüz hazır değil, retry devam ediyor) → spinner.
+ * Tüm retry'lar bitip hâlâ hata varsa → setup sayfasına yönlendirir.
+ * Bu sayede "API henüz ayakta değil" durumu setup sayfası açmasına yol açmaz.
  */
 function SetupGuard({ children }: { children: React.ReactNode }) {
-  const { data, isLoading } = useSetupStatus();
+  const { data, isLoading, isError, failureCount } = useSetupStatus();
 
-  if (isLoading) {
+  // API'ye ulaşılamıyor: retry'lar sürüyor → spinner göster, setup'a atma
+  // failureCount < 5: henüz tüm retry'lar bitmedi
+  if (isLoading || (isError && failureCount < 5)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
@@ -80,7 +93,7 @@ function SetupGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // API'ye erişilemiyorsa veya kurulum tamamlanmamışsa → setup
+  // Kurulum tamamlanmamış (veya tüm retry'lar başarısız — API tamamen erişilemez)
   if (!data?.configured) {
     return (
       <Routes>
@@ -97,9 +110,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <SetupGuard>
-          <AuthProvider>
-            <TokenInjector />
+        <AuthProvider>
+          <TokenInjector />
+          <SetupGuard>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/setup" element={<Navigate to="/" replace />} />
@@ -161,10 +174,19 @@ export default function App() {
                 }
               />
 
+              <Route
+                path="/changelog"
+                element={
+                  <ProtectedLayout>
+                    <ChangelogPage />
+                  </ProtectedLayout>
+                }
+              />
+
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </AuthProvider>
-        </SetupGuard>
+          </SetupGuard>
+        </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

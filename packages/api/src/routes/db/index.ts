@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { dbResolverHook } from "../../middleware/dbResolver.js";
+import { createIpAllowlistGuard } from "../../middleware/ipAllowlist.js";
 import { tablesRoute } from "./tables.js";
 import { rowsRoute } from "./rows.js";
 import { queryRoute } from "./query.js";
@@ -13,9 +14,11 @@ import { backupRoute } from "./backup.js";
 import { uploadRoute } from "./upload.js";
 
 export async function dbRoutes(server: FastifyInstance) {
-  // Tüm /db route'larında auth + DB çözümleme zorunlu
+  // Hook sırası: authenticate → dbResolver → ipAllowlistGuard → scopeGuard (route seviyesinde)
   server.addHook("preHandler", server.authenticate);
   server.addHook("preHandler", dbResolverHook);
+  // IP kontrol dbResolver'dan sonra — req.dbName gerekli
+  server.addHook("preHandler", createIpAllowlistGuard(server));
 
   await server.register(tablesRoute);
   await server.register(rowsRoute);

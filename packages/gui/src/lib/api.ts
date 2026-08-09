@@ -9,6 +9,24 @@
  * AuthContext tarafından buraya inject edilir (setTokenAccessors).
  */
 
+// ── Backup types ─────────────────────────────────────────────────────────────
+
+export interface BackupMeta {
+  id: string;
+  db_name: string;
+  file_path: string;
+  size_bytes: number | null;
+  status: "completed" | "failed" | "in_progress";
+  created_at: string;
+  error_msg: string | null;
+}
+
+export interface BackupScheduleConfig {
+  cron: string;
+  enabled: boolean;
+  retain: number;
+}
+
 export const BASE_URL =
   (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ??
   "http://localhost:3000";
@@ -158,14 +176,17 @@ export interface SetupPayload {
 export interface SetupResult {
   ok: boolean;
   message: string;
+  accessToken?: string;
+  refreshToken?: string | null;
+  email?: string;
 }
 
 export async function getSetupStatus(): Promise<SetupStatus> {
+  // Network hatası veya !res.ok durumunda throw et — React Query retry mekanizması
+  // devreye girsin. "API erişilemedi = kurulum gerekli" yanlış bir çıkarım:
+  // API henüz başlamıyor olabilir ve kurulum gerçekte tamamlanmış durumda olabilir.
   const res = await fetch(`${BASE_URL}/setup/status`);
-  if (!res.ok) {
-    // API erişilemiyorsa → setup gerekiyor gibi davran
-    return { configured: false };
-  }
+  if (!res.ok) throw new Error(`Setup status check failed: ${res.status}`);
   return res.json() as Promise<SetupStatus>;
 }
 
@@ -186,4 +207,97 @@ export async function postSetup(payload: SetupPayload): Promise<SetupResult> {
   }
 
   return res.json() as Promise<SetupResult>;
+}
+
+// ── Multipart upload helper ─────────────────────────────────────────────────
+
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const body = new FormData();
+  body.append("file", file);
+
+  const res = await fetch(`${BASE_URL}${path}`, { method: "POST", headers, body });
+
+  if (res.status === 401) {
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
+    }
+    const newToken = await refreshPromise;
+    if (!newToken) {
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
+    headers["Authorization"] = `Bearer ${newToken}`;
+    const retry = await fetch(`${BASE_URL}${path}`, { method: "POST", headers, body });
+    if (!retry.ok) throw new Error(await retry.text());
+    return retry.json() as Promise<T>;
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { msg = (JSON.parse(text) as { message?: string; error?: string }).message ?? (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return undefined as unknown as T;
+  return res.json() as Promise<T>;
+}
+
+// ── Backup API ────────────────────────────────────────────────────────────────
+
+export function listBackups(db: string): Promise<{ backups: BackupMeta[] }> {
+  return api.get(`/db/${db}/backup/list`);
+}
+
+export function createBackup(db: string): Promise<BackupMeta> {
+  return api.post(`/db/${db}/backup/create`, {});
+}
+
+export function deleteBackup(db: string, backupId: string): Promise<void> {
+  return api.delete(`/db/${db}/backup/${backupId}`);
+}
+
+/** Returns the URL to download a specific saved backup file. */
+export function downloadBackupUrl(db: string, backupId: string): string {
+  const token = getToken();
+  return `${BASE_URL}/db/${db}/backup/${backupId}/download${token ? `?token=${token}` : ""}`;
+}
+
+export function restoreBackup(db: string, file: File): Promise<{ restored: boolean; database: string }> {
+  return uploadFile(`/db/${db}/backup/restore`, file);
+}
+
+export function getBackupSchedule(db: string): Promise<{ database: string; schedule: BackupScheduleConfig | null }> {
+  return api.get(`/db/${db}/backup/schedule`);
+}
+
+export function setBackupSchedule(db: string, config: BackupScheduleConfig): Promise<{ database: string; schedule: BackupScheduleConfig }> {
+  return api.put(`/db/${db}/backup/schedule`, config);
+}
+
+export function deleteBackupSchedule(db: string): Promise<void> {
+  return api.delete(`/db/${db}/backup/schedule`);
+}
+
+// ── IP Allowlist ──────────────────────────────────────────────────────────────
+
+export interface IpAllowlistConfig {
+  mode: "everyone" | "same_network" | "allowlist";
+  ips: string[];
+}
+
+export function getIpAllowlist(db: string): Promise<IpAllowlistConfig> {
+  return api.get(`/admin/databases/${db}/ip-allowlist`);
+}
+
+export function setIpAllowlist(db: string, config: IpAllowlistConfig): Promise<{ ok: boolean; config: IpAllowlistConfig }> {
+  return api.put(`/admin/databases/${db}/ip-allowlist`, config);
+}
+
+export function deleteIpAllowlist(db: string): Promise<{ ok: boolean }> {
+  return api.delete(`/admin/databases/${db}/ip-allowlist`);
 }

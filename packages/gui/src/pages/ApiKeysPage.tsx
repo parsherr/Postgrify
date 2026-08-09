@@ -239,7 +239,7 @@ export default function ApiKeysPage() {
                     className="font-mono text-xs"
                   />
                   <p className="text-2xs text-muted-foreground">
-                    Env'deki DB_SECRET_&lt;DB&gt; veya ADMIN_SECRET
+                    {"Env'deki DB_SECRET_<DB> veya ADMIN_SECRET"}
                   </p>
                 </div>
 

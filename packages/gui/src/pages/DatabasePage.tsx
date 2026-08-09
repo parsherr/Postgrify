@@ -26,7 +26,8 @@ import {
   Archive,
   KeyRound,
   Square,
-  } from "lucide-react";
+  Shield,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,19 +43,22 @@ import type { DataGridColumn } from "@/components/data-grid/DataGrid";
 import { QueryEditor } from "@/components/query-editor/QueryEditor";
 import { ResultsPanel } from "@/components/query-editor/ResultsPanel";
 import { saveToHistory } from "@/components/query-editor/QueryHistory";
-import { api, BASE_URL, getToken } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AuthsTab } from "@/components/database/AuthsTab";
+import { BackupTab } from "@/components/database/BackupTab";
+import { ConnectionsTab } from "@/components/database/ConnectionsTab";
 
 // ── Sekme tanimlari ──────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: "summary", label: "Summary",          icon: LayoutDashboard },
-  { id: "tables",  label: "Tables & Schema",  icon: Table2 },
-  { id: "data",    label: "Data",             icon: Rows3 },
-  { id: "query",   label: "SQL Editor",       icon: Terminal },
-  { id: "backup",  label: "Backup",           icon: Archive },
-  { id: "auths",   label: "Auths",            icon: KeyRound },
-  { id: "options", label: "Database Options", icon: Settings2 },
+  { id: "summary",     label: "Summary",          icon: LayoutDashboard },
+  { id: "tables",      label: "Tables & Schema",  icon: Table2 },
+  { id: "data",        label: "Data",             icon: Rows3 },
+  { id: "query",       label: "SQL Editor",       icon: Terminal },
+  { id: "backup",      label: "Backup",           icon: Archive },
+  { id: "auths",       label: "Auths",            icon: KeyRound },
+  { id: "connections", label: "Connections",      icon: Shield },
+  { id: "options",     label: "Database Options", icon: Settings2 },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -149,6 +153,8 @@ export default function DatabasePage() {
             <BackupTab db={db} />
           ) : activeTab === "auths" ? (
             <AuthsTab db={db} />
+          ) : activeTab === "connections" ? (
+            <ConnectionsTab db={db!} />
           ) : (
             <OptionsTab db={db} dbInfo={dbInfo} />
           )}
@@ -929,137 +935,6 @@ function SchemaTableItem({
   );
 }
 
-
-// ── Backup Tab ────────────────────────────────────────────────────────────────
-
-function BackupTab({ db }: { db: string }) {
-  const { data: tables } = useTables(db);
-  const { data: databases } = useDatabases();
-  const dbInfo = databases?.find((d) => d.name === db);
-  const [isDownloading, setIsDownloading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [lastDownload, setLastDownload] = React.useState<string | null>(null);
-
-  async function handleDownload() {
-    setIsDownloading(true);
-    setError(null);
-    try {
-      const token = getToken();
-      const res = await fetch(`${BASE_URL}/db/${db}/backup/download`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
-        throw new Error(err.error ?? err.message ?? `HTTP ${res.status}`);
-      }
-
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      const now  = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      a.href     = url;
-      a.download = `${db}_${now}.sql`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      setLastDownload(new Date().toLocaleString("tr-TR"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsDownloading(false);
-    }
-  }
-
-  const tableCount = tables?.length ?? 0;
-  const dbSize     = dbInfo?.size_bytes ? formatBytes(dbInfo.size_bytes) : "—";
-
-  return (
-    <div className="flex h-full items-start justify-center overflow-y-auto p-8">
-      <div className="w-full max-w-md space-y-6">
-        {/* Başlık */}
-        <div>
-          <h2 className="text-base font-semibold">Backup</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Veritabanının SQL dump'ını indirin. DDL (CREATE TABLE) ve DML (INSERT) ifadelerini içerir.
-          </p>
-        </div>
-
-        {/* DB Bilgisi */}
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="grid grid-cols-3 divide-x divide-border text-center">
-            <div className="px-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Veritabanı</p>
-              <p className="mt-1 font-mono text-sm font-medium">{db}</p>
-            </div>
-            <div className="px-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Tablolar</p>
-              <p className="mt-1 text-sm font-medium">{tableCount}</p>
-            </div>
-            <div className="px-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Boyut</p>
-              <p className="mt-1 text-sm font-medium">{dbSize}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Download Kartı */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-muted/30">
-              <Archive className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">SQL Dump</p>
-              <p className="text-xs text-muted-foreground">
-                Public schema — CREATE TABLE + INSERT INTO ifadeleri.
-                Sadece veri; view, index, foreign key dahil değil.
-              </p>
-            </div>
-          </div>
-
-          {error && (
-            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
-            </div>
-          )}
-
-          {lastDownload && !error && (
-            <p className="text-xs text-muted-foreground">
-              Son indirme: {lastDownload}
-            </p>
-          )}
-
-          <Button
-            onClick={handleDownload}
-            disabled={isDownloading}
-            className="w-full"
-          >
-            {isDownloading ? (
-              <>
-                <span className="mr-2 h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Hazırlanıyor…
-              </>
-            ) : (
-              <>
-                <Archive className="mr-2 h-3.5 w-3.5" />
-                Download SQL Backup
-              </>
-            )}
-          </Button>
-        </div>
-
-        {/* Uyarı */}
-        <p className="text-center text-xs text-muted-foreground/60">
-          Bu dump yalnızca geliştirme ve test ortamları içindir.
-          Üretim yedeklemesi için <code className="text-muted-foreground">pg_dump</code> kullanın.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 // ── Options Tab ───────────────────────────────────────────────────────────────
 

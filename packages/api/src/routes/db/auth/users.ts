@@ -12,6 +12,47 @@
  */
 
 import type { FastifyInstance } from "fastify";
+
+/**
+ * Sensitive keys that must never be returned in API responses.
+ *
+ * These fields are stored in users.metadata JSONB for operational purposes
+ * (password reset, email verification, magic link), but exposing them would
+ * let anyone with admin API access bypass those flows entirely.
+ */
+const SENSITIVE_METADATA_KEYS = [
+  "reset_token",
+  "reset_token_expires",
+  // magicLink.ts stores under magic_link_token
+  "magic_link_token",
+  "magic_link_token_expires",
+  // kept for backward compat in case any prior data used these keys
+  "magic_token",
+  "magic_token_expires",
+  "verification_token",
+  "verification_token_expires",
+];
+
+/**
+ * Strips sensitive internal fields from a user's metadata object.
+ * Returns null when metadata is null/undefined to preserve the original type.
+ */
+function stripSensitiveMetadata(metadata: unknown): unknown {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return metadata;
+  }
+  const cleaned = { ...(metadata as Record<string, unknown>) };
+  for (const key of SENSITIVE_METADATA_KEYS) {
+    delete cleaned[key];
+  }
+  return cleaned;
+}
+
+/** Applies stripSensitiveMetadata to a user row returned from the DB. */
+function sanitizeUser(user: Record<string, unknown>): Record<string, unknown> {
+  if (!user.metadata) return user;
+  return { ...user, metadata: stripSensitiveMetadata(user.metadata) };
+}
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { scopeGuard } from "../../../middleware/scopeGuard.js";
 import { hashPassword, verifyPassword } from "../../../services/passwordService.js";
@@ -26,7 +67,7 @@ function authGuard(server: FastifyInstance, scope: Parameters<typeof scopeGuard>
 }
 
 export async function authUsersRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
   // ── GET /:database/auth/users ──────────────────────────────────────────────
   server.get(
     "/:database/auth/users",
@@ -42,12 +83,17 @@ export async function authUsersRoute(server: FastifyInstance) {
       await ensureAuthSchema(sql);
 
       const users = await sql`
-        SELECT id, email, role, is_active, created_at, last_login, metadata
+        SELECT id, email, role, is_active, created_at, last_login,
+               -- Güvenlik: reset/magic token hash'leri metadata'dan çıkarıyoruz.
+               -- Bu alanlar DB dump veya admin API üzerinden sızdırılmamalı.
+               (metadata - 'reset_token' - 'reset_token_exp'
+                         - 'magic_token' - 'magic_token_exp') AS metadata
         FROM _postgrify_auth.users
         ORDER BY created_at ASC
       `;
 
-      return reply.send({ users, total: users.length });
+      // SQL katmanında JSONB - ile filtrelendi; sanitizeUser JS katmanında ek güvenlik sağlar
+      return reply.send({ users: users.map((u) => sanitizeUser(u as Record<string, unknown>)), total: users.length });
     })
   );
 
@@ -89,10 +135,12 @@ export async function authUsersRoute(server: FastifyInstance) {
       const [user] = await sql`
         INSERT INTO _postgrify_auth.users (email, password_hash, role)
         VALUES (${email}, ${passwordHash}, ${role})
-        RETURNING id, email, role, is_active, created_at, last_login, metadata
+        RETURNING id, email, role, is_active, created_at, last_login,
+                  (metadata - 'reset_token' - 'reset_token_exp'
+                            - 'magic_token' - 'magic_token_exp') AS metadata
       `;
 
-      return reply.status(201).send(user);
+      return reply.status(201).send(sanitizeUser(user as Record<string, unknown>));
     })
   );
 
@@ -154,7 +202,9 @@ export async function authUsersRoute(server: FastifyInstance) {
         `UPDATE _postgrify_auth.users
          SET ${setStr}
          WHERE id = $${paramIndex}
-         RETURNING id, email, role, is_active, created_at, last_login, metadata`,
+         RETURNING id, email, role, is_active, created_at, last_login,
+                   (metadata - 'reset_token' - 'reset_token_exp'
+                             - 'magic_token' - 'magic_token_exp') AS metadata`,
         values as Parameters<typeof sql.unsafe>[1]
       );
 

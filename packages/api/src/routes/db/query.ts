@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { config } from "../../config/env.js";
+import { insertAuditLog } from "./auth/provision.js";
 
 const BLOCKED_KEYWORDS = /\b(DROP|TRUNCATE|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY)\b/i;
 
@@ -83,6 +84,25 @@ export async function queryRoute(server: FastifyInstance) {
         });
       } else {
         rows = await sql.unsafe(rawSql, params as never[]);
+
+        // Güvenlik audit: QUERY_LOG_ENABLED=true iken admin full-SQL sorgularını kaydet.
+        // Bu özellikle DROP, DELETE, UPDATE gibi destructive sorgular için kritik.
+        if (config.QUERY_LOG_ENABLED) {
+          // insertAuditLog _postgrify_auth schema'sını bekler;
+          // yoksa hata yoksayılır — audit log asıl işlemi engellememeli.
+          try {
+            await insertAuditLog(sql, "raw_sql_exec", req.user?.sub ?? "admin", {
+              ip: req.ip,
+              userAgent: req.headers["user-agent"] as string | undefined,
+              metadata: {
+                sql: rawSql.slice(0, 2000), // çok uzun sorguları kırp
+                role: req.user?.role,
+              },
+            });
+          } catch {
+            // Auth schema olmayan DB'lerde audit log yazılamaz — önemli değil
+          }
+        }
       }
 
       return reply.send({ rows: rows as Record<string, unknown>[], count: (rows as unknown[]).length });

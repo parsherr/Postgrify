@@ -14,6 +14,15 @@ import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js
 import { sendEmail, buildVerifyEmail } from "../../../services/emailService.js";
 import { config } from "../../../config/env.js";
 import crypto from "node:crypto";
+import { validatePassword, parsePolicyFromSettings } from "../../../utils/passwordPolicy.js";
+
+/**
+ * Verification token'ı SHA-256 ile hash'ler — DB'de ham token saklanmaz.
+ * Email bağlantısında plain token gönderilir; DB'de yalnızca hash tutulur.
+ */
+function hashVerificationToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 export async function authSignupRoute(server: FastifyInstance) {
   server.post(
@@ -65,13 +74,25 @@ export async function authSignupRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Signup feature flag kontrolü
+      // Signup feature flag kontrolü — case-insensitive karşılaştırma
       const signupEnabled = await getAuthSetting(sql, "email_signup_enabled", "true");
-      if (signupEnabled !== "true") {
+      if (signupEnabled.toLowerCase() !== "true") {
         return reply.status(403).send({
           error: "Sign-up disabled",
           message: "New user registrations are currently disabled for this database.",
         });
+      }
+
+      // Şifre kompleksitesi — politika ayarlarından okunur
+      const policySettings: Record<string, string> = {
+        min_password_length:       await getAuthSetting(sql, "min_password_length",       "8"),
+        password_require_uppercase: await getAuthSetting(sql, "password_require_uppercase", "false"),
+        password_require_number:    await getAuthSetting(sql, "password_require_number",    "false"),
+        password_require_special:   await getAuthSetting(sql, "password_require_special",   "false"),
+      };
+      const policyCheck = validatePassword(password, parsePolicyFromSettings(policySettings));
+      if (!policyCheck.valid) {
+        return reply.status(400).send({ error: policyCheck.message });
       }
 
       // Email unique kontrolü
@@ -85,8 +106,12 @@ export async function authSignupRoute(server: FastifyInstance) {
       }
 
       const passwordHash = await hashPassword(password);
-      const verifyRequired = await getAuthSetting(sql, "email_verify_required", "false");
+      // getAuthSetting normalizeEdilmiş (lowercase) değer döner — === "true" güvenli
+      const isVerifyRequired = (await getAuthSetting(sql, "email_verify_required", "false")) === "true";
       const verificationToken = crypto.randomBytes(32).toString("hex");
+      // Güvenlik: DB'de plain token değil SHA-256 hash'i sakla.
+      // Email bağlantısında ham token kullanılır; DB dump'ında yalnızca hash görünür.
+      const verificationTokenHash = hashVerificationToken(verificationToken);
       const verificationExp = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 saat
 
       const [user] = await sql`
@@ -97,12 +122,12 @@ export async function authSignupRoute(server: FastifyInstance) {
         RETURNING id, email, email_verified, role
       `;
 
-      // Verify token'ı kaydet
+      // Verify token hash'ini kaydet (plain text değil)
       await sql`
         UPDATE _postgrify_auth.users
         SET
           metadata = jsonb_set(
-            jsonb_set(metadata, '{verification_token}', ${JSON.stringify(verificationToken)}::jsonb),
+            jsonb_set(metadata, '{verification_token}', ${JSON.stringify(verificationTokenHash)}::jsonb),
             '{verification_exp}', ${JSON.stringify(verificationExp.toISOString())}::jsonb
           )
         WHERE id = ${user.id}
@@ -131,7 +156,7 @@ export async function authSignupRoute(server: FastifyInstance) {
       return reply.status(201).send({
         ok: true,
         email_verify_sent: emailSent,
-        message: verifyRequired === "true"
+        message: isVerifyRequired
           ? "Hesabınız oluşturuldu. Giriş yapmak için email adresinizi doğrulayın."
           : "Hesabınız oluşturuldu.",
         user: {

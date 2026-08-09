@@ -10,9 +10,13 @@ export async function statsRoute(server: FastifyInstance) {
   server.get(
     "/stats",
     {
+      // Güvenlik: admin istatistikleri (aktif DB listesi, uptime, Node versiyonu)
+      // kimlik doğrulaması gerektirmeli — bilgi sızıntısı riski.
+      preHandler: [server.authenticateAdmin],
       schema: {
-        description: "Service-wide statistics",
+        description: "Service-wide statistics (requires admin token)",
         tags: ["admin"],
+        security: [{ bearerAuth: [] }],
       },
     },
     asyncHandler(async (_req, reply) => {

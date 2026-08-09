@@ -12,8 +12,10 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { GrainGradient } from "@paper-design/shaders-react";
 import { postSetup } from "../lib/api";
+import { useAuthContext } from "../hooks/useAuthContext";
 
 // ── Floating-label input ──────────────────────────────────────────────────────
 
@@ -115,6 +117,8 @@ const STEP_HEADINGS: Record<number, { title: string; sub: string }> = {
 
 export default function SetupPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { login, loginWithTokens } = useAuthContext();
 
   // Adım durumu
   const [step, setStep] = useState(1);
@@ -134,7 +138,6 @@ export default function SetupPage() {
   // UI durumu
   const [error, setError] = useState("");
   const [isPending, setIsPending] = useState(false);
-  const [done, setDone] = useState(false);
 
   // ── Validasyon ──────────────────────────────────────────────────────────────
 
@@ -176,7 +179,7 @@ export default function SetupPage() {
     setError("");
     setIsPending(true);
     try {
-      await postSetup({
+      const result = await postSetup({
         adminEmail: email,
         adminPassword: password,
         pgHost,
@@ -184,8 +187,21 @@ export default function SetupPage() {
         pgUser,
         pgPassword,
       });
-      setDone(true);
-      setTimeout(() => navigate("/login"), 3000);
+
+      // Cache'i güncelle — SetupGuard artık configured=true görecek
+      queryClient.setQueryData(["setup-status"], { configured: true });
+
+      // API setup response'unda token varsa direkt kullan (container modunda
+      // /auth/admin/login env var'ları henüz güncellenmediğinden 503 verir).
+      // Token yoksa klasik login dene.
+      if (result.accessToken) {
+        loginWithTokens(result.accessToken, result.refreshToken ?? null, result.email ?? email);
+      } else {
+        await login(email, password);
+      }
+
+      // Dashboard'a yönlendir
+      navigate("/", { replace: true });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Kurulum başarısız.";
       setError(msg);
@@ -215,26 +231,7 @@ export default function SetupPage() {
             <img src="/black-white-logo.png" alt="Postgrify" className="h-8 w-8 object-contain invert" />
           </div>
 
-          {done ? (
-            /* ── Tamamlandı ekranı ───────────────────────────── */
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800">
-                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                  <path d="M5 14L11 20L23 8" stroke="#EFFF12" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <h1 className="text-4xl font-medium tracking-[-0.04em] text-white">
-                Kurulum tamamlandı!
-              </h1>
-              <p className="mt-3 text-base text-zinc-400">
-                API sunucusunu yeniden başlat, ardından giriş yapabilirsin.
-              </p>
-              <p className="mt-6 text-[11px] tracking-wide text-zinc-600">
-                Giriş sayfasına yönlendiriliyorsun…
-              </p>
-            </div>
-          ) : (
-            <>
+          <>
               {/* Step indicator */}
               <div className="mb-8">
                 <StepIndicator current={step} />
@@ -335,7 +332,6 @@ export default function SetupPage() {
                 Argon2id · JWT · Redis session
               </p>
             </>
-          )}
         </div>
 
         {/* ── Sağ panel — GrainGradient ─────────────────────────────────── */}

@@ -12,6 +12,7 @@ import {
   Plus,
   LogOut,
   ExternalLink,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDatabases } from "@/hooks/useDatabases";
@@ -191,6 +192,29 @@ export function Sidebar({ collapsed }: SidebarProps) {
               </TooltipTrigger>
               {collapsed && (
                 <TooltipContent side="right">API Docs</TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+
+        {/* Changes */}
+        <div className="px-2 py-0.5">
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/changelog"
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-300",
+                    collapsed && "justify-center px-0"
+                  )}
+                >
+                  <ScrollText className="h-3.5 w-3.5 shrink-0" />
+                  {!collapsed && <span>Changes</span>}
+                </Link>
+              </TooltipTrigger>
+              {collapsed && (
+                <TooltipContent side="right">Changes</TooltipContent>
               )}
             </Tooltip>
           </TooltipProvider>

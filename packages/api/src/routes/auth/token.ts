@@ -31,7 +31,7 @@ function getDbSecret(dbName: string): string {
 }
 
 export async function tokenRoute(server: FastifyInstance) {
-  const jwtService = new JwtService(config.JWT_SECRET);
+  const jwtService = new JwtService(() => config.JWT_SECRET);
 
   server.post(
     "/token",

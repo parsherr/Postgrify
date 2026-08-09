@@ -134,12 +134,15 @@ export async function databasesRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool("postgres");
 
       // Varsa kalan bağlantıları zorla kes
+      // Parametrik sorgu — identifier kontrolü geçmiş olsa bile string
+      // interpolasyonu savunma derinliği ilkesini ihlal eder.
       try {
-        await sql.unsafe(`
-          SELECT pg_terminate_backend(pid)
-          FROM pg_stat_activity
-          WHERE datname = '${db}' AND pid <> pg_backend_pid()
-        `);
+        await sql.unsafe(
+          `SELECT pg_terminate_backend(pid)
+           FROM pg_stat_activity
+           WHERE datname = $1 AND pid <> pg_backend_pid()`,
+          [db]
+        );
       } catch {
         // Hata olsa bile DROP'u dene
       }

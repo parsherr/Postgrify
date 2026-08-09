@@ -28,6 +28,8 @@ export interface AuthContextValue {
   /** api.ts'in token'ı okuması için — React dışı bağlam */
   getAccessToken: () => string | null;
   setAccessToken: (token: string) => void;
+  /** Setup wizard: sunucudan gelen token'larla oturumu başlat, login isteği atmaz */
+  loginWithTokens: (accessToken: string, refreshToken: string | null, email: string) => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -132,6 +134,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [setAccessToken]
   );
 
+  const loginWithTokens = useCallback(
+    (at: string, rt: string | null, userEmail: string): void => {
+      setAccessToken(at);
+      setEmail(userEmail);
+      if (rt) localStorage.setItem(REFRESH_TOKEN_KEY, rt);
+    },
+    [setAccessToken]
+  );
+
   const logout = useCallback(async (): Promise<void> => {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     const token = accessTokenRef.current;
@@ -167,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: accessToken !== null,
         isLoading,
         login,
+        loginWithTokens,
         logout,
         refreshAccessToken,
         getAccessToken,

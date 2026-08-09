@@ -12,6 +12,14 @@ const server = Fastify({
   logger: {
     level: config.LOG_LEVEL,
   },
+  // nginx veya diğer reverse proxy arkasındaysa gerçek istemci IP'sini al.
+  // trustProxy: true olmadan req.ip proxy'nin iç IP'si (172.x.x.x) olur;
+  // rate-limit tüm requestleri aynı "IP"den görür ve brute-force koruması devre dışı kalır.
+  //
+  // Güvenlik: "true" yerine Docker internal network aralığı belirtilir.
+  // Bu sayede dışarıdan gelen X-Forwarded-For header'ı ile IP spoofing önlenir.
+  // Yalnızca 172.16.0.0/12 (Docker bridge) ve 127.0.0.1 (loopback) güvenilir proxy sayılır.
+  trustProxy: "127.0.0.1, 172.16.0.0/12",
 });
 
 async function start() {
