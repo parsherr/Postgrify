@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #000;
+    color: #e7e9ea;
+    min-height: 100vh;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { cursor: pointer; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-bold transition-colors bg-white text-black hover:bg-gray-200 px-5 py-2;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-bold transition-colors border border-gray-600 text-white hover:bg-white/10 px-5 py-2;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-bold transition-colors bg-red-500 text-white hover:bg-red-600 px-4 py-2;
+  }
+  .input {
+    @apply w-full rounded-md border border-gray-700 bg-transparent px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-sky-500 transition-colors;
+  }
+  .card {
+    @apply border-b border-gray-800 p-4 hover:bg-white/[0.03] transition-colors;
+  }
+}

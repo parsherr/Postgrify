@@ -61,7 +61,15 @@ LOG_LEVEL=info                # fatal | error | warn | info | debug | trace
 CORS_ORIGINS=http://localhost:5173   # virgülle ayır
 
 # Özellik bayrakları
-ALLOW_RAW_SQL_ADMIN=true      # admin token ile DDL dahil tam SQL
+#
+# ALLOW_RAW_SQL_ADMIN — Raw SQL güvenlik bypass'ı
+#   false (varsayılan): POST /query endpoint'i admin token olsa bile yalnızca SELECT çalıştırır.
+#   true: admin token ile DDL dahil her türlü SQL çalıştırılabilir (DROP TABLE vb.).
+#   ÖNERİ: production'da false bırakın. DDL için POST /db/:db/tables endpoint'ini kullanın.
+#   DB-user token'ları (per-DB app kullanıcıları) bu flag'den etkilenmez;
+#   onlar her zaman scope'larıyla sınırlıdır (query scope → yalnızca SELECT).
+ALLOW_RAW_SQL_ADMIN=false
+#
 QUERY_LOG_ENABLED=false       # sorgu loglama (performans etkisi var)
 SLOW_QUERY_THRESHOLD_MS=500   # bu ms'yi aşan sorgular loglanır
 

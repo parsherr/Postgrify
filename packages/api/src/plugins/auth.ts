@@ -8,7 +8,7 @@ import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { JwtService, jtiBlacklist } from "../services/jwtService.js";
 import { config } from "../config/env.js";
-import type { JwtPayload } from "../types/auth.js";
+import type { JwtPayload, DbUserJwtPayload } from "../types/auth.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -18,10 +18,18 @@ declare module "fastify" {
       req: FastifyRequest,
       reply: FastifyReply
     ) => Promise<void>;
+    /**
+     * Admin, scoped-DB veya per-DB-user token kabul eden authenticator.
+     * CRUD endpoint'lerinde DB-user token'ların da erişebilmesi için kullanılır.
+     * DB-user token kabul edildiğinde req.dbUserPayload set edilir.
+     */
+    authenticateAny: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
   interface FastifyRequest {
     user: JwtPayload | null;
     dbName: string | null;
+    /** Per-DB kullanıcı token payload'ı — yalnızca DB-user token ile doldurilur. */
+    dbUser: DbUserJwtPayload | null;
   }
 }
 
@@ -43,9 +51,10 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
     }
   });
 
-  // request.user ve request.dbName'i her request'te null ile başlat
+  // request.user, request.dbName ve request.dbUser'ı her request'te null ile başlat
   server.decorateRequest("user", null);
   server.decorateRequest("dbName", null);
+  server.decorateRequest("dbUser", null);
 
   // DB token veya admin token ile erişilebilen route'lar için
   server.decorate(
@@ -80,6 +89,36 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
       }
 
       req.user = payload;
+    }
+  );
+// Admin, scoped-DB veya per-DB-user token kabul eden authenticator.
+  // DB-user token'lar "postgrify/db-auth" issuer'ı ile gelir.
+  // Kabul edildiğinde req.dbUser doldurulur; req.user null kalır.
+  // Bu sayede scopeGuard, DB-user token'ları admin bypass'ı olmadan kabul eder —
+  // ama scopeGuard'ın DB-user farkındalığı gerekir (scopeGuard.ts'e bakın).
+  server.decorate(
+    "authenticateAny",
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const token = extractToken(req);
+      if (!token) {
+        return reply.status(401).send({ error: "Missing authorization token" });
+      }
+
+      // Önce admin/DB token dene
+      const adminOrDb = await jwtService.verifyAdminOrDb(token);
+      if (adminOrDb) {
+        req.user = adminOrDb;
+        return;
+      }
+
+      // DB-user token dene
+      const dbUser = await jwtService.verifyDbUser(token);
+      if (dbUser) {
+        req.dbUser = dbUser;
+        return;
+      }
+
+      return reply.status(401).send({ error: "Invalid or expired token" });
     }
   );
 });

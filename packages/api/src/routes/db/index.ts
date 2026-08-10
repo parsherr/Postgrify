@@ -1,11 +1,25 @@
 /**
  * DB route'larını gruplar. Prefix: /db/:database
- * Her route, önce authenticate → dbResolver → scopeGuard çalıştırır.
+ *
+ * Hook sırası (her istek için):
+ *   1. authenticateAny — admin, DB-scoped veya DB-user token'larını kabul eder.
+ *      - Admin/DB-scoped token → req.user set edilir.
+ *      - DB-user token (iss: "postgrify/db-auth") → req.dbUser set edilir.
+ *      Token yoksa veya geçersizse 401 döner.
+ *   2. dbResolverHook — req.dbName'i URL param / header / query'den çözer.
+ *   3. createIpAllowlistGuard — DB bazlı IP kısıtlaması (req.dbName gerekli).
+ *   4. scopeGuard("...") — route seviyesinde, req.user veya req.dbUser'a göre scope kontrolü.
+ *
+ * DB-user token scope mapping (scopeGuard tarafından uygulanır):
+ *   admin  role → read / write / delete / schema / query
+ *   editor role → read / write / delete / query  (JOIN/aggregation için — SORUN #11 düzeltmesi)
+ *   viewer role → read
  */
 
 import type { FastifyInstance } from "fastify";
 import { dbResolverHook } from "../../middleware/dbResolver.js";
 import { createIpAllowlistGuard } from "../../middleware/ipAllowlist.js";
+import { config } from "../../config/env.js";
 import { tablesRoute } from "./tables.js";
 import { rowsRoute } from "./rows.js";
 import { queryRoute } from "./query.js";
@@ -14,8 +28,26 @@ import { backupRoute } from "./backup.js";
 import { uploadRoute } from "./upload.js";
 
 export async function dbRoutes(server: FastifyInstance) {
-  // Hook sırası: authenticate → dbResolver → ipAllowlistGuard → scopeGuard (route seviyesinde)
-  server.addHook("preHandler", server.authenticate);
+  // P2: geliştirme modunda X-API-Key header'ı CRUD/query/upload endpoint'lerine
+  // gelince uyarı log'la. Production'da sessiz — mevcut istemciler etkilenmez.
+  // X-API-Key yalnızca /db/:db/auth/* endpoint'lerinde geçerlidir (apiKeyGuard).
+  if (config.NODE_ENV === "development") {
+    server.addHook("preHandler", async (req) => {
+      if (req.headers["x-api-key"]) {
+        req.log.warn(
+          { path: req.url },
+          "X-API-Key header received on a CRUD/query/upload endpoint — " +
+          "this header is only accepted on /db/:db/auth/* routes (apiKeyGuard). " +
+          "Use Authorization: Bearer <token> for data access."
+        );
+      }
+    });
+  }
+
+  // P1: authenticateAny kullanılıyor (eskiden: authenticate).
+  // Fark: DB-user token'ları (iss: "postgrify/db-auth") artık reddedilmiyor;
+  // req.dbUser set edilip scopeGuard'a bırakılıyor.
+  server.addHook("preHandler", server.authenticateAny);
   server.addHook("preHandler", dbResolverHook);
   // IP kontrol dbResolver'dan sonra — req.dbName gerekli
   server.addHook("preHandler", createIpAllowlistGuard(server));

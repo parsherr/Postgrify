@@ -15,6 +15,11 @@
  *   field.is.null     → "field" IS NULL
  *   field.is.not_null → "field" IS NOT NULL
  *   (Diğer değerler geçersizdir — net hata mesajı döner)
+ *
+ * Sıralama — iki format desteklenir:
+ *   ?order=created_at.desc         (birleşik format)
+ *   ?sort=created_at&order=desc    (ayrı format — Supabase/PostgREST uyumlu)
+ *   İkisi birlikte verilirse "sort+order" önceliklidir.
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
@@ -23,7 +28,8 @@ export interface SelectOptions {
   select?: string;   // "id,name,email"
   where?: string[];  // ["age.gt.18", "status.eq.active"]
   or?: string[];     // ["role.eq.admin", "role.eq.mod"] → OR ile birleştirilir
-  order?: string;    // "name.asc" | "created_at.desc"
+  order?: string;    // "created_at.desc" (birleşik) VEYA yalnızca yön ("desc") — sort ile birlikte
+  sort?: string;     // "created_at" — order="desc" ile birlikte kullanılır
   limit?: number;
   offset?: number;
 }
@@ -170,21 +176,46 @@ export function parseSelectColumns(select?: string): string {
 }
 
 /**
- * "name.asc" veya "created_at.desc" → ORDER BY "name" ASC
+ * Sıralama ifadesi oluşturur. İki kullanım biçimi:
+ *
+ * 1. Birleşik format:  parseOrderBy("created_at.desc")
+ * 2. Ayrı format:      parseOrderBy("desc", "created_at")
+ *    — sort=created_at&order=desc (Supabase/PostgREST uyumlu)
+ *
+ * @param order  "column.direction" veya yalnızca yön ("asc"|"desc")
+ * @param sort   Kolon adı (order yalnızca yön içerdiğinde kullanılır)
  */
-export function parseOrderBy(order?: string): string {
-  if (!order) return "";
+export function parseOrderBy(order?: string, sort?: string): string {
+  if (!order && !sort) return "";
 
-  const lastDot = order.lastIndexOf(".");
-  const column = order.slice(0, lastDot);
-  const direction = order.slice(lastDot + 1).toUpperCase();
+  let column: string;
+  let direction: string;
+
+  if (sort) {
+    // Ayrı format: sort=created_at&order=desc
+    column = sort;
+    direction = (order ?? "asc").toUpperCase();
+  } else if (order) {
+    const lastDot = order.lastIndexOf(".");
+    if (lastDot === -1) {
+      // Sadece yön verilmiş ama sort yok — geçersiz, boş döndür
+      throw new Error(
+        `Invalid order format: "${order}". Use "column.asc" or "column.desc", ` +
+        `or use ?sort=column&order=asc separately.`
+      );
+    }
+    column = order.slice(0, lastDot);
+    direction = order.slice(lastDot + 1).toUpperCase();
+  } else {
+    return "";
+  }
 
   if (!isValidIdentifier(column)) {
     throw new Error(`Invalid column name in order: ${column}`);
   }
 
   if (direction !== "ASC" && direction !== "DESC") {
-    throw new Error(`Invalid order direction: ${direction}. Use asc or desc`);
+    throw new Error(`Invalid order direction: "${direction}". Use asc or desc`);
   }
 
   return `ORDER BY "${column}" ${direction}`;

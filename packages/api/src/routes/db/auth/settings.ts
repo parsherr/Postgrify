@@ -23,6 +23,9 @@ const AUTH_SETTING_KEYS = [
   "signup_redirect_url",
   "token_expiry",
   "refresh_token_expiry",
+  // Yeni kayıt olan kullanıcıların varsayılan rolü (SORUN #7 düzeltmesi).
+  // Değerler: 'viewer' | 'editor' | 'admin'
+  "default_user_role",
 ] as const;
 
 type AuthSettingKey = (typeof AUTH_SETTING_KEYS)[number];
@@ -75,6 +78,8 @@ export async function authSettingsRoute(server: FastifyInstance) {
             signup_redirect_url:   { type: "string" },
             token_expiry:          { type: "string", pattern: "^\\d+[smhd]$" },
             refresh_token_expiry:  { type: "string", pattern: "^\\d+[smhd]$" },
+            // Yeni kullanıcıların varsayılan rolü (SORUN #7 düzeltmesi)
+            default_user_role:     { type: "string", enum: ["viewer", "editor", "admin"] },
           },
           additionalProperties: false,
         },

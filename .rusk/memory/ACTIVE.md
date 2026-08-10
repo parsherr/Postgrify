@@ -1,29 +1,39 @@
----
-name: active
-description: Şu anki görev durumu
-metadata:
-  type: project
----
+# Active Work — 2026-08-10
 
-# Now
-Güvenlik düzeltmeleri tamamlandı — 444/444 test geçiyor, TypeScript hatasız.
+## Durum
+Tüm görevler tamamlandı. 797/797 unit test + 33/33 entegrasyon testi geçiyor.
 
-# Done (Güvenlik)
-- KRIT-4: env.ts — production'da placeholder JWT_SECRET/ADMIN_SECRET → process.exit(1)
-- KRIT-3: databases.ts:141 — pg_terminate_backend $1 parametrik query
-- KRIT-2: rateLimit.ts — ioredis backend (Redis varsa distributed, yoksa in-memory fallback)
-- KRIT-1: terminal.ts — TERMINAL_ENABLED flag, env cleanup (JWT_SECRET/PG_PASSWORD temizlendi), token ilk WS mesajından alınıyor
-- HIGH-3: passwordReset.ts + magicLink.ts — SHA-256 hash token storage; users.ts metadata filtreleme
-- HIGH-1 + HIGH-2: oauth.ts — token URL fragment'a taşındı, open redirect origin whitelist eklendi
-- HIGH-4: oauth.ts — Redis-backed state store (in-memory fallback)
-- MED-5: nginx.conf — X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP, Permissions-Policy
-- MED-6: docker-compose.yml — Redis requirepass, env.ts TERMINAL_ENABLED flag
-- MED-3: query.ts — QUERY_LOG_ENABLED raw SQL audit log
-- VERI-1: scripts/reset-admin.ts — emergency admin CLI aracı
-- Güvenlik test suite: test/security/ (7 dosya, 104 güvenlik testi)
-- 444 test geçiyor (37 test dosyası)
+## Tamamlanan Düzeltmeler (bu session)
 
-# Next
-- docker compose up -d --build ile uçtan uca test
-- .env.example REDIS_PASSWORD, TERMINAL_ENABLED alanlarını güncelle
-- packages/.env'e REDIS_PASSWORD ekle
+### API Bug Fixes
+- **SORUN #H**: `query.ts` preHandler'a `authenticateAny` eklendi → editor DB user token artık /query'ye erişebiliyor
+- **SORUN #8**: `DELETE /db/:database/auth/me` zaten `users.ts`'de mevcuttu (önceki sessionda hatalı rapor)
+- **metadata JSONB bug**: `me.ts` PATCH handler'da `|| $1::JSONB` yerine `|| $1::text::jsonb` kullanıldı — postgres.js bind sorununu çözüyor
+- **metadata scalar bug**: `GET /me` ve `GET /auth/users` + `PATCH /me` RETURNING'de `CASE WHEN jsonb_typeof(metadata)='object'` ile bozuk (array) metadata güvenli hale getirildi
+- **PATCH WHERE duplicate bug**: PATCH RETURNING kısmına hatayla eklenen ikinci `WHERE id = $1` kaldırıldı
+- **provision.ts**: `AuditEvent` tipine `"account_deleted"` eklendi
+
+### Test Dosyaları
+- `test/routes/me-delete.test.ts` — 4 test, `authUsersRoute` kullanıyor, 200/401/403 beklentileri doğru
+- `test/routes/me-get-metadata.test.ts` — 5 test
+- `test/routes/me-patch.test.ts` — 10 test
+- `test/routes/rows-pagination.test.ts` — 5 test
+- `test/routes/query-db-user.test.ts` — 5 test
+
+### Tweeter-Clone Test Scripti
+- `packages/test/tweeter-clone/config.mjs` — düzeltildi
+- `packages/test/tweeter-clone/setup.mjs` — idempotent, `default:` (değil `defaultValue:`), auth user cleanup
+- `packages/test/tweeter-clone/app.mjs` — 10 bölüm, 33 test, 33/33 geçiyor
+
+## Keşfedilen API Tasarım Notları
+- `POST /auth/token`: body `{ database, secret, scope? }` — Bearer token gerektirmez
+- `POST /admin/databases`: `{ name }` — sadece isim yeterli, host/port gerekmiyor
+- `DELETE /db/:db/auth/me`: 200 `{ ok: true, message }` döner (204 değil)
+- Admin token `POST /auth/token/admin` response: `{ token, role: "admin" }` — expiresIn yok
+- `POST /db/:db/:table` response: `{ inserted: [{ ...row }] }` — `inserted[0].id` ile id alınır
+- Tablo CREATE: API `default:` alanını bekler, `defaultValue:` değil
+- `X-API-Key`: per-DB auth endpoints (signup/login) Bearer token olmadan X-API-Key zorunlu
+
+## Next
+- Gerektiğinde `database-issues.md` güncelle
+- Varsa yeni kullanıcı istekleri

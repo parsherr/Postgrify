@@ -1,0 +1,398 @@
+/* ─── Reset & Base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #000;
+  --surface: #0f0f0f;
+  --surface-hover: #1a1a1a;
+  --border: #2f3336;
+  --primary: #1d9bf0;
+  --primary-hover: #1a8cd8;
+  --danger: #f4212e;
+  --text: #e7e9ea;
+  --text-muted: #71767b;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --radius: 16px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ─── Layout ───────────────────────────────────────────────────────────── */
+.app {
+  max-width: 600px;
+  margin: 0 auto;
+  min-height: 100vh;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────── */
+.header {
+  position: sticky;
+  top: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 100;
+}
+
+.header-logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.header-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ─── Auth Panel ───────────────────────────────────────────────────────── */
+.auth-panel {
+  padding: 32px 16px;
+  max-width: 400px;
+  margin: 60px auto;
+}
+
+.auth-panel h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+.auth-panel p  { color: var(--text-muted); margin-bottom: 32px; }
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.tab {
+  flex: 1;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.tab.active { color: var(--text); border-color: var(--primary); }
+
+/* ─── Form Elements ────────────────────────────────────────────────────── */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 12px;
+  font-family: var(--font);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+input:focus, textarea:focus { border-color: var(--primary); }
+textarea { resize: vertical; min-height: 80px; }
+
+/* ─── Buttons ──────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 9999px;
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--text); color: #000; }
+.btn-primary:hover:not(:disabled) { background: #d7dbdc; }
+.btn-blue { background: var(--primary); color: #fff; }
+.btn-blue:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-hover); }
+.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.btn-danger:hover:not(:disabled) { background: rgba(244, 33, 46, 0.1); }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.btn-full { width: 100%; }
+
+/* ─── Tweet Composer ───────────────────────────────────────────────────── */
+.composer {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  gap: 12px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  color: #fff;
+  overflow: hidden;
+}
+
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.composer-body { flex: 1; }
+.composer-body textarea {
+  border: none;
+  font-size: 20px;
+  padding: 8px 0;
+  background: transparent;
+  width: 100%;
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.composer-tools { display: flex; gap: 4px; }
+.composer-tool {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 18px;
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.composer-tool:hover { background: rgba(29, 155, 240, 0.1); }
+
+.char-count {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.char-count.warning { color: #ffd400; }
+.char-count.danger  { color: var(--danger); }
+
+/* ─── Tweet Card ───────────────────────────────────────────────────────── */
+.tweet {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  gap: 12px;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+
+.tweet:hover { background: rgba(255, 255, 255, 0.03); }
+
+.tweet-body { flex: 1; min-width: 0; }
+.tweet-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+
+.tweet-display-name { font-weight: 700; color: var(--text); }
+.tweet-username     { color: var(--text-muted); font-size: 14px; }
+.tweet-time         { color: var(--text-muted); font-size: 14px; margin-left: auto; }
+
+.tweet-content { margin-bottom: 10px; word-break: break-word; }
+
+.tweet-image {
+  max-width: 100%;
+  border-radius: 16px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.tweet-actions {
+  display: flex;
+  gap: 24px;
+  color: var(--text-muted);
+}
+
+.tweet-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  transition: color 0.2s, background 0.2s;
+  user-select: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+}
+
+.tweet-action:hover { color: var(--primary); background: rgba(29, 155, 240, 0.1); }
+.tweet-action.liked { color: #f91880; }
+.tweet-action.liked:hover { color: #f91880; background: rgba(249, 24, 128, 0.1); }
+.tweet-action.delete-action:hover { color: var(--danger); background: rgba(244, 33, 46, 0.1); }
+
+/* ─── Profile Section ──────────────────────────────────────────────────── */
+.profile-banner {
+  height: 130px;
+  background: var(--primary);
+  position: relative;
+}
+
+.profile-info { padding: 12px 16px 16px; }
+
+.profile-avatar-wrap {
+  margin-top: -48px;
+  margin-bottom: 12px;
+}
+
+.profile-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 4px solid var(--bg);
+  background: var(--surface);
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+}
+
+.profile-name   { font-size: 20px; font-weight: 700; }
+.profile-handle { color: var(--text-muted); margin-bottom: 8px; }
+.profile-bio    { margin-bottom: 12px; }
+
+.profile-stats { display: flex; gap: 20px; color: var(--text-muted); font-size: 14px; }
+.profile-stats strong { color: var(--text); font-weight: 700; }
+
+/* ─── Image Preview ────────────────────────────────────────────────────── */
+.image-preview {
+  position: relative;
+  margin-top: 8px;
+}
+
+.image-preview img {
+  max-width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.image-preview-remove {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* ─── Messages ─────────────────────────────────────────────────────────── */
+.message {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.message-error   { background: rgba(244, 33, 46, 0.15); color: #ff6b6b; border: 1px solid rgba(244, 33, 46, 0.3); }
+.message-success { background: rgba(0, 186, 124, 0.15); color: #00ba7c; border: 1px solid rgba(0, 186, 124, 0.3); }
+.message-info    { background: rgba(29, 155, 240, 0.15); color: var(--primary); border: 1px solid rgba(29, 155, 240, 0.3); }
+
+/* ─── Spinner ──────────────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-center {
+  display: flex;
+  justify-content: center;
+  padding: 40px;
+}
+
+/* ─── Empty state ──────────────────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty h3 { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+
+/* ─── Modal ─────────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  border: 1px solid var(--border);
+}
+
+.modal h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+.modal p  { color: var(--text-muted); margin-bottom: 20px; }
+
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ─── Note banner (issues) ─────────────────────────────────────────────── */
+.issue-note {
+  background: rgba(255, 212, 0, 0.08);
+  border: 1px solid rgba(255, 212, 0, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #ffd400;
+  margin: 8px 16px;
+}

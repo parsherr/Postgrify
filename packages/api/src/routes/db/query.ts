@@ -24,9 +24,18 @@ export async function queryRoute(server: FastifyInstance) {
   server.post(
     "/:database/query",
     {
-      preHandler: [scopeGuard("query")],
+      // authenticateAny: admin token, DB-scoped token ve DB-user token'ları kabul eder.
+      // scopeGuard("query"): DB-user token'ları için rol-scope eşlemesini kontrol eder
+      //   (editor → query scope var; viewer → yok).
+      // authenticateAny olmadan req.dbUser hiç set edilmez → DB-user token 403 alır.
+      preHandler: [server.authenticateAny, scopeGuard("query")],
       schema: {
-        description: "Execute raw SQL. Default: SELECT only. Admin token enables full SQL.",
+        description:
+          "Execute raw SQL. Default: SELECT only. Admin token with ALLOW_RAW_SQL_ADMIN=true enables full SQL.\n\n" +
+          "Response shape: `{ rows, total, limit: null, offset: null }`. " +
+          "`limit` and `offset` are always null for raw SQL queries — they are " +
+          "meaningful only when the API controls pagination (GET /db/:db/:table). " +
+          "Use `rows.length` to detect end-of-page for hand-written paginated SQL.",
         tags: ["query"],
         body: {
           type: "object",
@@ -34,6 +43,17 @@ export async function queryRoute(server: FastifyInstance) {
           properties: {
             sql: { type: "string" },
             params: { type: "array", default: [] },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              rows:   { type: "array", items: { type: "object" } },
+              total:  { type: "integer", description: "Number of rows returned (= rows.length for raw SQL)" },
+              limit:  { type: ["integer", "null"], description: "Always null for raw SQL — pagination is controlled by the SQL itself" },
+              offset: { type: ["integer", "null"], description: "Always null for raw SQL" },
+            },
           },
         },
       },
@@ -48,6 +68,15 @@ export async function queryRoute(server: FastifyInstance) {
       const isAdmin = req.user?.role === "admin";
       const adminFullSqlEnabled = config.ALLOW_RAW_SQL_ADMIN;
 
+      // Admin token tam SQL çalıştırabilir:
+      //   - ALLOW_RAW_SQL_ADMIN=true → her zaman (DDL dahil)
+      //   - ALLOW_RAW_SQL_ADMIN=false (varsayılan) → admin token da SELECT-only'e tabi
+      //     ANCAK: admin SELECT sorgularında "query" scope bypass'ı var (full read erişimi)
+      //
+      // SORUN #15 düzeltmesi: ALLOW_RAW_SQL_ADMIN=true olmadan admin token SELECT
+      // yapabilir ama DDL/DML çalıştıramaz. Bu davranış tutarlı ve öngörülebilir.
+      // DDL için: ALLOW_RAW_SQL_ADMIN=true VEYA POST /tables endpoint'ini kullan.
+      //
       // SELECT-only mod kontrolü
       if (!(isAdmin && adminFullSqlEnabled)) {
         const trimmed = rawSql.trim().toUpperCase();
@@ -105,7 +134,25 @@ export async function queryRoute(server: FastifyInstance) {
         }
       }
 
-      return reply.send({ rows: rows as Record<string, unknown>[], count: (rows as unknown[]).length });
+      // Bigint değerleri (PostgreSQL count() gibi) string olarak gelir — number'a çevir.
+      // İstemciler parseInt/Number() olmadan karşılaştırma yapabilmeli.
+      const normalized = (rows as Record<string, unknown>[]).map((row) => {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(row)) {
+          out[k] = typeof v === "bigint" || (typeof v === "string" && /^\d+$/.test(v) && Number.isSafeInteger(Number(v)))
+            ? Number(v)
+            : v;
+        }
+        return out;
+      });
+
+      return reply.send({
+        rows: normalized,
+        total: normalized.length,
+        // limit/offset: ham SQL'de belirsiz — yokluklarını açıkça belirt
+        limit: null,
+        offset: null,
+      });
     })
   );
 }

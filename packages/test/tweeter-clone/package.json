@@ -1,0 +1,14 @@
+{
+  "name": "tweeter-clone",
+  "version": "1.0.0",
+  "description": "Postgrify API/SDK test projesi — Twitter klonu",
+  "type": "module",
+  "scripts": {
+    "setup": "node src/setup.js",
+    "start": "node src/serve.js",
+    "dev": "node src/serve.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

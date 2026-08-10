@@ -74,12 +74,34 @@ export async function tablesRoute(server: FastifyInstance) {
                 type: "object",
                 required: ["name", "type"],
                 properties: {
-                  name: { type: "string" },
-                  type: { type: "string" },
-                  nullable: { type: "boolean", default: true },
+                  name:       { type: "string" },
+                  type:       { type: "string" },
+                  nullable:   { type: "boolean", default: true },
                   primaryKey: { type: "boolean", default: false },
-                  unique: { type: "boolean", default: false },
-                  default: { type: "string" },
+                  unique:     { type: "boolean", default: false },
+                  default:    { type: "string" },
+                  // Foreign key desteği (SORUN #1 düzeltmesi)
+                  references: {
+                    type: "object",
+                    description: "Foreign key constraint definition",
+                    required: ["table"],
+                    properties: {
+                      table:    { type: "string", description: "Referenced table name" },
+                      column:   { type: "string", description: "Referenced column name (default: id)" },
+                      onDelete: {
+                        type: "string",
+                        enum: ["CASCADE", "SET NULL", "RESTRICT", "NO ACTION", "SET DEFAULT"],
+                        default: "NO ACTION",
+                        description: "ON DELETE action",
+                      },
+                      onUpdate: {
+                        type: "string",
+                        enum: ["CASCADE", "SET NULL", "RESTRICT", "NO ACTION", "SET DEFAULT"],
+                        default: "NO ACTION",
+                        description: "ON UPDATE action",
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -98,10 +120,21 @@ export async function tablesRoute(server: FastifyInstance) {
           primaryKey?: boolean;
           unique?: boolean;
           default?: string;
+          references?: {
+            table: string;
+            column?: string;
+            onDelete?: string;
+            onUpdate?: string;
+          };
         }>;
       };
 
       assertIdentifier(name, "table");
+
+      // FK constraint'lerini inline kolon tanımlarından ayırıyoruz.
+      // PostgreSQL'de inline REFERENCES sözdizimi geçerli ama tablo seviyesi
+      // FOREIGN KEY kısıtları daha okunabilir ve constraint ismi verilebilir.
+      const fkConstraints: string[] = [];
 
       const colDefs = columns.map((col) => {
         assertIdentifier(col.name, "column");
@@ -114,10 +147,42 @@ export async function tablesRoute(server: FastifyInstance) {
           const safeDefault = assertColumnDefault(col.default, col.name);
           parts.push(`DEFAULT ${safeDefault}`);
         }
+
+        // Foreign key desteği (SORUN #1 düzeltmesi)
+        if (col.references) {
+          const refTable = col.references.table;
+          const refCol = col.references.column ?? "id";
+          // Güvenlik: tablo ve kolon adlarını validate et
+          assertIdentifier(refTable, "referenced table");
+          assertIdentifier(refCol, "referenced column");
+
+          // ON DELETE / ON UPDATE için whitelist — SQL injection'a kapalı
+          const ALLOWED_ACTIONS = new Set([
+            "CASCADE", "SET NULL", "RESTRICT", "NO ACTION", "SET DEFAULT",
+          ]);
+          const onDelete = col.references.onDelete?.toUpperCase() ?? "NO ACTION";
+          const onUpdate = col.references.onUpdate?.toUpperCase() ?? "NO ACTION";
+          if (!ALLOWED_ACTIONS.has(onDelete)) {
+            throw new Error(`Invalid ON DELETE action: ${col.references.onDelete}`);
+          }
+          if (!ALLOWED_ACTIONS.has(onUpdate)) {
+            throw new Error(`Invalid ON UPDATE action: ${col.references.onUpdate}`);
+          }
+
+          // Constraint adı deterministik — tablo+kolon kombinasyonundan türetilir
+          const constraintName = `fk_${name}_${col.name}`;
+          fkConstraints.push(
+            `CONSTRAINT "${constraintName}" FOREIGN KEY ("${col.name}") ` +
+            `REFERENCES "${refTable}"("${refCol}") ` +
+            `ON DELETE ${onDelete} ON UPDATE ${onUpdate}`
+          );
+        }
+
         return parts.join(" ");
       });
 
-      const ddl = `CREATE TABLE "${name}" (${colDefs.join(", ")})`;
+      const allDefs = [...colDefs, ...fkConstraints];
+      const ddl = `CREATE TABLE "${name}" (${allDefs.join(", ")})`;
       const sql = server.poolManager.getPool(dbName);
       await sql.unsafe(ddl);
 

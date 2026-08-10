@@ -40,6 +40,10 @@ export async function authSignupRoute(server: FastifyInstance) {
             email:     { type: "string", format: "email" },
             password:  { type: "string", minLength: 8 },
             full_name: { type: "string" },
+            // Uygulama-specific alanlar için opsiyonel metadata (SORUN #6 düzeltmesi).
+            // Bu değerler _postgrify_auth.users.metadata JSONB kolonuna merge edilir.
+            // Örn: { username: "johndoe", plan: "free", referral: "xyz" }
+            metadata:  { type: "object", additionalProperties: true },
           },
         },
         response: {
@@ -65,10 +69,11 @@ export async function authSignupRoute(server: FastifyInstance) {
     },
     asyncHandler(async (req, reply) => {
       const { database } = req.params as { database: string };
-      const { email, password, full_name } = req.body as {
+      const { email, password, full_name, metadata: extraMetadata } = req.body as {
         email: string;
         password: string;
         full_name?: string;
+        metadata?: Record<string, unknown>;
       };
 
       const sql = server.poolManager.getPool(database);
@@ -108,6 +113,14 @@ export async function authSignupRoute(server: FastifyInstance) {
       const passwordHash = await hashPassword(password);
       // getAuthSetting normalizeEdilmiş (lowercase) değer döner — === "true" güvenli
       const isVerifyRequired = (await getAuthSetting(sql, "email_verify_required", "false")) === "true";
+
+      // Yeni kullanıcının varsayılan rolünü auth_settings'den oku (SORUN #7 düzeltmesi).
+      // Geliştirici bunu 'editor' yaparak kullanıcıların kayıt sonrası veri yazabilmesini sağlar.
+      const rawDefaultRole = await getAuthSetting(sql, "default_user_role", "viewer");
+      const VALID_ROLES = ["viewer", "editor", "admin"] as const;
+      const defaultUserRole: typeof VALID_ROLES[number] = (VALID_ROLES as readonly string[]).includes(rawDefaultRole)
+        ? rawDefaultRole as typeof VALID_ROLES[number]
+        : "viewer";
       const verificationToken = crypto.randomBytes(32).toString("hex");
       // Güvenlik: DB'de plain token değil SHA-256 hash'i sakla.
       // Email bağlantısında ham token kullanılır; DB dump'ında yalnızca hash görünür.
@@ -116,20 +129,25 @@ export async function authSignupRoute(server: FastifyInstance) {
 
       const [user] = await sql`
         INSERT INTO _postgrify_auth.users
-          (email, password_hash, full_name, email_verified, provider)
+          (email, password_hash, full_name, email_verified, provider, role)
         VALUES
-          (${email.toLowerCase()}, ${passwordHash}, ${full_name ?? null}, false, 'email')
+          (${email.toLowerCase()}, ${passwordHash}, ${full_name ?? null}, false, 'email', ${defaultUserRole})
         RETURNING id, email, email_verified, role
       `;
 
-      // Verify token hash'ini kaydet (plain text değil)
+      // Verify token hash'ini kaydet (plain text değil).
+      // extraMetadata varsa verification token ile birlikte merge et (SORUN #6 düzeltmesi).
+      const baseMetadata = extraMetadata && Object.keys(extraMetadata).length > 0
+        ? extraMetadata
+        : {};
+      const metadataWithToken = {
+        ...baseMetadata,
+        verification_token: verificationTokenHash,
+        verification_exp: verificationExp.toISOString(),
+      };
       await sql`
         UPDATE _postgrify_auth.users
-        SET
-          metadata = jsonb_set(
-            jsonb_set(metadata, '{verification_token}', ${JSON.stringify(verificationTokenHash)}::jsonb),
-            '{verification_exp}', ${JSON.stringify(verificationExp.toISOString())}::jsonb
-          )
+        SET metadata = ${JSON.stringify(metadataWithToken)}::jsonb
         WHERE id = ${user.id}
       `;
 

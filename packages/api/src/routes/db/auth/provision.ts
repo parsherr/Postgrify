@@ -135,7 +135,12 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       ('password_require_number',    'false'),
       ('password_require_special',   'false'),
       ('account_lockout_attempts',   '5'),
-      ('account_lockout_minutes',    '15')
+      ('account_lockout_minutes',    '15'),
+      -- Yeni kullanıcıların varsayılan rolü.
+      -- Değerler: 'viewer' (sadece okuma), 'editor' (okuma+yazma+silme+sorgu), 'admin' (tam erişim)
+      -- Uygulama geliştiricisi bunu 'editor' yaparak yeni kullanıcıların
+      -- tweet atabilmesini, profil oluşturabilmesini sağlayabilir. (SORUN #7 düzeltmesi)
+      ('default_user_role',          'viewer')
     ON CONFLICT (key) DO NOTHING;
   `);
 }
@@ -179,7 +184,8 @@ export type AuditEvent =
   | "oauth_signup"
   | "account_disabled"
   | "password_changed"
-  | "raw_sql_exec";
+  | "raw_sql_exec"
+  | "account_deleted";
 
 /**
  * Per-DB auth ayarını okur. Yoksa default değeri döner.

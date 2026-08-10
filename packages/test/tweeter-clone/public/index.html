@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tweeter — Postgrify Test</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="loading-center" style="margin-top: 100px;">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!--
+    SORUN NOTU #7: DB_TOKEN burada hardcode edilmek zorunda kaldı.
+    Postgrify'ın per-DB auth token'ları (auth-js ile giriş yapıldığında alınan token)
+    /db/:database/rows ve /db/:database/query endpoint'lerine erişemiyor.
+    Bu yüzden setup.js tarafından üretilen bir scope token kullanıyoruz.
+    Gerçek bir uygulamada bu token ASLA frontend'de bulunmamalı.
+  -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

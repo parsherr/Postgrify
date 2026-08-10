@@ -50,7 +50,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.get(
     "/:database/:table",
     {
-      preHandler: [scopeGuard("read")],
+      preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
         description: "List rows with optional filtering, sorting and pagination",
         tags: ["rows"],
@@ -66,7 +66,16 @@ export async function rowsRoute(server: FastifyInstance) {
               ],
               description: "OR-grouped conditions: role.eq.admin,role.eq.mod",
             },
-            order: { type: "string" },
+            order: {
+              type: "string",
+              description:
+                'Sort expression: "column.asc" / "column.desc" (combined), ' +
+                'or just direction "asc"/"desc" when ?sort=column is also provided.',
+            },
+            sort: {
+              type: "string",
+              description: "Column to sort by when using separate ?sort=col&order=dir syntax.",
+            },
             limit: { type: "integer", default: 100, maximum: 1000 },
             offset: { type: "integer", default: 0 },
           },
@@ -83,6 +92,7 @@ export async function rowsRoute(server: FastifyInstance) {
         where?: string | string[];
         or?: string | string[];
         order?: string;
+        sort?: string;
         limit?: number;
         offset?: number;
       };
@@ -106,9 +116,26 @@ export async function rowsRoute(server: FastifyInstance) {
       const cached = await server.cache.get(cacheKey);
       if (cached) return reply.send(JSON.parse(cached));
 
-      const cols = parseSelectColumns(query.select);
-      const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList, orList);
-      const orderSql = parseOrderBy(query.order);
+      let cols: string;
+      let whereSql: string;
+      let whereValues: unknown[];
+      let orderSql: string;
+
+      try {
+        cols = parseSelectColumns(query.select);
+        const parsed = parseWhereConditions(
+          whereList,
+          orList
+        );
+        whereSql   = parsed.sql;
+        whereValues = parsed.values;
+        orderSql   = parseOrderBy(query.order, query.sort);
+      } catch (e) {
+        return reply.status(400).send({
+          error: "Invalid query parameters",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
       const limit = Math.min(query.limit ?? 100, 1000);
       const offset = query.offset ?? 0;
 
@@ -148,7 +175,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.post(
     "/:database/:table",
     {
-      preHandler: [scopeGuard("write")],
+      preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
         description: "Insert one or multiple rows",
         tags: ["rows"],
@@ -177,7 +204,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.patch(
     "/:database/:table",
     {
-      preHandler: [scopeGuard("write")],
+      preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
         description: "Update rows matching the where filter",
         tags: ["rows"],
@@ -237,7 +264,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.delete(
     "/:database/:table",
     {
-      preHandler: [scopeGuard("delete")],
+      preHandler: [server.authenticateAny, scopeGuard("delete")],
       schema: {
         description: "Delete rows matching the where filter",
         tags: ["rows"],
@@ -279,7 +306,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.get(
     "/:database/:table/:id",
     {
-      preHandler: [scopeGuard("read")],
+      preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
         description: "Get a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
@@ -314,7 +341,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.put(
     "/:database/:table/:id",
     {
-      preHandler: [scopeGuard("write")],
+      preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
         description: "Replace a row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
@@ -363,7 +390,7 @@ export async function rowsRoute(server: FastifyInstance) {
   server.delete(
     "/:database/:table/:id",
     {
-      preHandler: [scopeGuard("delete")],
+      preHandler: [server.authenticateAny, scopeGuard("delete")],
       schema: {
         description: "Delete a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],

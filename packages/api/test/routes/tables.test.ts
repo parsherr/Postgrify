@@ -76,6 +76,9 @@ beforeAll(async () => {
     (req as { user: unknown }).user = payload;
   });
   server.decorate("authenticateAdmin", async () => {});
+  server.decorate("authenticateAny", async (req: never, reply: never) => {
+    return (server as never as { authenticate: (r: never, rep: never) => Promise<void> }).authenticate(req, reply);
+  });
 
   const { dbRoutes } = await import("../../src/routes/db/index.js");
   await server.register(dbRoutes, { prefix: "/db" });

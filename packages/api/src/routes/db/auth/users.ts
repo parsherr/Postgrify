@@ -86,8 +86,10 @@ export async function authUsersRoute(server: FastifyInstance) {
         SELECT id, email, role, is_active, created_at, last_login,
                -- Güvenlik: reset/magic token hash'leri metadata'dan çıkarıyoruz.
                -- Bu alanlar DB dump veya admin API üzerinden sızdırılmamalı.
-               (metadata - 'reset_token' - 'reset_token_exp'
-                         - 'magic_token' - 'magic_token_exp') AS metadata
+               -- Metadata array veya scalar olabilir (bozuk veri durumu) — önce object'e normalize et.
+               ((CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+                 - 'reset_token' - 'reset_token_exp'
+                 - 'magic_token' - 'magic_token_exp') AS metadata
         FROM _postgrify_auth.users
         ORDER BY created_at ASC
       `;
@@ -384,6 +386,91 @@ export async function authUsersRoute(server: FastifyInstance) {
       `;
 
       return reply.send({ ok: true, message: "Password updated. All other sessions revoked." });
+    })
+  );
+
+  // ── DELETE /:database/auth/me ──────────────────────────────────────────────
+  // Kullanıcının kendi hesabını silmesi (SORUN #8 düzeltmesi).
+  // Bu endpoint DB-user token ile erişilebilir; admin scope gerekmez.
+  // Sadece token sahibinin kendi hesabını siler — başka kullanıcıları silemez.
+  server.delete(
+    "/:database/auth/me",
+    {
+      schema: {
+        description:
+          "Delete the currently authenticated user's own account. " +
+          "Requires a per-database user token (not an admin token). " +
+          "All sessions are revoked and the user record is permanently deleted.",
+        tags: ["db-auth"],
+        security: [{ bearerAuth: [] }],
+        // body schema yok — DELETE /auth/me body gerektirmez.
+        // Handler kendi başına token'ı parse eder; body varsa optional olarak okur.
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok:      { type: "boolean" },
+              message: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const authHeader = req.headers.authorization;
+      const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      if (!rawToken) {
+        return reply.status(401).send({ error: "Missing authorization token" });
+      }
+
+      // Sadece per-DB user token kabul et — admin token'ı reddediyoruz
+      // çünkü admin token bir "kullanıcıya" ait değil; hangi user silinmeli belli değil.
+      const dbUserPayload = await jwtService.verifyDbUser(rawToken);
+      if (!dbUserPayload) {
+        return reply.status(403).send({
+          error: "Forbidden",
+          message:
+            "DELETE /auth/me requires a per-database user token. " +
+            "Use DELETE /auth/users/:id with an admin token to delete other users.",
+        });
+      }
+
+      const userId = dbUserPayload.sub;
+      const database = req.dbName!;
+
+      if (dbUserPayload.db !== database) {
+        return reply.status(403).send({ error: "Token database mismatch" });
+      }
+
+      const sql = server.poolManager.getPool(database);
+      await ensureAuthSchema(sql);
+
+      // Şifre doğrulama (opsiyonel — gönderilmişse kontrol et)
+      const { password: confirmPassword } = (req.body ?? {}) as { password?: string };
+      if (confirmPassword) {
+        const [user] = await sql`
+          SELECT password_hash FROM _postgrify_auth.users
+          WHERE id = ${userId} AND is_active = true
+        `;
+        if (!user) {
+          return reply.status(404).send({ error: "User not found" });
+        }
+        const { verifyPassword: verify } = await import("../../../services/passwordService.js");
+        const valid = await verify(user.password_hash as string, confirmPassword);
+        if (!valid) {
+          return reply.status(401).send({ error: "Incorrect password" });
+        }
+      }
+
+      // Tüm session'ları revoke et, sonra kullanıcıyı sil (CASCADE session'ları da siler)
+      await sql`
+        UPDATE _postgrify_auth.sessions SET revoked = true WHERE user_id = ${userId}
+      `;
+      await sql`
+        DELETE FROM _postgrify_auth.users WHERE id = ${userId}
+      `;
+
+      return reply.send({ ok: true, message: "Account deleted successfully." });
     })
   );
 }

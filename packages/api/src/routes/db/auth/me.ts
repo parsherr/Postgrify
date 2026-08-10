@@ -1,15 +1,16 @@
 /**
- * GET  /:database/auth/me — Geçerli DB kullanıcısının bilgilerini döner.
- * PATCH /:database/auth/me — Profil alanlarını günceller (full_name, avatar_url, metadata).
+ * GET    /:database/auth/me — Geçerli DB kullanıcısının bilgilerini döner.
+ * PATCH  /:database/auth/me — Profil alanlarını günceller (full_name, avatar_url, metadata).
  *
  * Her iki endpoint de Authorization: Bearer <db-user-access-token> gerektirir.
  * password_hash hiçbir zaman döndürülmez.
  * Şifre değişikliği için PATCH /:database/auth/me/password kullanılır.
+ * Hesap silme için DELETE /:database/auth/me (users.ts içinde tanımlı).
  */
 
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
-import { ensureAuthSchema } from "./provision.js";
+import { ensureAuthSchema, insertAuditLog } from "./provision.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 
@@ -70,7 +71,9 @@ export async function authMeRoute(server: FastifyInstance) {
           id, email, role, full_name, avatar_url,
           email_verified, is_active, provider,
           created_at, last_login,
-          metadata - 'verification_token' - 'verification_exp'
+          -- Metadata array veya scalar olabilir (bozuk veri durumu) — önce object'e normalize et.
+          (CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+            - 'verification_token' - 'verification_exp'
             - 'reset_token' - 'reset_token_exp'
             - 'magic_token' - 'magic_token_exp' AS metadata
         FROM _postgrify_auth.users
@@ -189,7 +192,8 @@ export async function authMeRoute(server: FastifyInstance) {
           full_name  = ${hasFullName  ? (body.full_name  ?? null) : sql`full_name`},
           avatar_url = ${hasAvatarUrl ? (body.avatar_url ?? null) : sql`avatar_url`},
           metadata   = ${hasMetadata
-            ? sql`(metadata || ${JSON.stringify(safeMetadata)}::JSONB)
+            ? sql`((CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+                  || ${JSON.stringify(safeMetadata)}::text::jsonb)
                   - 'reset_token' - 'reset_token_exp'
                   - 'magic_token' - 'magic_token_exp'
                   - 'verification_token' - 'verification_exp'`
@@ -199,7 +203,8 @@ export async function authMeRoute(server: FastifyInstance) {
           id, email, role, full_name, avatar_url,
           email_verified, is_active, provider,
           created_at, last_login,
-          metadata - 'verification_token' - 'verification_exp'
+          (CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+            - 'verification_token' - 'verification_exp'
             - 'reset_token' - 'reset_token_exp'
             - 'magic_token' - 'magic_token_exp' AS metadata
       `;
@@ -211,4 +216,5 @@ export async function authMeRoute(server: FastifyInstance) {
       return reply.send(updated);
     })
   );
-}
+
+  }
