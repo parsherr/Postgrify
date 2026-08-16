@@ -24,6 +24,7 @@ import { tablesRoute } from "./tables.js";
 import { rowsRoute } from "./rows.js";
 import { queryRoute } from "./query.js";
 import { metaRoute } from "./meta.js";
+import { schemaListsRoute } from "./schemaLists.js";
 import { backupRoute } from "./backup.js";
 import { uploadRoute } from "./upload.js";
 import { rpcRoute } from "./rpc.js";
@@ -60,6 +61,7 @@ export async function dbRoutes(server: FastifyInstance) {
   await server.register(tablesRoute);
   await server.register(rowsRoute);
   await server.register(metaRoute);
+  await server.register(schemaListsRoute);
   await server.register(queryRoute);
   await server.register(rpcRoute);
   await server.register(backupRoute);
