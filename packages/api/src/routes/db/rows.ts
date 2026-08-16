@@ -22,8 +22,10 @@ import { assertIdentifier } from "../../utils/identifier.js";
 import {
   parseWhereConditions,
   parseSelect,
+  attachEmbedSql,
   parseOrderBy,
 } from "../../services/queryBuilder.js";
+import { buildEmbedSelectFragments } from "../../services/queryEmbedSql.js";
 import { TTL } from "../../services/cacheService.js";
 import { parsePrefer } from "../../utils/prefer.js";
 import { setContentRange } from "../../utils/contentRange.js";
@@ -130,11 +132,13 @@ async function handleGetList(
   let whereSql: string;
   let whereValues: unknown[];
   let orderSql: string;
+  let embedSpecs = [] as import("../../services/queryEmbed.js").EmbedSpec[];
 
   try {
     const selectParsed = parseSelect(query.select);
     cols = selectParsed.sql;
     groupBySql = selectParsed.groupBySql;
+    embedSpecs = selectParsed.embeds;
     const parsed = parseWhereConditions(whereList, orList);
     whereSql = parsed.sql;
     whereValues = parsed.values;
@@ -172,6 +176,27 @@ async function handleGetList(
   }
 
   const sql = server.poolManager.getPool(dbName);
+
+  if (embedSpecs.length > 0) {
+    try {
+      const fragments = await buildEmbedSelectFragments(
+        sql,
+        dbName,
+        table,
+        embedSpecs
+      );
+      const attached = attachEmbedSql(
+        { sql: cols, groupBySql, hasAggregate: false, embeds: embedSpecs },
+        fragments
+      );
+      cols = attached.sql;
+    } catch (e) {
+      return reply.status(400).send({
+        error: "Invalid embed",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { rows, total } = await sql.begin("read only", async (tx: any) => {
@@ -650,9 +675,20 @@ export async function rowsRoute(server: FastifyInstance) {
       let cols: string;
       let groupBySql: string;
       try {
-        const parsed = parseSelect(select);
+        let parsed = parseSelect(select);
         cols = parsed.sql;
         groupBySql = parsed.groupBySql;
+        const pool = server.poolManager.getPool(dbName);
+        if (parsed.embeds.length > 0) {
+          const fragments = await buildEmbedSelectFragments(
+            pool,
+            dbName,
+            table,
+            parsed.embeds
+          );
+          parsed = attachEmbedSql(parsed, fragments);
+          cols = parsed.sql;
+        }
       } catch (e) {
         return reply.status(400).send({
           error: "Invalid select",
