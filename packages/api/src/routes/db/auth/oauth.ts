@@ -14,6 +14,8 @@ import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js
 import { getAuthUrl, exchangeCode } from "../../../services/oauthService.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
+import { expirySeconds, parseDurationMs } from "./sessionResponse.js";
+import { safeAppRedirect, sessionFragment } from "./redirectSafe.js";
 import crypto from "node:crypto";
 
 /**
@@ -273,10 +275,9 @@ export async function authOAuthRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
-      // Yeni session — DB'de refresh token hash'ini sakla, client'a ham token gönder
       const refreshToken = crypto.randomBytes(48).toString("hex");
       const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
-      const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
+      const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
@@ -294,44 +295,24 @@ export async function authOAuthRoute(server: FastifyInstance) {
         }
       );
 
-      // signup_redirect_url varsa oraya yönlendir.
-      // Güvenlik — open redirect koruması: yalnızca aynı origin'e (APP_URL) izin ver.
-      // Güvenlik — token sızıntısı koruması: token'lar query param değil URL fragment
-      //   olarak iletilir. Fragment tarayıcıdan server'a hiç gitmez; log'lara düşmez;
-      //   Referer header'ı ile üçüncü taraflara sızmaz.
+      // signup_redirect_url varsa oraya yönlendir (C-13 GoTrue fragment).
       const [redirectSetting] = await sql`
         SELECT value FROM _postgrify_auth.auth_settings
         WHERE key = 'signup_redirect_url'
       `;
 
-      const appOrigin = new URL(config.APP_URL).origin;
-      const rawRedirect = (redirectSetting?.value as string) || `${config.APP_URL}/auth/callback`;
-
-      // Origin whitelist kontrolü — farklı origin'e asla yönlendirme
-      let safeBase: string;
-      try {
-        const candidate = new URL(rawRedirect);
-        safeBase = candidate.origin === appOrigin
-          ? rawRedirect
-          : `${config.APP_URL}/auth/callback`;
-      } catch {
-        safeBase = `${config.APP_URL}/auth/callback`;
-      }
-
-      // Token'ları fragment'a ekle (# ile) — query param'dan çok daha güvenli
-      const fragment = `access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}`;
-      const finalRedirect = `${safeBase}#${fragment}`;
-
-      return reply.redirect(finalRedirect);
+      const rawRedirect =
+        (redirectSetting?.value as string) || `${config.APP_URL}/auth/callback`;
+      const safeBase = safeAppRedirect(rawRedirect);
+      const expiresIn = expirySeconds(config.ACCESS_TOKEN_EXPIRY);
+      const fragment = sessionFragment({
+        accessToken,
+        refreshToken,
+        expiresIn,
+        expiresAt: Math.floor(Date.now() / 1000) + expiresIn,
+        type: "oauth",
+      });
+      return reply.redirect(`${safeBase}#${fragment}`);
     })
   );
-}
-
-function parseDuration(expiry: string): number {
-  const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) return 7 * 24 * 60 * 60 * 1000;
-  const value = parseInt(match[1], 10);
-  const unit = match[2];
-  const multipliers: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-  return value * (multipliers[unit] ?? 86_400_000);
 }

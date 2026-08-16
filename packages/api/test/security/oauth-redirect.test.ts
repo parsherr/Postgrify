@@ -81,8 +81,10 @@ describe("HIGH-1: OAuth token URL fragment güvenliği", () => {
       join(__dirname, "../../src/routes/db/auth/oauth.ts"),
       "utf-8"
     );
-    // Token'lar fragment (#) ile iletilmeli
-    expect(src).toContain("#${fragment}");
+    // Token'lar fragment (#) ile iletilmeli (sessionFragment helper)
+    expect(src).toMatch(/#\$\{fragment\}|#\$\{sessionFragment/);
+    expect(src).toContain("sessionFragment");
+    expect(src).toContain('type: "oauth"');
     // Query param olarak setlenmemeli
     expect(src).not.toMatch(/searchParams\.set\(["']access_token/);
   });
@@ -154,8 +156,12 @@ describe("HIGH-2: Open redirect origin whitelist", () => {
       join(__dirname, "../../src/routes/db/auth/oauth.ts"),
       "utf-8"
     );
-    expect(src).toContain("appOrigin");
-    expect(src).toContain("candidate.origin === appOrigin");
+    expect(src).toContain("safeAppRedirect");
     expect(src).toContain("auth/callback");
+    const helper = readFileSync(
+      join(__dirname, "../../src/routes/db/auth/redirectSafe.ts"),
+      "utf-8"
+    );
+    expect(helper).toContain("candidate.origin === appOrigin");
   });
 });
