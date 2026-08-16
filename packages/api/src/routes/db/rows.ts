@@ -278,14 +278,30 @@ export async function rowsRoute(server: FastifyInstance) {
     asyncHandler(async (req, reply) => handleGetList(server, req, reply, true))
   );
 
-  // ── POST — legacy (C-02 sonraki adım) ─────────────────────────────────────
+  // ── C-02 POST insert / upsert (Prefer: return / resolution / missing) ─────
   server.post(
     "/:database/:table",
     {
       preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
-        description: "Insert one or multiple rows",
+        description:
+          "Insert rows. Prefer: return=minimal|representation|headers-only; " +
+          "resolution=merge-duplicates|ignore-duplicates with ?on_conflict=; " +
+          "missing=default|null; ?columns= whitelist.",
         tags: ["rows"],
+        querystring: {
+          type: "object",
+          properties: {
+            on_conflict: {
+              type: "string",
+              description: "Comma-separated UNIQUE columns for ON CONFLICT",
+            },
+            columns: {
+              type: "string",
+              description: "Comma-separated column whitelist (bulk / missing=default)",
+            },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
@@ -293,17 +309,134 @@ export async function rowsRoute(server: FastifyInstance) {
       const { table } = req.params as { table: string };
       assertIdentifier(table, "table");
 
-      const body = req.body as Record<string, unknown> | Record<string, unknown>[];
-      const rows = Array.isArray(body) ? body : [body];
+      const prefer = parsePrefer(req.headers.prefer);
+      const q = req.query as { on_conflict?: string; columns?: string };
+
+      if (prefer.resolution && !q.on_conflict) {
+        return reply.status(400).send({
+          error: "on_conflict query param required when Prefer: resolution is set",
+        });
+      }
+
+      const body = req.body as Record<string, unknown> | Record<string, unknown>[] | null;
+      if (body === null || body === undefined) {
+        return reply.status(400).send({ error: "Empty body" });
+      }
+      let rowsIn = Array.isArray(body) ? body : [body];
+      if (rowsIn.length === 0) {
+        return reply.status(400).send({ error: "Empty body" });
+      }
+
+      // columns= whitelist
+      let allowed: string[] | null = null;
+      if (q.columns) {
+        allowed = q.columns.split(",").map((c) => c.trim()).filter(Boolean);
+        for (const c of allowed) assertIdentifier(c, "column");
+      }
+
+      const rows: Record<string, unknown>[] = [];
+      for (const row of rowsIn) {
+        if (typeof row !== "object" || row === null || Array.isArray(row)) {
+          return reply.status(400).send({ error: "Each row must be a JSON object" });
+        }
+        const src = row as Record<string, unknown>;
+        const out: Record<string, unknown> = {};
+        const keys = allowed ?? Object.keys(src);
+        for (const k of keys) {
+          assertIdentifier(k, "column");
+          if (k in src) {
+            out[k] = src[k];
+          } else if (prefer.missing === "null") {
+            out[k] = null;
+          }
+        }
+        rows.push(out);
+      }
+
+      // Union of keys across rows (for multi-row INSERT column list)
+      const allKeys = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+      if (allKeys.length === 0) {
+        return reply.status(400).send({
+          error: "No columns to insert (check body and Prefer: missing / columns=)",
+        });
+      }
+      for (const k of allKeys) assertIdentifier(k, "column");
+
+      let preferenceApplied: string[] = [];
+
+      let conflictSql = "";
+      if (prefer.resolution && q.on_conflict) {
+        const conflictCols = q.on_conflict.split(",").map((c) => c.trim()).filter(Boolean);
+        for (const c of conflictCols) assertIdentifier(c, "on_conflict");
+        const target = conflictCols.map((c) => `"${c}"`).join(", ");
+        if (prefer.resolution === "ignore-duplicates") {
+          conflictSql = ` ON CONFLICT (${target}) DO NOTHING`;
+        } else {
+          const updates = allKeys
+            .filter((k) => !conflictCols.includes(k))
+            .map((k) => `"${k}" = EXCLUDED."${k}"`)
+            .join(", ");
+          conflictSql = updates
+            ? ` ON CONFLICT (${target}) DO UPDATE SET ${updates}`
+            : ` ON CONFLICT (${target}) DO NOTHING`;
+        }
+        preferenceApplied.push(`resolution=${prefer.resolution}`);
+      }
+
+      const wantsReturning =
+        prefer.return === "representation" || prefer.return === "headers-only";
+      const returning = wantsReturning ? " RETURNING *" : "";
+
+      const colList = allKeys.map((k) => `"${k}"`).join(", ");
+      const values: unknown[] = [];
+      const rowPlaceholders = rows.map((row) => {
+        const ph = allKeys.map((k) => {
+          values.push(k in row ? row[k] : null);
+          return `$${values.length}`;
+        });
+        return `(${ph.join(", ")})`;
+      });
+
+      const insertSql =
+        `INSERT INTO "${table}" (${colList}) VALUES ${rowPlaceholders.join(", ")}` +
+        conflictSql +
+        returning;
 
       const sql = server.poolManager.getPool(dbName);
-      const inserted = await sql`INSERT INTO ${sql(table)} ${sql(rows)} RETURNING *`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await sql.unsafe(insertSql, values as any[]);
+      const inserted = wantsReturning
+        ? (result as Record<string, unknown>[])
+        : [];
 
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "rows", table, "*")
       );
 
-      return reply.status(201).send({ inserted });
+      // Upsert that may update existing rows → 200; pure insert → 201
+      const status = prefer.resolution ? 200 : 201;
+
+      if (prefer.return === "headers-only") {
+        const first = inserted[0];
+        if (first) {
+          const idVal = first.id ?? Object.values(first)[0];
+          reply.header("Location", `/db/${dbName}/${table}?id=eq.${idVal}`);
+        }
+        preferenceApplied.push("return=headers-only");
+        reply.header("Preference-Applied", preferenceApplied.join(", "));
+        return reply.status(status).send();
+      }
+
+      if (prefer.return === "representation") {
+        preferenceApplied.push("return=representation");
+        reply.header("Preference-Applied", preferenceApplied.join(", "));
+        return reply.status(status).send(inserted);
+      }
+
+      // minimal (default) — no body
+      preferenceApplied.push("return=minimal");
+      reply.header("Preference-Applied", preferenceApplied.join(", "));
+      return reply.status(status).send();
     })
   );
 
