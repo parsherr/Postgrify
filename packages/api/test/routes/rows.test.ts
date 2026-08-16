@@ -191,13 +191,13 @@ describe("DELETE /db/:database/:table — toplu silme", () => {
     expect(res.json().error).toMatch(/where filter required/i);
   });
 
-  it("where filtresi ile 200 döner", async () => {
+  it("where filtresi ile 204 döner (Prefer return=minimal default)", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/db/project1/users?where=id.eq.1",
       headers: { Authorization: `Bearer ${dbToken}` },
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(204);
   });
 
   it("delete scope olmadan 403 döner", async () => {

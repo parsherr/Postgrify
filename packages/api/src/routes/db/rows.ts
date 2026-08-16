@@ -522,13 +522,14 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // ── DELETE batch — legacy (C-04 sonraki adım) ─────────────────────────────
+  // ── C-04 DELETE batch (Prefer: return; where required — ADR-009) ──────────
   server.delete(
     "/:database/:table",
     {
       preHandler: [server.authenticateAny, scopeGuard("delete")],
       schema: {
-        description: "Delete rows matching the where filter",
+        description:
+          "Delete rows matching where filter (required). Prefer: return=minimal|representation.",
         tags: ["rows"],
       },
     },
@@ -536,6 +537,8 @@ export async function rowsRoute(server: FastifyInstance) {
       const dbName = req.dbName!;
       const { table } = req.params as { table: string };
       assertIdentifier(table, "table");
+      const prefer = parsePrefer(req.headers.prefer);
+      reply.header("X-Postgrify-Require-Filter", "true");
 
       const query = req.query as { where?: string | string[] };
       const whereList = Array.isArray(query.where)
@@ -551,11 +554,12 @@ export async function rowsRoute(server: FastifyInstance) {
       }
 
       const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList);
+      const returning = prefer.return === "representation" ? " RETURNING *" : "";
 
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const deleted = await sql.unsafe(
-        `DELETE FROM "${table}" ${whereSql} RETURNING *`,
+        `DELETE FROM "${table}" ${whereSql}${returning}`,
         whereValues as any[]
       );
 
@@ -563,7 +567,13 @@ export async function rowsRoute(server: FastifyInstance) {
         server.cache.buildKey(dbName, "rows", table, "*")
       );
 
-      return reply.send({ deleted });
+      if (prefer.return === "representation") {
+        reply.header("Preference-Applied", "return=representation");
+        return reply.status(200).send(deleted);
+      }
+
+      reply.header("Preference-Applied", "return=minimal");
+      return reply.status(204).send();
     })
   );
 
