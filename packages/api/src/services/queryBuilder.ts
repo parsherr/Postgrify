@@ -12,9 +12,13 @@
  *   Array/range (E-12): tags.cs.{a,b} , schedule.ov.[2026-01-01,2026-06-01]
  *   like(any|all) (E-13): name.like(any).{A*,B*} , title.ilike(all).{*x*,*y*}
  *
- * OR desteği:
+ * OR / AND (E-15):
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
  *   → WHERE "status" = 'active' AND ("role" = 'admin' OR "role" = 'mod')
+ *   ?or=(age.lt.18,age.gt.65)
+ *   ?and=(status.eq.pending,total.gt.100)
+ *   ?or=(status.eq.pending,and=(total.gt.100,customer_id.eq.5))
+ *   ?not.and=(price.lt.10,stock.eq.0)
  *
  * `is` operatörü değerleri:
  *   field.is.null     → "field" IS NULL
@@ -35,6 +39,22 @@ import {
   buildLikeAnyAllClause,
   matchLikeAnyAll,
 } from "./queryLikeAny.js";
+import { isFlatAtomList, parseLogicParam } from "./queryLogic.js";
+
+/** Extra PostgREST logic params beyond legacy flat `or` atoms. */
+export interface LogicFilterExtras {
+  /** Raw `and=` values, e.g. `(status.eq.pending,total.gt.100)` */
+  and?: string[];
+  /** Raw `not.or=` values */
+  notOr?: string[];
+  /** Raw `not.and=` values */
+  notAnd?: string[];
+  /**
+   * When true, treat `orConditions` as raw PostgREST values (may contain
+   * nested and= / or=) instead of a pre-split flat atom list.
+   */
+  orRaw?: boolean;
+}
 
 export interface SelectOptions {
   select?: string;
@@ -323,7 +343,8 @@ function parseCondition(
 
 export function parseWhereConditions(
   conditions: string[],
-  orConditions: string[] = []
+  orConditions: string[] = [],
+  extras: LogicFilterExtras = {}
 ): { sql: string; values: unknown[] } {
   const parts: string[] = [];
   const values: unknown[] = [];
@@ -335,13 +356,59 @@ export function parseWhereConditions(
   }
 
   if (orConditions.length > 0) {
-    const orParts: string[] = [];
-    for (const condition of orConditions) {
-      const result = parseCondition(condition, values.length);
-      orParts.push(result.sql);
-      values.push(...result.values);
+    const useTree =
+      extras.orRaw === true || !isFlatAtomList(orConditions);
+
+    if (!useTree) {
+      const orParts: string[] = [];
+      for (const condition of orConditions) {
+        const result = parseCondition(condition, values.length);
+        orParts.push(result.sql);
+        values.push(...result.values);
+      }
+      parts.push(`(${orParts.join(" OR ")})`);
+    } else {
+      for (const raw of orConditions) {
+        const result = parseLogicParam(
+          raw,
+          "OR",
+          values.length,
+          parseCondition
+        );
+        parts.push(result.sql);
+        values.push(...result.values);
+      }
     }
-    parts.push(`(${orParts.join(" OR ")})`);
+  }
+
+  for (const raw of extras.and ?? []) {
+    const result = parseLogicParam(raw, "AND", values.length, parseCondition);
+    parts.push(result.sql);
+    values.push(...result.values);
+  }
+
+  for (const raw of extras.notOr ?? []) {
+    const result = parseLogicParam(
+      raw,
+      "OR",
+      values.length,
+      parseCondition,
+      { not: true }
+    );
+    parts.push(result.sql);
+    values.push(...result.values);
+  }
+
+  for (const raw of extras.notAnd ?? []) {
+    const result = parseLogicParam(
+      raw,
+      "AND",
+      values.length,
+      parseCondition,
+      { not: true }
+    );
+    parts.push(result.sql);
+    values.push(...result.values);
   }
 
   return {
