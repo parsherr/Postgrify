@@ -577,14 +577,14 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // GET /:id — legacy (C-06 sonraki adım: select=)
+  // ── C-06 GET /:id (?select= + ?pk=) — object body (Postgrify DX) ─────────
   server.get(
     "/:database/:table/:id",
     {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
         description:
-          "Get a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
+          "Get a single row by primary key (object, not array). ?pk= and ?select= supported.",
         tags: ["rows"],
         querystring: {
           type: "object",
@@ -593,6 +593,10 @@ export async function rowsRoute(server: FastifyInstance) {
               type: "string",
               description: "Primary key column name (default: id)",
             },
+            select: {
+              type: "string",
+              description: "Comma-separated columns (default *)",
+            },
           },
         },
       },
@@ -600,14 +604,24 @@ export async function rowsRoute(server: FastifyInstance) {
     asyncHandler(async (req, reply) => {
       const dbName = req.dbName!;
       const { table, id } = req.params as { table: string; id: string };
-      const { pk } = req.query as { pk?: string };
+      const { pk, select } = req.query as { pk?: string; select?: string };
       assertIdentifier(table, "table");
       const pkCol = resolvePkColumn(pk);
+
+      let cols: string;
+      try {
+        cols = parseSelectColumns(select);
+      } catch (e) {
+        return reply.status(400).send({
+          error: "Invalid select",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
 
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const [row] = await sql.unsafe(
-        `SELECT * FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
+        `SELECT ${cols} FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
         [id] as any[]
       );
 
@@ -616,14 +630,14 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // PUT /:id — legacy (C-05 sonraki adım)
+  // ── C-05 PUT /:id — upsert + Prefer: return (ADR-006) ─────────────────────
   server.put(
     "/:database/:table/:id",
     {
       preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
         description:
-          "Replace a row by primary key. Use ?pk=column to specify a non-id primary key column.",
+          "Update row by PK; if missing, INSERT (upsert). Prefer: return=minimal|representation|headers-only.",
         tags: ["rows"],
         querystring: {
           type: "object",
@@ -642,30 +656,77 @@ export async function rowsRoute(server: FastifyInstance) {
       const { pk } = req.query as { pk?: string };
       assertIdentifier(table, "table");
       const pkCol = resolvePkColumn(pk);
+      const preferHeader = req.headers.prefer;
+      const prefer = parsePrefer(preferHeader);
+      // Prefer yoksa representation (GUI geriye uyum); açık Prefer honor edilir
+      const returnMode =
+        preferHeader === undefined || preferHeader === ""
+          ? "representation"
+          : prefer.return;
 
       const updates = req.body as Record<string, unknown>;
+      if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+        return reply.status(400).send({ error: "Body must be a JSON object" });
+      }
+      const keys = Object.keys(updates);
+      for (const k of keys) assertIdentifier(k, "column");
+
       const sql = server.poolManager.getPool(dbName);
+      const returningClause =
+        returnMode === "minimal" ? "" : " RETURNING *";
 
-      const setCols = Object.keys(updates)
-        .map((k, i) => {
-          assertIdentifier(k, "column");
-          return `"${k}" = $${i + 2}`;
-        })
-        .join(", ");
+      let created = false;
+      let row: Record<string, unknown> | undefined;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [updated] = await sql.unsafe(
-        `UPDATE "${table}" SET ${setCols} WHERE "${pkCol}" = $1 RETURNING *`,
-        [id, ...Object.values(updates)] as any[]
-      );
+      if (keys.length > 0) {
+        const setCols = keys
+          .map((k, i) => `"${k}" = $${i + 2}`)
+          .join(", ");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updatedRows = (await sql.unsafe(
+          `UPDATE "${table}" SET ${setCols} WHERE "${pkCol}" = $1${returningClause || " RETURNING *"}`,
+          [id, ...Object.values(updates)] as any[]
+        )) as Record<string, unknown>[];
+        row = updatedRows[0];
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const existing = (await sql.unsafe(
+          `SELECT * FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
+          [id] as any[]
+        )) as Record<string, unknown>[];
+        row = existing[0];
+      }
 
-      if (!updated) return reply.status(404).send({ error: "Row not found" });
+      if (!row) {
+        const insertRow: Record<string, unknown> = { ...updates };
+        const numericId = Number(id);
+        insertRow[pkCol] = Number.isNaN(numericId) ? id : numericId;
+        const cols = Object.keys(insertRow);
+        for (const c of cols) assertIdentifier(c, "column");
+        const colSql = cols.map((c) => `"${c}"`).join(", ");
+        const ph = cols.map((_, i) => `$${i + 1}`).join(", ");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inserted = (await sql.unsafe(
+          `INSERT INTO "${table}" (${colSql}) VALUES (${ph}) RETURNING *`,
+          Object.values(insertRow) as any[]
+        )) as Record<string, unknown>[];
+        row = inserted[0];
+        created = true;
+      }
 
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "rows", table, "*")
       );
 
-      return reply.send(updated);
+      if (returnMode === "minimal") {
+        return reply.status(created ? 201 : 204).send();
+      }
+      if (returnMode === "headers-only") {
+        reply.header("Location", `/db/${dbName}/${table}/${id}`);
+        return reply.status(created ? 201 : 200).send();
+      }
+      reply.header("Preference-Applied", `return=${returnMode}`);
+      return reply.status(created ? 201 : 200).send(row);
     })
   );
 
