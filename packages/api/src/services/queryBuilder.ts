@@ -397,7 +397,7 @@ export function parseWhereConditions(
   };
 }
 
-export { parseSelect, parseSelectColumns } from "./querySelect.js";
+export { parseSelect, parseSelectColumns, attachEmbedSql } from "./querySelect.js";
 export type { ParsedSelect } from "./querySelect.js";
 
 export function parseOrderBy(order?: string, sort?: string): string {
