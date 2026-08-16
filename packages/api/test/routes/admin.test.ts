@@ -1,5 +1,5 @@
 /**
- * Admin route testleri — DB listesi, oluşturma, silme.
+ * Admin route testleri — DB listesi, oluşturma, silme, schema-cache reload.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -134,5 +134,46 @@ describe("POST /admin/databases", () => {
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().name).toBe("new_project");
+  });
+});
+
+describe("POST /admin/databases/:db/schema-cache/reload (E-27)", () => {
+  it("admin → 204 and invalidates db cache prefix", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/admin/databases/project1/schema-cache/reload",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(res.body).toBe("");
+    expect(server.cache.invalidatePattern).toHaveBeenCalledWith(
+      "postgrify:project1:*"
+    );
+  });
+
+  it("invalid db name → 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/admin/databases/bad-name!/schema-cache/reload",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("DB token → 403", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/admin/databases/project1/schema-cache/reload",
+      headers: { Authorization: `Bearer ${dbToken}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("no token → 401", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/admin/databases/project1/schema-cache/reload",
+    });
+    expect(res.statusCode).toBe(401);
   });
 });
