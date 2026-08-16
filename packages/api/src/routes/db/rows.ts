@@ -5,7 +5,8 @@
  * Mutations: legacy body shape korunuyor (sonraki turtle adımlarında Prefer eklenecek)
  *
  *   GET    /db/:database/:table
- *   HEAD   /db/:database/:table   (E-01 — C-01 ile aynı SQL, body yok)
+ *   HEAD   /db/:database/:table   (E-01)
+ *   OPTIONS /db/:database/:table  (E-02 — Allow, no DB)
  *   POST   /db/:database/:table
  *   PATCH  /db/:database/:table
  *   DELETE /db/:database/:table
@@ -276,6 +277,40 @@ export async function rowsRoute(server: FastifyInstance) {
       },
     },
     asyncHandler(async (req, reply) => handleGetList(server, req, reply, true))
+  );
+
+  // ── E-02 OPTIONS (Allow + CORS methods; no DB hit) ────────────────────────
+  const TABLE_ALLOW = "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS";
+  server.options(
+    "/:database/:table",
+    {
+      // CORS preflight often has no Bearer — skip scope; still resolve via parent hooks.
+      // Parent authenticateAny would 401; override with no-op auth for OPTIONS only.
+      preHandler: [],
+      schema: {
+        description: "Supported HTTP methods for table resource (PostgREST-style Allow)",
+        tags: ["rows"],
+        security: [],
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { table } = req.params as { table: string };
+      try {
+        assertIdentifier(table, "table");
+      } catch (e) {
+        return reply.status(400).send({
+          error: "Invalid table name",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+      reply.header("Allow", TABLE_ALLOW);
+      reply.header("Access-Control-Allow-Methods", TABLE_ALLOW);
+      reply.header(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, Prefer, X-Database, X-API-Key, Range, Range-Unit"
+      );
+      return reply.status(200).send();
+    })
   );
 
   // ── C-02 POST insert / upsert (Prefer: return / resolution / missing) ─────

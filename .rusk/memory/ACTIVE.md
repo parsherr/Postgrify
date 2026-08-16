@@ -1,17 +1,22 @@
-# Active Work — 2026-08-16 (TURTLE)
+# Active Work — 2026-08-16 (TURTLE + LOOP)
 
-## Bitmiş
-| ID | PR | Durum |
-|----|-----|-------|
-| C-01 GET list | https://github.com/parsherr/Postgrify/pull/1 | açık |
+## Kural
+Her adımda bu dosyayı güncelle. Canlı Docker/curl → geliştirme bitince.
+
+## Açık PR’lar
+| ID | PR |
+|----|-----|
+| C-01 | https://github.com/parsherr/Postgrify/pull/1 |
+| E-01 | https://github.com/parsherr/Postgrify/pull/2 |
+| C-02 | https://github.com/parsherr/Postgrify/pull/3 |
+| C-03 | https://github.com/parsherr/Postgrify/pull/4 |
+| C-04 | https://github.com/parsherr/Postgrify/pull/5 |
+| C-05+C-06 | https://github.com/parsherr/Postgrify/pull/6 |
 
 ## Şu an
-🎯 **E-01** `HEAD /db/:database/:table`
-- Aynı SQL/header’lar GET ile; **body yok**
-- Prefer:count + Content-Range GET ile birebir
-- Auth/scope/injection aynı kurallar
+🎯 **E-02** `OPTIONS /db/:database/:table`
 
 ## Kuyruk
-3. C-02 POST Prefer
-4. C-03 PATCH Prefer
-5. …
+- C-07 login snake_case → C-08 refresh → C-09 logout → C-10/19 signup → …
+- E-09 RPC, E-25 ready
+- En sonda: Docker + curl smoke
