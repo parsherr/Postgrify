@@ -313,14 +313,50 @@ describe("parseSelectColumns", () => {
     expect(() => parseSelectColumns("id,drop,name")).toThrow();
   });
 
-  it("E-18 select cast duration::text", () => {
+  it("E-18 select cast duration::text keeps duration key", () => {
     expect(parseSelectColumns("id,duration::text")).toBe(
-      '"id", ("duration")::text'
+      '"id", ("duration")::text AS "duration"'
     );
   });
 
   it("E-18 reject unknown cast type in select", () => {
     expect(() => parseSelectColumns("id::notatype")).toThrow(/Invalid cast/);
+  });
+
+  it("E-19 JSON path select aliases last key", () => {
+    expect(parseSelectColumns("id,settings->>'theme'")).toBe(
+      `"id", "settings"->>'theme' AS "theme"`
+    );
+  });
+
+  it("E-19 nested JSON path aliases last key", () => {
+    expect(parseSelectColumns("attrs->'specs'->>'weight'")).toBe(
+      `"attrs"->'specs'->>'weight' AS "weight"`
+    );
+  });
+
+  it("E-17 plain column alias", () => {
+    expect(parseSelectColumns("fullName:name")).toBe('"name" AS "fullName"');
+  });
+
+  it("E-17 alias over JSON path", () => {
+    expect(parseSelectColumns("theme:settings->>'theme'")).toBe(
+      `"settings"->>'theme' AS "theme"`
+    );
+  });
+
+  it("E-17 alias over cast", () => {
+    expect(parseSelectColumns("secs:duration::text")).toBe(
+      '("duration")::text AS "secs"'
+    );
+  });
+
+  it("E-17 rejects invalid alias", () => {
+    expect(() => parseSelectColumns("bad-name:id")).toThrow(/Invalid select alias/);
+  });
+
+  it("E-17 does not treat :: cast as alias", () => {
+    expect(parseSelectColumns("name::text")).toBe('("name")::text AS "name"');
   });
 });
 
