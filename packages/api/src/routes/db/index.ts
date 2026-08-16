@@ -47,7 +47,11 @@ export async function dbRoutes(server: FastifyInstance) {
   // P1: authenticateAny kullanılıyor (eskiden: authenticate).
   // Fark: DB-user token'ları (iss: "postgrify/db-auth") artık reddedilmiyor;
   // req.dbUser set edilip scopeGuard'a bırakılıyor.
-  server.addHook("preHandler", server.authenticateAny);
+  // E-02: OPTIONS (CORS / Allow discovery) — Bearer yok; auth atlanır.
+  server.addHook("preHandler", async (req, reply) => {
+    if (req.method === "OPTIONS") return;
+    return server.authenticateAny(req, reply);
+  });
   server.addHook("preHandler", dbResolverHook);
   // IP kontrol dbResolver'dan sonra — req.dbName gerekli
   server.addHook("preHandler", createIpAllowlistGuard(server));
