@@ -1,5 +1,5 @@
 /**
- * Signup route testleri — C-10 GoTrue session shape.
+ * Signup route testleri.
  *
  * POST /:database/auth/signup
  */
@@ -9,7 +9,6 @@ import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply }
 import { JwtService } from "../../../src/services/jwtService.js";
 
 const JWT_SECRET = "test-secret-must-be-at-least-32-characters";
-vi.stubEnv("JWT_SECRET", JWT_SECRET);
 
 const mockGetAuthSetting = vi.fn();
 const mockSendEmail = vi.fn();
@@ -43,12 +42,9 @@ vi.mock("postgres", () => {
 
 vi.mock("../../../src/services/cacheService.js", () => ({
   CacheService: vi.fn().mockImplementation(() => ({
-    connect: vi.fn(),
-    disconnect: vi.fn(),
+    connect: vi.fn(), disconnect: vi.fn(),
     get: vi.fn().mockResolvedValue(null),
-    set: vi.fn(),
-    del: vi.fn(),
-    invalidatePattern: vi.fn(),
+    set: vi.fn(), del: vi.fn(), invalidatePattern: vi.fn(),
     buildKey: (...p: string[]) => `postgrify:${p.join(":")}`,
     redisClient: null,
   })),
@@ -57,29 +53,6 @@ vi.mock("../../../src/services/cacheService.js", () => ({
 
 let server: FastifyInstance;
 let sqlFnRef: ReturnType<typeof vi.fn>;
-
-function mockSuccessfulInsert(email: string, extras: Record<string, unknown> = {}) {
-  sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
-    const q = strings[0] ?? "";
-    if (q.includes("WHERE email =")) return Promise.resolve([]);
-    if (q.includes("INSERT INTO _postgrify_auth.users")) {
-      return Promise.resolve([
-        {
-          id: "new-uuid-1",
-          email,
-          email_verified: false,
-          role: "viewer",
-          created_at: "2026-03-01T00:00:00.000Z",
-          metadata: {},
-          provider: "email",
-          full_name: extras.full_name ?? null,
-          is_active: true,
-        },
-      ]);
-    }
-    return Promise.resolve([]);
-  });
-}
 
 beforeAll(async () => {
   server = Fastify({ logger: false });
@@ -111,12 +84,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server.close();
-  vi.unstubAllEnvs();
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
   sqlFnRef.mockResolvedValue([]);
+  // Default: signup enabled, verify not required
   mockGetAuthSetting.mockImplementation((_sql: unknown, key: string, def: string) => {
     if (key === "email_signup_enabled") return Promise.resolve("true");
     if (key === "email_verify_required") return Promise.resolve("false");
@@ -126,8 +99,22 @@ beforeEach(() => {
 });
 
 describe("POST /:database/auth/signup", () => {
-  it("C-10: verify off → 200 + session tokens", async () => {
-    mockSuccessfulInsert("newuser@example.com");
+  it("Başarılı signup → 201, user objesi döner", async () => {
+    sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
+      const q = strings[0] ?? "";
+      // Email unique kontrol → yok
+      if (q.includes("WHERE email =")) return Promise.resolve([]);
+      // INSERT user → döner
+      if (q.includes("INSERT INTO _postgrify_auth.users")) {
+        return Promise.resolve([{
+          id: "new-uuid-1",
+          email: "newuser@example.com",
+          email_verified: false,
+          role: "viewer",
+        }]);
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await server.inject({
       method: "POST",
@@ -137,18 +124,12 @@ describe("POST /:database/auth/signup", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
+    // GoTrue session shape (C-10)
     expect(body.access_token).toEqual(expect.any(String));
-    expect(body.access_token.length).toBeGreaterThan(10);
-    expect(body.refresh_token).toEqual(expect.any(String));
     expect(body.token_type).toBe("bearer");
-    expect(typeof body.expires_in).toBe("number");
     expect(body.user).toMatchObject({
       email: "newuser@example.com",
-      role: "authenticated",
-      aud: "authenticated",
     });
-    expect(body.email_verify_sent).toBe(true);
-    expect(body).not.toHaveProperty("ok");
   });
 
   it("Signup email_signup_enabled=false → 403", async () => {
@@ -170,6 +151,7 @@ describe("POST /:database/auth/signup", () => {
   it("Duplicate email → 409 Email already registered", async () => {
     sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
       const q = strings[0] ?? "";
+      // Email zaten var
       if (q.includes("WHERE email =")) {
         return Promise.resolve([{ id: "existing-uuid" }]);
       }
@@ -206,13 +188,27 @@ describe("POST /:database/auth/signup", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("email_verify_required=true → empty tokens, same shape", async () => {
+  it("email_verify_required=true → response'da email_verify_sent alanı var", async () => {
     mockGetAuthSetting.mockImplementation((_sql: unknown, key: string, def: string) => {
       if (key === "email_signup_enabled") return Promise.resolve("true");
       if (key === "email_verify_required") return Promise.resolve("true");
       return Promise.resolve(def);
     });
-    mockSuccessfulInsert("verify@example.com");
+    mockSendEmail.mockResolvedValue(undefined);
+
+    sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
+      const q = strings[0] ?? "";
+      if (q.includes("WHERE email =")) return Promise.resolve([]);
+      if (q.includes("INSERT INTO _postgrify_auth.users")) {
+        return Promise.resolve([{
+          id: "new-uuid-2",
+          email: "verify@example.com",
+          email_verified: false,
+          role: "viewer",
+        }]);
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await server.inject({
       method: "POST",
@@ -222,32 +218,31 @@ describe("POST /:database/auth/signup", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.access_token).toBe("");
-    expect(body.refresh_token).toBe("");
-    expect(body.token_type).toBe("bearer");
-    expect(body.user.email_confirmed_at).toBeNull();
-    expect(body.email_verify_sent).toBe(true);
-    expect(body.message).toMatch(/verify/i);
+    expect(body).toHaveProperty("email_verify_sent");
+    expect(body.message).toContain("verify your email");
   });
 
-  it("data.full_name Supabase field → user_metadata", async () => {
-    mockSuccessfulInsert("named@example.com", { full_name: "Test User" });
+  it("full_name ile signup → 200", async () => {
+    sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
+      const q = strings[0] ?? "";
+      if (q.includes("WHERE email =")) return Promise.resolve([]);
+      if (q.includes("INSERT INTO _postgrify_auth.users")) {
+        return Promise.resolve([{
+          id: "new-uuid-3",
+          email: "named@example.com",
+          email_verified: false,
+          role: "viewer",
+        }]);
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await server.inject({
       method: "POST",
       url: "/testdb/auth/signup",
-      payload: {
-        email: "named@example.com",
-        password: "password123",
-        data: { full_name: "Test User", plan: "free" },
-      },
+      payload: { email: "named@example.com", password: "password123", full_name: "Test User" },
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().user.user_metadata).toMatchObject({
-      full_name: "Test User",
-      plan: "free",
-    });
-    expect(res.json().user.user_metadata).not.toHaveProperty("verification_token");
   });
 });

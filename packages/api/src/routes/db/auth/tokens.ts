@@ -294,7 +294,7 @@ export async function authTokensRoute(server: FastifyInstance) {
       if (!session) {
         const revoked = (
           await sql`
-          SELECT s.id, s.user_id, s.revoked_at,
+          SELECT s.id, s.user_id, s.revoked_at, s.expires_at,
                  u.email, u.role, u.is_active, u.email_verified,
                  u.created_at, u.metadata, u.provider, u.full_name, u.avatar_url
           FROM _postgrify_auth.sessions s
@@ -305,6 +305,15 @@ export async function authTokensRoute(server: FastifyInstance) {
         )[0] as Record<string, unknown> | undefined;
 
         if (!revoked) {
+          return reply.status(401).send({ error: "Invalid or expired refresh token" });
+        }
+
+        // An expired-then-revoked token must never re-enter the rotation chain,
+        // even within the grace window — expiry is absolute.
+        const originalExpiresAt = revoked.expires_at
+          ? new Date(revoked.expires_at as string).getTime()
+          : 0;
+        if (originalExpiresAt > 0 && Date.now() > originalExpiresAt) {
           return reply.status(401).send({ error: "Invalid or expired refresh token" });
         }
 

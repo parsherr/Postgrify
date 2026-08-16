@@ -350,22 +350,84 @@ export function parseWhereConditions(
   };
 }
 
+/**
+ * First `:` that is not part of `::` (cast). PostgREST alias:expr.
+ * `fullName:name` → 8; `name::text` → -1; `theme:settings->>'x'::text` → 5.
+ */
+function findAliasColon(item: string): number {
+  for (let i = 0; i < item.length; i++) {
+    if (item[i] !== ":") continue;
+    if (item[i + 1] === ":") {
+      i += 1;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Response key for bare JSON / cast selects (PostgREST: last path key, or base col).
+ */
+function inferSelectAlias(columnExpr: string): string | null {
+  const { base, cast } = splitCast(columnExpr);
+  if (isValidIdentifier(base)) {
+    return cast ? base : null;
+  }
+  const textKey = base.match(/->>'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
+  if (textKey) return textKey[1];
+  const objKey = base.match(/->'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
+  if (objKey) return objKey[1];
+  const idx = base.match(/->(\d+)$/);
+  if (idx) return idx[1];
+  return null;
+}
+
+/**
+ * One select item → SQL fragment (E-17 alias, E-19 JSON path AS).
+ */
+function parseSelectItem(item: string): string {
+  let alias: string | null = null;
+  let expr = item;
+
+  const colonIdx = findAliasColon(item);
+  if (colonIdx !== -1) {
+    alias = item.slice(0, colonIdx);
+    expr = item.slice(colonIdx + 1);
+    if (!alias || !isValidIdentifier(alias)) {
+      throw new Error(`Invalid select alias: ${alias ?? "(empty)"}`);
+    }
+    if (!expr) {
+      throw new Error(`Invalid select expression after alias: ${item}`);
+    }
+  }
+
+  let sql: string;
+  try {
+    sql = toColumnSql(expr);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/Invalid cast/i.test(msg)) throw e;
+    throw new Error(`Invalid column name in select: ${item}`);
+  }
+
+  const asName = alias ?? inferSelectAlias(expr);
+  if (asName) {
+    return `${sql} AS "${asName}"`;
+  }
+  return sql;
+}
+
+/**
+ * Parse select=col1,alias:col2,json->>'k' into SQL fragment.
+ * "*" or empty → "*". E-17 aliases; E-19 JSON paths get AS last-key.
+ */
 export function parseSelectColumns(select?: string): string {
   if (!select || select === "*") return "*";
 
   const columns = select.split(",").map((c) => c.trim()).filter(Boolean);
-  const parts: string[] = [];
-  for (const col of columns) {
-    try {
-      parts.push(toColumnSql(col));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Preserve cast validation wording (E-18); otherwise generic select error.
-      if (/Invalid cast/i.test(msg)) throw e;
-      throw new Error(`Invalid column name in select: ${col}`);
-    }
-  }
-  return parts.join(", ");
+  if (columns.length === 0) return "*";
+  return columns.map(parseSelectItem).join(", ");
 }
 
 export function parseOrderBy(order?: string, sort?: string): string {

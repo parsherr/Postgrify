@@ -92,6 +92,8 @@ function buildCallSql(
   const values: unknown[] = [];
   let i = 1;
   for (const key of keys) {
+    // Validate arg names before interpolating into SQL — they come from user input.
+    assertIdentifier(key, "argument");
     parts.push(`"${key}" := $${i++}`);
     values.push(call.args[key]);
   }
