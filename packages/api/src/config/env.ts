@@ -31,6 +31,8 @@ const envSchema = z.object({
   ADMIN_PASSWORD_HASH: z.string().optional(), // argon2id hash — scripts/hash-password.ts ile üret
   ACCESS_TOKEN_EXPIRY: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRY: z.string().default("7d"),
+  /** C-08: revoked refresh reuse grace (seconds); after this → revoke all user sessions */
+  REFRESH_TOKEN_REUSE_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(10),
 
   // Rate limiting
   RATE_LIMIT_GLOBAL: z.coerce.number().default(1000),

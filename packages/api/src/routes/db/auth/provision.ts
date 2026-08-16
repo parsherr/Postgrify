@@ -49,6 +49,7 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       expires_at    TIMESTAMPTZ NOT NULL,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       revoked       BOOLEAN     NOT NULL DEFAULT false,
+      revoked_at    TIMESTAMPTZ,
       ip            TEXT,
       user_agent    TEXT
     );
@@ -112,6 +113,9 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       ADD COLUMN IF NOT EXISTS provider_id       TEXT,
       ADD COLUMN IF NOT EXISTS failed_attempts   INTEGER     NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS locked_until      TIMESTAMPTZ;
+
+    ALTER TABLE _postgrify_auth.sessions
+      ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
 
     -- password_hash NOT NULL kısıtını kaldır (OAuth kullanıcıları için)
     -- Bu sadece mevcut kısıt varsa çalışır; IF NOT EXISTS olmadığı için
@@ -185,7 +189,8 @@ export type AuditEvent =
   | "account_disabled"
   | "password_changed"
   | "raw_sql_exec"
-  | "account_deleted";
+  | "account_deleted"
+  | "refresh_token_reuse";
 
 /**
  * Per-DB auth ayarını okur. Yoksa default değeri döner.
