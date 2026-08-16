@@ -6,7 +6,7 @@
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   LayoutDashboard,
-  Terminal,
+  Code2,
   KeyRound,
   Database,
   Plus,
@@ -29,7 +29,7 @@ const VERSION = (import.meta as unknown as { env: { VITE_APP_VERSION?: string } 
 const navItems = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
   { label: "Veritabanları", to: "/databases", icon: Database },
-  { label: "SQL Editörü", to: "/query", icon: Terminal },
+  { label: "SQL Editörü", to: "/query", icon: Code2 },
   { label: "API Keys", to: "/api-keys", icon: KeyRound },
 ];
 

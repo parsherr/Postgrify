@@ -9,7 +9,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
  */
 import React from "react";
 import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Table2, Rows3, Terminal, Settings2, Loader2, Play, Database, HardDrive, Hash, ChevronRight, Copy, Check, Archive, KeyRound, Square, } from "lucide-react";
+import { LayoutDashboard, Table2, Rows3, Code2, Settings2, Loader2, Play, Database, HardDrive, Hash, ChevronRight, Copy, Check, Archive, KeyRound, Square, Shield, } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,16 +23,19 @@ import { DataGrid } from "@/components/data-grid/DataGrid";
 import { QueryEditor } from "@/components/query-editor/QueryEditor";
 import { ResultsPanel } from "@/components/query-editor/ResultsPanel";
 import { saveToHistory } from "@/components/query-editor/QueryHistory";
-import { api, BASE_URL, getToken } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AuthsTab } from "@/components/database/AuthsTab";
+import { BackupTab } from "@/components/database/BackupTab";
+import { ConnectionsTab } from "@/components/database/ConnectionsTab";
 // ── Sekme tanimlari ──────────────────────────────────────────────────────────
 const TABS = [
     { id: "summary", label: "Summary", icon: LayoutDashboard },
     { id: "tables", label: "Tables & Schema", icon: Table2 },
     { id: "data", label: "Data", icon: Rows3 },
-    { id: "query", label: "SQL Editor", icon: Terminal },
+    { id: "query", label: "SQL Editor", icon: Code2 },
     { id: "backup", label: "Backup", icon: Archive },
     { id: "auths", label: "Auths", icon: KeyRound },
+    { id: "connections", label: "Connections", icon: Shield },
     { id: "options", label: "Database Options", icon: Settings2 },
 ];
 // ── Ana bilesen ───────────────────────────────────────────────────────────────
@@ -53,7 +56,7 @@ export default function DatabasePage() {
     }
     return (_jsxs("div", { className: "flex h-full overflow-hidden", children: [_jsxs("div", { className: "flex w-52 shrink-0 flex-col border-r border-border bg-card", children: [_jsxs("div", { className: "flex h-10 items-center gap-2 border-b border-border px-3", children: [_jsx(Database, { className: "h-4 w-4 shrink-0 text-muted-foreground" }), _jsx("span", { className: "truncate font-mono text-sm font-semibold", children: db })] }), _jsx("nav", { className: "flex-1 py-2", children: TABS.map(({ id, label, icon: Icon }) => (_jsxs("button", { onClick: () => setTab(id), className: cn("flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors", activeTab === id
                                 ? "bg-accent text-foreground"
-                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"), children: [_jsx(Icon, { className: "h-3.5 w-3.5 shrink-0" }), label] }, id))) }), _jsx("div", { className: "border-t border-border p-2", children: _jsxs(Link, { to: "/databases", className: "flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground", children: [_jsx(ChevronRight, { className: "h-3 w-3 rotate-180" }), "Veritabanlari"] }) })] }), _jsxs("div", { className: "flex min-w-0 flex-1 flex-col overflow-hidden", children: [_jsx("div", { className: "flex h-10 shrink-0 items-center border-b border-border px-4", children: _jsx("span", { className: "font-mono text-sm font-semibold", children: db }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: dbLoading ? (_jsx("div", { className: "space-y-3 p-6", children: Array.from({ length: 4 }).map((_, i) => (_jsx(Skeleton, { className: "h-8 w-full" }, i))) })) : activeTab === "summary" ? (_jsx(SummaryTab, { db: db, dbInfo: dbInfo })) : activeTab === "tables" ? (_jsx(TablesTab, { db: db })) : activeTab === "data" ? (_jsx(DataTab, { db: db, activeTable: activeTable, setTable: setTable })) : activeTab === "query" ? (_jsx(SqlEditorTab, { db: db })) : activeTab === "backup" ? (_jsx(BackupTab, { db: db })) : activeTab === "auths" ? (_jsx(AuthsTab, { db: db })) : (_jsx(OptionsTab, { db: db, dbInfo: dbInfo })) })] })] }));
+                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"), children: [_jsx(Icon, { className: "h-3.5 w-3.5 shrink-0" }), label] }, id))) }), _jsx("div", { className: "border-t border-border p-2", children: _jsxs(Link, { to: "/databases", className: "flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground", children: [_jsx(ChevronRight, { className: "h-3 w-3 rotate-180" }), "Veritabanlari"] }) })] }), _jsxs("div", { className: "flex min-w-0 flex-1 flex-col overflow-hidden", children: [_jsx("div", { className: "flex h-10 shrink-0 items-center border-b border-border px-4", children: _jsx("span", { className: "font-mono text-sm font-semibold", children: db }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: dbLoading ? (_jsx("div", { className: "space-y-3 p-6", children: Array.from({ length: 4 }).map((_, i) => (_jsx(Skeleton, { className: "h-8 w-full" }, i))) })) : activeTab === "summary" ? (_jsx(SummaryTab, { db: db, dbInfo: dbInfo })) : activeTab === "tables" ? (_jsx(TablesTab, { db: db })) : activeTab === "data" ? (_jsx(DataTab, { db: db, activeTable: activeTable, setTable: setTable })) : activeTab === "query" ? (_jsx(SqlEditorTab, { db: db })) : activeTab === "backup" ? (_jsx(BackupTab, { db: db })) : activeTab === "auths" ? (_jsx(AuthsTab, { db: db })) : activeTab === "connections" ? (_jsx(ConnectionsTab, { db: db })) : (_jsx(OptionsTab, { db: db, dbInfo: dbInfo })) })] })] }));
 }
 // ── Summary Tab ──────────────────────────────────────────────────────────────
 function SummaryTab({ db, dbInfo, }) {
@@ -304,49 +307,6 @@ function SchemaTableItem({ db, name, isSelected, onSelect, onInsertName, }) {
     const { data: schema } = useTableSchema(db, isSelected ? name : "");
     const columns = schema?.columns ?? [];
     return (_jsxs("div", { children: [_jsxs("button", { onClick: onSelect, className: cn("flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30", isSelected && "bg-accent/20"), children: [_jsx(ChevronRight, { className: cn("h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform", isSelected && "rotate-90") }), _jsx(Table2, { className: "h-3 w-3 shrink-0 text-muted-foreground/60" }), _jsx("span", { className: "flex-1 truncate font-mono text-xs text-foreground/80 hover:text-foreground", onClick: (e) => { e.stopPropagation(); onInsertName(name); }, title: `"${name}" editore ekle`, children: name })] }), isSelected && columns.length > 0 && (_jsx("div", { className: "ml-5 border-l border-border/40 pb-1", children: columns.map((col) => (_jsxs("button", { onClick: () => onInsertName(col.name), className: "flex w-full items-center gap-2 px-2 py-0.5 text-left transition-colors hover:bg-accent/20", children: [_jsx("span", { className: "flex-1 truncate font-mono text-2xs text-foreground/70", children: col.name }), _jsx("span", { className: "shrink-0 font-mono text-2xs text-muted-foreground/40", children: col.type }), col.primary_key && (_jsx("span", { className: "shrink-0 text-2xs text-amber-500/70", children: "PK" }))] }, col.name))) }))] }));
-}
-// ── Backup Tab ────────────────────────────────────────────────────────────────
-function BackupTab({ db }) {
-    const { data: tables } = useTables(db);
-    const { data: databases } = useDatabases();
-    const dbInfo = databases?.find((d) => d.name === db);
-    const [isDownloading, setIsDownloading] = React.useState(false);
-    const [error, setError] = React.useState(null);
-    const [lastDownload, setLastDownload] = React.useState(null);
-    async function handleDownload() {
-        setIsDownloading(true);
-        setError(null);
-        try {
-            const token = getToken();
-            const res = await fetch(`${BASE_URL}/db/${db}/backup/download`, {
-                headers: {
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error ?? err.message ?? `HTTP ${res.status}`);
-            }
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            const now = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-            a.href = url;
-            a.download = `${db}_${now}.sql`;
-            a.click();
-            URL.revokeObjectURL(url);
-            setLastDownload(new Date().toLocaleString("tr-TR"));
-        }
-        catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-        }
-        finally {
-            setIsDownloading(false);
-        }
-    }
-    const tableCount = tables?.length ?? 0;
-    const dbSize = dbInfo?.size_bytes ? formatBytes(dbInfo.size_bytes) : "—";
-    return (_jsx("div", { className: "flex h-full items-start justify-center overflow-y-auto p-8", children: _jsxs("div", { className: "w-full max-w-md space-y-6", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-base font-semibold", children: "Backup" }), _jsx("p", { className: "mt-1 text-sm text-muted-foreground", children: "Veritaban\u0131n\u0131n SQL dump'\u0131n\u0131 indirin. DDL (CREATE TABLE) ve DML (INSERT) ifadelerini i\u00E7erir." })] }), _jsx("div", { className: "rounded-lg border border-border bg-card p-4", children: _jsxs("div", { className: "grid grid-cols-3 divide-x divide-border text-center", children: [_jsxs("div", { className: "px-3", children: [_jsx("p", { className: "text-[11px] font-semibold uppercase tracking-widest text-muted-foreground", children: "Veritaban\u0131" }), _jsx("p", { className: "mt-1 font-mono text-sm font-medium", children: db })] }), _jsxs("div", { className: "px-3", children: [_jsx("p", { className: "text-[11px] font-semibold uppercase tracking-widest text-muted-foreground", children: "Tablolar" }), _jsx("p", { className: "mt-1 text-sm font-medium", children: tableCount })] }), _jsxs("div", { className: "px-3", children: [_jsx("p", { className: "text-[11px] font-semibold uppercase tracking-widest text-muted-foreground", children: "Boyut" }), _jsx("p", { className: "mt-1 text-sm font-medium", children: dbSize })] })] }) }), _jsxs("div", { className: "rounded-lg border border-border bg-card p-5 space-y-4", children: [_jsxs("div", { className: "flex items-start gap-3", children: [_jsx("div", { className: "flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-muted/30", children: _jsx(Archive, { className: "h-4 w-4 text-muted-foreground" }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-sm font-medium", children: "SQL Dump" }), _jsx("p", { className: "text-xs text-muted-foreground", children: "Public schema \u2014 CREATE TABLE + INSERT INTO ifadeleri. Sadece veri; view, index, foreign key dahil de\u011Fil." })] })] }), error && (_jsx("div", { className: "rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive", children: error })), lastDownload && !error && (_jsxs("p", { className: "text-xs text-muted-foreground", children: ["Son indirme: ", lastDownload] })), _jsx(Button, { onClick: handleDownload, disabled: isDownloading, className: "w-full", children: isDownloading ? (_jsxs(_Fragment, { children: [_jsx("span", { className: "mr-2 h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" }), "Haz\u0131rlan\u0131yor\u2026"] })) : (_jsxs(_Fragment, { children: [_jsx(Archive, { className: "mr-2 h-3.5 w-3.5" }), "Download SQL Backup"] })) })] }), _jsxs("p", { className: "text-center text-xs text-muted-foreground/60", children: ["Bu dump yaln\u0131zca geli\u015Ftirme ve test ortamlar\u0131 i\u00E7indir. \u00DCretim yedeklemesi i\u00E7in ", _jsx("code", { className: "text-muted-foreground", children: "pg_dump" }), " kullan\u0131n."] })] }) }));
 }
 // ── Options Tab ───────────────────────────────────────────────────────────────
 function OptionsTab({ db, dbInfo }) {

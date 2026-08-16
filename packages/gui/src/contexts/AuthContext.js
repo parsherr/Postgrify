@@ -93,6 +93,12 @@ export function AuthProvider({ children }) {
             localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
         }
     }, [setAccessToken]);
+    const loginWithTokens = useCallback((at, rt, userEmail) => {
+        setAccessToken(at);
+        setEmail(userEmail);
+        if (rt)
+            localStorage.setItem(REFRESH_TOKEN_KEY, rt);
+    }, [setAccessToken]);
     const logout = useCallback(async () => {
         const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
         const token = accessTokenRef.current;
@@ -124,6 +130,7 @@ export function AuthProvider({ children }) {
             isAuthenticated: accessToken !== null,
             isLoading,
             login,
+            loginWithTokens,
             logout,
             refreshAccessToken,
             getAccessToken,

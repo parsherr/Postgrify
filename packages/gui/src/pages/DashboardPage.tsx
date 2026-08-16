@@ -4,7 +4,7 @@
  */
 
 import { Link, useNavigate } from "react-router-dom";
-import { Database, Table2, HardDrive, Terminal, Plus, Cpu } from "lucide-react";
+import { Database, Table2, HardDrive, Code2, Plus, Cpu } from "lucide-react";
 import { useDatabases, useAdminStats } from "@/hooks/useDatabases";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBytes } from "@/lib/utils";
@@ -62,7 +62,7 @@ export default function DashboardPage() {
             onClick={() => navigate("/query")}
             className="flex items-center gap-2 rounded-[10px] border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
           >
-            <Terminal className="h-3.5 w-3.5" />
+            <Code2 className="h-3.5 w-3.5" />
             SQL Editörü
           </button>
           <button

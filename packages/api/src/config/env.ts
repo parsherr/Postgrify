@@ -43,14 +43,8 @@ const envSchema = z.object({
   REDIS_URL: z.string().optional(),
   REDIS_PASSWORD: z.string().optional(),
 
-  // Terminal WebSocket — production'da açıkça true yapılmalı
-  TERMINAL_ENABLED: z
-    .string()
-    .transform((v) => v === "true")
-    .default("false"),
-
   // Sunucu
-  PORT: z.coerce.number().default(6880),
+  PORT: z.coerce.number().default(3000),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

@@ -4,7 +4,7 @@
  */
 
 import { useLocation, useParams, Link, useNavigate } from "react-router-dom";
-import { ChevronRight, Database, LogOut, Terminal } from "lucide-react";
+import { ChevronRight, Code2, Database, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -115,7 +115,7 @@ export function TopBar() {
                 onClick={() => navigate("/query")}
                 className="text-xs"
               >
-                <Terminal className="mr-2 h-3 w-3" />
+                <Code2 className="mr-2 h-3 w-3" />
                 SQL Editörü
               </DropdownMenuItem>
             </DropdownMenuContent>

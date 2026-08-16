@@ -19,6 +19,8 @@ import TablePage from "./pages/TablePage";
 import CreateTablePage from "./pages/CreateTablePage";
 import QueryPage from "./pages/QueryPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
+import ChangelogPage from "./pages/ChangelogPage";
+import { UpdateModal } from "./components/UpdateModal";
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
@@ -51,24 +53,30 @@ function ProtectedLayout({ children }) {
     }
     if (!isAuthenticated)
         return _jsx(Navigate, { to: "/login", replace: true });
-    return _jsx(AppShell, { children: children });
+    return (_jsxs(AppShell, { children: [_jsx(UpdateModal, {}), children] }));
 }
 /**
  * SetupGuard — uygulama ilk yüklendiğinde /setup/status kontrol eder.
  * configured=false ise tüm route'ları /setup'a yönlendirir.
  * configured=true ise normal akış devam eder.
+ *
+ * isLoading ve isError (API henüz hazır değil, retry devam ediyor) → spinner.
+ * Tüm retry'lar bitip hâlâ hata varsa → setup sayfasına yönlendirir.
+ * Bu sayede "API henüz ayakta değil" durumu setup sayfası açmasına yol açmaz.
  */
 function SetupGuard({ children }) {
-    const { data, isLoading } = useSetupStatus();
-    if (isLoading) {
+    const { data, isLoading, isError, failureCount } = useSetupStatus();
+    // API'ye ulaşılamıyor: retry'lar sürüyor → spinner göster, setup'a atma
+    // failureCount < 5: henüz tüm retry'lar bitmedi
+    if (isLoading || (isError && failureCount < 5)) {
         return (_jsx("div", { className: "flex h-screen items-center justify-center bg-background", children: _jsx("div", { className: "h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" }) }));
     }
-    // API'ye erişilemiyorsa veya kurulum tamamlanmamışsa → setup
+    // Kurulum tamamlanmamış (veya tüm retry'lar başarısız — API tamamen erişilemez)
     if (!data?.configured) {
         return (_jsxs(Routes, { children: [_jsx(Route, { path: "/setup", element: _jsx(SetupPage, {}) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/setup", replace: true }) })] }));
     }
     return _jsx(_Fragment, { children: children });
 }
 export default function App() {
-    return (_jsx(QueryClientProvider, { client: queryClient, children: _jsx(BrowserRouter, { children: _jsx(SetupGuard, { children: _jsxs(AuthProvider, { children: [_jsx(TokenInjector, {}), _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/setup", element: _jsx(Navigate, { to: "/", replace: true }) }), _jsx(Route, { path: "/", element: _jsx(ProtectedLayout, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/databases", element: _jsx(ProtectedLayout, { children: _jsx(DatabasesPage, {}) }) }), _jsx(Route, { path: "/databases/:db", element: _jsx(ProtectedLayout, { children: _jsx(DatabasePage, {}) }) }), _jsx(Route, { path: "/databases/:db/new-table", element: _jsx(ProtectedLayout, { children: _jsx(CreateTablePage, {}) }) }), _jsx(Route, { path: "/databases/:db/tables/:table", element: _jsx(ProtectedLayout, { children: _jsx(TablePage, {}) }) }), _jsx(Route, { path: "/query", element: _jsx(ProtectedLayout, { children: _jsx(QueryPage, {}) }) }), _jsx(Route, { path: "/api-keys", element: _jsx(ProtectedLayout, { children: _jsx(ApiKeysPage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] })] }) }) }) }));
+    return (_jsx(QueryClientProvider, { client: queryClient, children: _jsx(BrowserRouter, { children: _jsxs(AuthProvider, { children: [_jsx(TokenInjector, {}), _jsx(SetupGuard, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/setup", element: _jsx(Navigate, { to: "/", replace: true }) }), _jsx(Route, { path: "/", element: _jsx(ProtectedLayout, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/databases", element: _jsx(ProtectedLayout, { children: _jsx(DatabasesPage, {}) }) }), _jsx(Route, { path: "/databases/:db", element: _jsx(ProtectedLayout, { children: _jsx(DatabasePage, {}) }) }), _jsx(Route, { path: "/databases/:db/new-table", element: _jsx(ProtectedLayout, { children: _jsx(CreateTablePage, {}) }) }), _jsx(Route, { path: "/databases/:db/tables/:table", element: _jsx(ProtectedLayout, { children: _jsx(TablePage, {}) }) }), _jsx(Route, { path: "/query", element: _jsx(ProtectedLayout, { children: _jsx(QueryPage, {}) }) }), _jsx(Route, { path: "/api-keys", element: _jsx(ProtectedLayout, { children: _jsx(ApiKeysPage, {}) }) }), _jsx(Route, { path: "/changelog", element: _jsx(ProtectedLayout, { children: _jsx(ChangelogPage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) })] }) }) }));
 }
