@@ -1,17 +1,17 @@
 /**
- * E-20: select list parser with aggregates + automatic GROUP BY.
+ * Select list parser: E-17 aliases, E-19 JSON AS, E-20 aggregates, E-16 embeds.
  *
- *   select=status,total:amount.sum(),n:id.count()
- *   select=category,avg_price:price.avg()::int
- *   select=amount.sum()
- *   select=count()
- *
- * Non-aggregate columns are GROUP BY'd when any aggregate is present.
- * Alias uses first `:` that is not part of `::` cast (same rule as E-17).
+ * Embeds are returned as specs; call `attachEmbedSql` after FK resolution
+ * to append correlated subqueries.
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
 import { splitCast, toColumnSql } from "./queryBuilder.js";
+import {
+  parseEmbedSpec,
+  splitSelectTopLevel,
+  type EmbedSpec,
+} from "./queryEmbed.js";
 
 const AGG_SQL: Record<string, string> = {
   sum: "SUM",
@@ -22,11 +22,12 @@ const AGG_SQL: Record<string, string> = {
 };
 
 export interface ParsedSelect {
-  /** SELECT list fragment (no leading SELECT) */
+  /** SELECT list fragment (no leading SELECT) — may be incomplete until embeds attached */
   sql: string;
   /** "" or `GROUP BY ...` */
   groupBySql: string;
   hasAggregate: boolean;
+  embeds: EmbedSpec[];
 }
 
 function findAliasColon(item: string): number {
@@ -43,7 +44,6 @@ function findAliasColon(item: string): number {
 
 interface SelectPart {
   sql: string;
-  /** Expression to GROUP BY (null for aggregates) */
   groupExpr: string | null;
   isAggregate: boolean;
 }
@@ -113,6 +113,7 @@ function parseSelectItem(item: string): SelectPart {
   const agg = parseAggregateBase(base, cast, alias);
   if (agg) return agg;
 
+  // Infer JSON last-key AS (E-19) when no explicit alias
   let colSql: string;
   try {
     colSql = toColumnSql(expr);
@@ -130,7 +131,6 @@ function parseSelectItem(item: string): SelectPart {
     };
   }
 
-  // Cast-only select keeps a stable response key (base identifier).
   const { base: castBase, cast: onlyCast } = splitCast(expr);
   if (onlyCast && isValidIdentifier(castBase)) {
     return {
@@ -138,6 +138,21 @@ function parseSelectItem(item: string): SelectPart {
       groupExpr: colSql,
       isAggregate: false,
     };
+  }
+
+  // E-19: auto-AS last JSON key
+  if (!isValidIdentifier(castBase)) {
+    const textKey = castBase.match(/->>'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
+    const objKey = castBase.match(/->'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
+    const idx = castBase.match(/->(\d+)$/);
+    const auto = textKey?.[1] ?? objKey?.[1] ?? idx?.[1] ?? null;
+    if (auto) {
+      return {
+        sql: `${colSql} AS "${auto}"`,
+        groupExpr: colSql,
+        isAggregate: false,
+      };
+    }
   }
 
   return {
@@ -148,40 +163,67 @@ function parseSelectItem(item: string): SelectPart {
 }
 
 /**
- * Parse select= into SQL + optional GROUP BY (E-20).
+ * Parse select= into SQL + optional GROUP BY + embed specs (E-16/E-20).
  */
 export function parseSelect(select?: string): ParsedSelect {
   if (!select || select === "*") {
-    return { sql: "*", groupBySql: "", hasAggregate: false };
+    return { sql: "*", groupBySql: "", hasAggregate: false, embeds: [] };
   }
 
-  const columns = select.split(",").map((c) => c.trim()).filter(Boolean);
+  const columns = splitSelectTopLevel(select);
   if (columns.length === 0) {
-    return { sql: "*", groupBySql: "", hasAggregate: false };
+    return { sql: "*", groupBySql: "", hasAggregate: false, embeds: [] };
   }
 
-  if (columns.some((c) => c === "*") && columns.length > 1) {
+  const embeds: EmbedSpec[] = [];
+  const parts: SelectPart[] = [];
+  let hasStar = false;
+
+  for (const col of columns) {
+    if (col === "*") {
+      hasStar = true;
+      parts.push({ sql: "*", groupExpr: null, isAggregate: false });
+      continue;
+    }
+
+    const embed = parseEmbedSpec(col);
+    if (embed) {
+      embeds.push(embed);
+      continue;
+    }
+
+    parts.push(parseSelectItem(col));
+  }
+
+  if (hasStar && parts.some((p) => p.sql !== "*")) {
     throw new Error('Cannot mix "*" with other select columns');
   }
 
-  const parts = columns.map(parseSelectItem);
   const hasAggregate = parts.some((p) => p.isAggregate);
 
-  if (hasAggregate && parts.some((p) => p.sql === "*")) {
+  if (hasAggregate && hasStar) {
     throw new Error("Cannot use * with aggregate functions in select");
   }
 
-  const sql = parts.map((p) => p.sql).join(", ");
+  if (hasAggregate && embeds.length > 0) {
+    throw new Error(
+      "Cannot combine aggregate functions and embedded resources in the same select"
+    );
+  }
 
   if (!hasAggregate) {
-    return { sql, groupBySql: "", hasAggregate: false };
+    return {
+      sql: parts.map((p) => p.sql).join(", "),
+      groupBySql: "",
+      hasAggregate: false,
+      embeds,
+    };
   }
 
   const groupExprs = parts
     .filter((p) => p.groupExpr !== null)
     .map((p) => p.groupExpr as string);
 
-  // Deduplicate while preserving order
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const g of groupExprs) {
@@ -193,10 +235,36 @@ export function parseSelect(select?: string): ParsedSelect {
   const groupBySql =
     unique.length > 0 ? `GROUP BY ${unique.join(", ")}` : "";
 
-  return { sql, groupBySql, hasAggregate: true };
+  return {
+    sql: parts.map((p) => p.sql).join(", "),
+    groupBySql,
+    hasAggregate: true,
+    embeds,
+  };
 }
 
-/** Backward-compatible SELECT list only. */
+/**
+ * Append resolved embed subquery fragments to a parsed select list.
+ */
+export function attachEmbedSql(
+  parsed: ParsedSelect,
+  embedSqlFragments: string[]
+): ParsedSelect {
+  if (embedSqlFragments.length === 0) return parsed;
+  const parts: string[] = [];
+  if (parsed.sql) parts.push(parsed.sql);
+  parts.push(...embedSqlFragments);
+  const sql = parts.length > 0 ? parts.join(", ") : "*";
+  return { ...parsed, sql };
+}
+
+/** Backward-compatible SELECT list only (no embed SQL attached). */
 export function parseSelectColumns(select?: string): string {
-  return parseSelect(select).sql;
+  const parsed = parseSelect(select);
+  if (parsed.embeds.length > 0) {
+    throw new Error(
+      "select contains embeds; use parseSelect + attachEmbedSql with a parent table"
+    );
+  }
+  return parsed.sql;
 }
