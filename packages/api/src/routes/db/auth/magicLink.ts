@@ -7,15 +7,30 @@
  * Kullanıcı yoksa otomatik kayıt yapılır (email_verified=true, şifresiz).
  */
 
+import type postgres from "postgres";
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js";
 import { sendEmail, buildMagicLinkEmail } from "../../../services/emailService.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
+import {
+  buildSessionResponse,
+  parseDurationMs,
+} from "./sessionResponse.js";
+import { safeAppRedirect, sessionFragment } from "./redirectSafe.js";
 import crypto from "node:crypto";
 
-const MAGIC_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 dakika
+const DEFAULT_MAGIC_TTL_MS = 15 * 60 * 1000;
+
+async function magicLinkTtlMs(sql: postgres.Sql): Promise<number> {
+  const raw = await getAuthSetting(sql, "magic_link_ttl_minutes", "15");
+  const minutes = parseInt(raw, 10);
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 24 * 60) {
+    return DEFAULT_MAGIC_TTL_MS;
+  }
+  return minutes * 60_000;
+}
 
 export async function authMagicLinkRoute(server: FastifyInstance) {
   const jwtService = new JwtService(() => config.JWT_SECRET);
@@ -97,7 +112,7 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
       const magicToken = crypto.randomBytes(32).toString("hex");
       // Güvenlik: token hash'i sakla, raw token'ı değil.
       const magicTokenHash = crypto.createHash("sha256").update(magicToken).digest("hex");
-      const magicExp = new Date(Date.now() + MAGIC_TOKEN_TTL_MS);
+      const magicExp = new Date(Date.now() + (await magicLinkTtlMs(sql)));
 
       await sql`
         UPDATE _postgrify_auth.users
@@ -124,13 +139,14 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
     })
   );
 
-  // ── GET /:database/auth/magic-link/verify ───────────────────────────────
+  // ── GET /:database/auth/magic-link/verify (C-12) ────────────────────────
   server.get(
     "/:database/auth/magic-link/verify",
     {
       config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
       schema: {
-        description: "Verify a magic link token and return a session.",
+        description:
+          "Verify magic link token (C-12). JSON GoTrue session or redirect_to fragment.",
         tags: ["db-auth"],
         security: [],
         querystring: {
@@ -138,40 +154,25 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
           required: ["token"],
           properties: {
             token: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              accessToken:  { type: "string" },
-              refreshToken: { type: "string" },
-              expiresIn:    { type: "string" },
-              user: {
-                type: "object",
-                properties: {
-                  id:    { type: "string" },
-                  email: { type: "string" },
-                  role:  { type: "string" },
-                },
-              },
-            },
+            redirect_to: { type: "string" },
           },
         },
       },
     },
     asyncHandler(async (req, reply) => {
       const { database } = req.params as { database: string };
-      const { token } = req.query as { token: string };
+      const { token, redirect_to: redirectTo } = req.query as {
+        token: string;
+        redirect_to?: string;
+      };
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Gelen token'ı hash'leyip DB'deki hash ile karşılaştır
       const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
       const [user] = await sql`
-        SELECT id, email, role, is_active,
+        SELECT id, email, role, is_active, created_at, metadata, provider, full_name, avatar_url,
                metadata->>'magic_token_exp' AS magic_token_exp
         FROM _postgrify_auth.users
         WHERE metadata->>'magic_token' = ${tokenHash}
@@ -181,9 +182,6 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid or already used magic link token" });
       }
 
-      // Savunma: magic_token_exp NULL veya parse edilemezse token geçersiz say.
-      // new Date(undefined) = Invalid Date → isNaN kontrolü kritik; bu olmadan
-      // NULL expiry olan bir token geçerli sayılabilir.
       const rawExp = user.magic_token_exp as string | null | undefined;
       if (!rawExp) {
         return reply.status(400).send({ error: "Invalid or expired magic link token" });
@@ -197,7 +195,6 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         return reply.status(403).send({ error: "Account is disabled" });
       }
 
-      // Token'ı tek kullanımlık yap — hemen sil
       await sql`
         UPDATE _postgrify_auth.users
         SET
@@ -215,10 +212,9 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
-      // Yeni session — DB'de refresh token hash'ini sakla, client'a ham token gönder
       const refreshToken = crypto.randomBytes(48).toString("hex");
       const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
-      const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
+      const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
@@ -230,21 +226,43 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         userAgent: req.headers["user-agent"],
       });
 
-      return reply.send({
+      const meta =
+        user.metadata && typeof user.metadata === "object"
+          ? { ...(user.metadata as Record<string, unknown>) }
+          : {};
+      delete meta.magic_token;
+      delete meta.magic_token_exp;
+
+      const session = buildSessionResponse({
         accessToken,
         refreshToken,
-        expiresIn: config.ACCESS_TOKEN_EXPIRY,
-        user: { id: user.id, email: user.email, role: user.role },
+        user: {
+          id: user.id as string,
+          email: user.email as string,
+          role: user.role as string,
+          is_active: user.is_active as boolean,
+          email_verified: true,
+          created_at: user.created_at as string | Date | null,
+          metadata: meta,
+          provider: (user.provider as string) ?? "email",
+          full_name: user.full_name as string | null,
+          avatar_url: user.avatar_url as string | null,
+        },
       });
+
+      if (redirectTo) {
+        const base = safeAppRedirect(redirectTo);
+        const fragment = sessionFragment({
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token ?? "",
+          expiresIn: session.expires_in,
+          expiresAt: session.expires_at,
+          type: "magiclink",
+        });
+        return reply.redirect(`${base}#${fragment}`);
+      }
+
+      return reply.send(session);
     })
   );
-}
-
-function parseDuration(expiry: string): number {
-  const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) return 7 * 24 * 60 * 60 * 1000;
-  const value = parseInt(match[1], 10);
-  const unit = match[2];
-  const multipliers: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-  return value * (multipliers[unit] ?? 86_400_000);
 }
