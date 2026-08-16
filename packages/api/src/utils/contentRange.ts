@@ -1,8 +1,11 @@
 /**
  * Content-Range helpers — PostgREST list pagination header.
  *
- * Format: Content-Range: {start}-{end}/{total|*}
+ * Format: Content-Range: {start}-{end}/{total or star}
+ * HEAD/limit=0 empty window: star/{total or star}
  * Unit: items (Range-Unit: items)
+ *
+ * Ref: https://docs.postgrest.org/en/v12/references/api/pagination_count.html
  */
 
 import type { FastifyReply } from "fastify";
@@ -11,12 +14,24 @@ export function setContentRange(
   reply: FastifyReply,
   offset: number,
   rowCount: number,
-  total: number | null
+  total: number | null,
+  opts?: { emptyStar?: boolean }
 ): void {
-  const start = rowCount === 0 ? 0 : offset;
-  const end = rowCount === 0 ? 0 : offset + rowCount - 1;
   const totalPart = total === null ? "*" : String(total);
-  reply.header("Content-Range", `${start}-${end}/${totalPart}`);
+
+  if (opts?.emptyStar || rowCount === 0) {
+    // PostgREST limit=0 / empty: */N
+    if (opts?.emptyStar || offset === 0) {
+      reply.header("Content-Range", `*/${totalPart}`);
+    } else {
+      reply.header("Content-Range", `${offset}-${offset}/${totalPart}`);
+    }
+  } else {
+    const start = offset;
+    const end = offset + rowCount - 1;
+    reply.header("Content-Range", `${start}-${end}/${totalPart}`);
+  }
+
   reply.header("Range-Unit", "items");
   if (total !== null) {
     reply.header("X-Total-Count", String(total));

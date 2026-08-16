@@ -145,6 +145,9 @@ async function handleGetList(
   const limit = Math.min(query.limit ?? 100, 1000);
   const offset = query.offset ?? 0;
 
+  // E-01: HEAD + limit=0 → skip row SELECT (PostgREST optimization); COUNT if Prefer:count
+  const skipRowFetch = headOnly && limit === 0;
+
   const cacheKey = queryCacheKey(server.cache, dbName, table, {
     ...query,
     count: prefer.count,
@@ -165,23 +168,28 @@ async function handleGetList(
   }
 
   const sql = server.poolManager.getPool(dbName);
-  const fullSql = `
-    SELECT ${cols} FROM "${table}"
-    ${whereSql}
-    ${orderSql}
-    LIMIT $${whereValues.length + 1}
-    OFFSET $${whereValues.length + 2}
-  `;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { rows, total } = await sql.begin("read only", async (tx: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows = await tx.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
+    let rows: unknown[] = [];
+    if (!skipRowFetch) {
+      const fullSql = `
+        SELECT ${cols} FROM "${table}"
+        ${whereSql}
+        ${orderSql}
+        LIMIT $${whereValues.length + 1}
+        OFFSET $${whereValues.length + 2}
+      `;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rows = await tx.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
+    }
     const total = await resolveCount(tx, table, whereSql, whereValues, prefer.count);
     return { rows, total };
   });
 
-  setContentRange(reply, offset, rows.length, total);
+  setContentRange(reply, offset, rows.length, total, {
+    emptyStar: skipRowFetch,
+  });
 
   if (!headOnly) {
     await server.cache.set(
@@ -191,8 +199,7 @@ async function handleGetList(
     );
   }
 
-  // PostgREST: 206 when Range was used and count known — we use limit/offset; keep 200
-  // Body is the array (C-01). HEAD: empty body.
+  // Body is the array (C-01). HEAD (E-01): empty body — RFC 9110.
   if (headOnly) return reply.status(200).send();
   return reply.send(rows);
 }
@@ -230,8 +237,8 @@ export async function rowsRoute(server: FastifyInstance) {
               type: "string",
               description: "Column to sort by when using ?sort=col&order=dir",
             },
-            limit: { type: "integer", default: 100, maximum: 1000 },
-            offset: { type: "integer", default: 0 },
+            limit: { type: "integer", default: 100, minimum: 0, maximum: 1000 },
+            offset: { type: "integer", default: 0, minimum: 0 },
           },
         },
       },
@@ -239,14 +246,33 @@ export async function rowsRoute(server: FastifyInstance) {
     asyncHandler(async (req, reply) => handleGetList(server, req, reply, false))
   );
 
-  // ── E-01 HEAD (same as GET, no body) — kept with C-01; verified after C-01 ─
+  // ── E-01 HEAD (same as GET, no body) ──────────────────────────────────────
   server.head(
     "/:database/:table",
     {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
-        description: "HEAD list — Content-Range without body",
+        description:
+          "HEAD list — Content-Range without body. Use limit=0 + Prefer:count=exact " +
+          "to count without fetching rows (PostgREST optimization).",
         tags: ["rows"],
+        querystring: {
+          type: "object",
+          properties: {
+            select: { type: "string" },
+            where: { type: "array", items: { type: "string" } },
+            or: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            order: { type: "string" },
+            sort: { type: "string" },
+            limit: { type: "integer", default: 100, minimum: 0, maximum: 1000 },
+            offset: { type: "integer", default: 0, minimum: 0 },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => handleGetList(server, req, reply, true))
