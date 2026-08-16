@@ -1,5 +1,6 @@
 /**
  * POST /db/:database/query — Ham SQL çalıştırma.
+ * POST /db/:database/query/explain — E-87 EXPLAIN (FORMAT JSON) plan.
  *
  * Varsayılan mod: yalnızca SELECT ifadeleri izin verilir.
  * Admin token veya "query" scope ile tam SQL (admin ayarına bağlı).
@@ -15,10 +16,65 @@ import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { config } from "../../config/env.js";
 import { insertAuditLog } from "./auth/provision.js";
 
-const BLOCKED_KEYWORDS = /\b(DROP|TRUNCATE|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY)\b/i;
+const BLOCKED_KEYWORDS =
+  /\b(DROP|TRUNCATE|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY)\b/i;
 
 // WITH ... (INSERT|UPDATE|DELETE|...) SELECT şeklindeki writeable CTE'leri yakalar
-const WRITABLE_CTE_PATTERN = /\bWITH\b[\s\S]*?\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER|CREATE)\b/i;
+const WRITABLE_CTE_PATTERN =
+  /\bWITH\b[\s\S]*?\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER|CREATE)\b/i;
+
+function assertSelectOnlySql(
+  rawSql: string,
+  isAdmin: boolean,
+  adminFullSqlEnabled: boolean
+): { ok: true } | { ok: false; status: number; error: string; message?: string } {
+  if (isAdmin && adminFullSqlEnabled) return { ok: true };
+
+  const trimmed = rawSql.trim().toUpperCase();
+  if (!trimmed.startsWith("SELECT") && !trimmed.startsWith("WITH")) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Only SELECT queries are allowed",
+      message:
+        "Use an admin token with ALLOW_RAW_SQL_ADMIN=true to run write queries",
+    };
+  }
+
+  if (WRITABLE_CTE_PATTERN.test(rawSql)) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Writable CTEs are not allowed in SELECT-only mode",
+    };
+  }
+
+  if (BLOCKED_KEYWORDS.test(rawSql)) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Query contains blocked keywords",
+    };
+  }
+
+  return { ok: true };
+}
+
+function buildExplainPrefix(opts: {
+  analyze: boolean;
+  buffers: boolean;
+  verbose: boolean;
+  settings: boolean;
+  wal: boolean;
+}): string {
+  const parts = ["FORMAT JSON"];
+  if (opts.analyze) parts.push("ANALYZE");
+  if (opts.buffers) parts.push("BUFFERS");
+  if (opts.verbose) parts.push("VERBOSE");
+  if (opts.settings) parts.push("SETTINGS");
+  if (opts.wal) parts.push("WAL");
+  return `EXPLAIN (${parts.join(", ")})`;
+}
 
 export async function queryRoute(server: FastifyInstance) {
   server.post(
@@ -49,10 +105,24 @@ export async function queryRoute(server: FastifyInstance) {
           200: {
             type: "object",
             properties: {
-              rows:   { type: "array", items: { type: "object" } },
-              total:  { type: "integer", description: "Number of rows returned (= rows.length for raw SQL)" },
-              limit:  { type: ["integer", "null"], description: "Always null for raw SQL — pagination is controlled by the SQL itself" },
-              offset: { type: ["integer", "null"], description: "Always null for raw SQL" },
+              rows: {
+                type: "array",
+                items: { type: "object" },
+              },
+              total: {
+                type: "integer",
+                description:
+                  "Number of rows returned (= rows.length for raw SQL)",
+              },
+              limit: {
+                type: ["integer", "null"],
+                description:
+                  "Always null for raw SQL — pagination is controlled by the SQL itself",
+              },
+              offset: {
+                type: ["integer", "null"],
+                description: "Always null for raw SQL",
+              },
             },
           },
         },
@@ -68,44 +138,16 @@ export async function queryRoute(server: FastifyInstance) {
       const isAdmin = req.user?.role === "admin";
       const adminFullSqlEnabled = config.ALLOW_RAW_SQL_ADMIN;
 
-      // Admin token tam SQL çalıştırabilir:
-      //   - ALLOW_RAW_SQL_ADMIN=true → her zaman (DDL dahil)
-      //   - ALLOW_RAW_SQL_ADMIN=false (varsayılan) → admin token da SELECT-only'e tabi
-      //     ANCAK: admin SELECT sorgularında "query" scope bypass'ı var (full read erişimi)
-      //
-      // SORUN #15 düzeltmesi: ALLOW_RAW_SQL_ADMIN=true olmadan admin token SELECT
-      // yapabilir ama DDL/DML çalıştıramaz. Bu davranış tutarlı ve öngörülebilir.
-      // DDL için: ALLOW_RAW_SQL_ADMIN=true VEYA POST /tables endpoint'ini kullan.
-      //
-      // SELECT-only mod kontrolü
-      if (!(isAdmin && adminFullSqlEnabled)) {
-        const trimmed = rawSql.trim().toUpperCase();
-        if (!trimmed.startsWith("SELECT") && !trimmed.startsWith("WITH")) {
-          return reply.status(403).send({
-            error: "Only SELECT queries are allowed",
-            message:
-              "Use an admin token with ALLOW_RAW_SQL_ADMIN=true to run write queries",
-          });
-        }
-
-        // Writeable CTE bypass koruması: WITH ... (INSERT|UPDATE|DELETE|...) SELECT
-        // BLOCKED_KEYWORDS'den önce kontrol edilmeli — daha spesifik hata mesajı döner
-        if (WRITABLE_CTE_PATTERN.test(rawSql)) {
-          return reply.status(403).send({
-            error: "Writable CTEs are not allowed in SELECT-only mode",
-          });
-        }
-
-        if (BLOCKED_KEYWORDS.test(rawSql)) {
-          return reply.status(403).send({
-            error: "Query contains blocked keywords",
-          });
-        }
+      const gate = assertSelectOnlySql(rawSql, !!isAdmin, adminFullSqlEnabled);
+      if (!gate.ok) {
+        return reply.status(gate.status).send({
+          error: gate.error,
+          ...(gate.message ? { message: gate.message } : {}),
+        });
       }
 
       const sql = server.poolManager.getPool(dbName);
 
-      // SELECT-only modda read-only transaction içinde çalıştır
       let rows: unknown[];
       if (!(isAdmin && adminFullSqlEnabled)) {
         rows = await sql.begin("read only", async (tx) => {
@@ -114,34 +156,32 @@ export async function queryRoute(server: FastifyInstance) {
       } else {
         rows = await sql.unsafe(rawSql, params as never[]);
 
-        // Güvenlik audit: QUERY_LOG_ENABLED=true iken admin full-SQL sorgularını kaydet.
-        // Bu özellikle DROP, DELETE, UPDATE gibi destructive sorgular için kritik.
         if (config.QUERY_LOG_ENABLED) {
-          // insertAuditLog _postgrify_auth schema'sını bekler;
-          // yoksa hata yoksayılır — audit log asıl işlemi engellememeli.
           try {
             await insertAuditLog(sql, "raw_sql_exec", req.user?.sub ?? "admin", {
               ip: req.ip,
               userAgent: req.headers["user-agent"] as string | undefined,
               metadata: {
-                sql: rawSql.slice(0, 2000), // çok uzun sorguları kırp
+                sql: rawSql.slice(0, 2000),
                 role: req.user?.role,
               },
             });
           } catch {
-            // Auth schema olmayan DB'lerde audit log yazılamaz — önemli değil
+            // Auth schema olmayan DB'lerde audit log yazılamaz
           }
         }
       }
 
-      // Bigint değerleri (PostgreSQL count() gibi) string olarak gelir — number'a çevir.
-      // İstemciler parseInt/Number() olmadan karşılaştırma yapabilmeli.
       const normalized = (rows as Record<string, unknown>[]).map((row) => {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(row)) {
-          out[k] = typeof v === "bigint" || (typeof v === "string" && /^\d+$/.test(v) && Number.isSafeInteger(Number(v)))
-            ? Number(v)
-            : v;
+          out[k] =
+            typeof v === "bigint" ||
+            (typeof v === "string" &&
+              /^\d+$/.test(v) &&
+              Number.isSafeInteger(Number(v)))
+              ? Number(v)
+              : v;
         }
         return out;
       });
@@ -149,9 +189,113 @@ export async function queryRoute(server: FastifyInstance) {
       return reply.send({
         rows: normalized,
         total: normalized.length,
-        // limit/offset: ham SQL'de belirsiz — yokluklarını açıkça belirt
         limit: null,
         offset: null,
+      });
+    })
+  );
+
+  // ── E-87 POST /:database/query/explain ────────────────────────────────────
+  server.post(
+    "/:database/query/explain",
+    {
+      preHandler: [server.authenticateAny, scopeGuard("query")],
+      schema: {
+        description:
+          "Run EXPLAIN (FORMAT JSON) on a SQL statement (E-87). " +
+          "Returns a structured plan for GUI visualization. " +
+          "Same SELECT-only rules as POST /query unless admin + ALLOW_RAW_SQL_ADMIN. " +
+          "buffers implies analyze.",
+        tags: ["query"],
+        body: {
+          type: "object",
+          required: ["sql"],
+          properties: {
+            sql: { type: "string" },
+            params: { type: "array", default: [] },
+            analyze: { type: "boolean", default: false },
+            buffers: { type: "boolean", default: false },
+            verbose: { type: "boolean", default: false },
+            settings: { type: "boolean", default: false },
+            wal: { type: "boolean", default: false },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const body = req.body as {
+        sql: string;
+        params?: unknown[];
+        analyze?: boolean;
+        buffers?: boolean;
+        verbose?: boolean;
+        settings?: boolean;
+        wal?: boolean;
+      };
+      const rawSql = body.sql;
+      const params = body.params ?? [];
+
+      if (!rawSql?.trim()) {
+        return reply.status(400).send({ error: "sql is required" });
+      }
+
+      if (rawSql.trim().toUpperCase().startsWith("EXPLAIN")) {
+        return reply.status(400).send({
+          error: "sql must not include EXPLAIN — this endpoint wraps it",
+        });
+      }
+
+      // E-87: always SELECT/WITH-only. EXPLAIN does not support DDL, and this
+      // endpoint is for plan visualization — never run destructive SQL here
+      // even when ALLOW_RAW_SQL_ADMIN is enabled.
+      const gate = assertSelectOnlySql(rawSql, false, false);
+      if (!gate.ok) {
+        return reply.status(gate.status).send({
+          error: gate.error,
+          ...(gate.message ? { message: gate.message } : {}),
+        });
+      }
+
+      // PostgreSQL: BUFFERS requires ANALYZE
+      const buffers = body.buffers === true;
+      const analyze = body.analyze === true || buffers;
+      const verbose = body.verbose === true;
+      const settings = body.settings === true;
+      const wal = body.wal === true;
+
+      const explainSql = `${buildExplainPrefix({
+        analyze,
+        buffers,
+        verbose,
+        settings,
+        wal,
+      })} ${rawSql}`;
+
+      const sql = server.poolManager.getPool(dbName);
+
+      // Always read-only: ANALYZE on SELECT is fine; writes are gated above.
+      const rows = (await sql.begin("read only", async (tx) => {
+        return tx.unsafe(explainSql, params as never[]);
+      })) as Record<string, unknown>[];
+
+      const first = rows[0] ?? {};
+      const planJson = first["QUERY PLAN"] ?? first["query plan"] ?? first;
+      const plan = Array.isArray(planJson) ? planJson[0] : planJson;
+      const planObj =
+        plan && typeof plan === "object"
+          ? (plan as Record<string, unknown>)
+          : null;
+
+      return reply.send({
+        Plan: planObj?.Plan ?? plan,
+        ...(planObj && "Planning Time" in planObj
+          ? { "Planning Time": planObj["Planning Time"] }
+          : {}),
+        ...(planObj && "Execution Time" in planObj
+          ? { "Execution Time": planObj["Execution Time"] }
+          : {}),
+        options: { analyze, buffers, verbose, settings, wal },
       });
     })
   );
