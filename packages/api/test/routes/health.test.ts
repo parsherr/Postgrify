@@ -2,6 +2,7 @@
  * Health endpoint integration testi.
  *
  * GET /health → public, minimal { ok: true }
+ * GET /ready, GET /health/ready → Postgres ping (E-25)
  * GET /admin/health → admin token gerektirir, detaylı bilgi döner
  *
  * Güvenlik değişikliği: public /health artık uptime/activePools açıklamıyor.
@@ -12,10 +13,12 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 
+const sqlMock = vi.fn().mockResolvedValue([{ ok: 1 }]);
+
 // DB ve cache bağlantılarını mock'la
 vi.mock("../../src/services/poolManager.js", () => ({
   PoolManager: vi.fn().mockImplementation(() => ({
-    getPool: vi.fn(),
+    getPool: vi.fn().mockReturnValue(sqlMock),
     closeAll: vi.fn().mockResolvedValue(undefined),
     activePoolCount: 2,
     activePoolNames: ["project1", "project2"],
@@ -75,5 +78,28 @@ describe("GET /health", () => {
   it("JSON Content-Type döner", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     expect(res.headers["content-type"]).toMatch(/application\/json/);
+  });
+});
+
+describe("GET /ready (E-25)", () => {
+  it("/ready → 200 ready:true when Postgres ping succeeds", async () => {
+    sqlMock.mockResolvedValue([{ ok: 1 }]);
+    const res = await server.inject({ method: "GET", url: "/ready" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ready).toBe(true);
+  });
+
+  it("/health/ready → aynı davranış", async () => {
+    sqlMock.mockResolvedValue([{ ok: 1 }]);
+    const res = await server.inject({ method: "GET", url: "/health/ready" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ready).toBe(true);
+  });
+
+  it("Postgres ping fail → 503", async () => {
+    sqlMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const res = await server.inject({ method: "GET", url: "/ready" });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().ready).toBe(false);
   });
 });

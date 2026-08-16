@@ -8,7 +8,10 @@ Live: `http://localhost:6880` — smoke `.rusk/memory/smoke-live.ps1`
 Admin `admin@postgrify.local` / `postgrify-admin` · DB `smoke_db`
 
 ## Şu an
-🎯 **C-17 / C-18 / C-20** users pagination + PATCH enrich + public settings — commit/PR
+🎯 **E-25** GET `/ready` + `/health/ready` — commit/PR
+
+## Son
+✅ C-17/C-18/C-20 → PR #17
 
 ## Kuyruk
-E-09/E-10 RPC → E-25 /ready → kalan missing criticals → smoke genişlet
+E-09/E-10 RPC → E-11 FTS / diğer criticals → smoke genişlet
