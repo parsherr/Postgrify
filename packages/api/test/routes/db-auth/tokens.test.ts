@@ -128,13 +128,16 @@ describe("POST /:database/auth/login", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).toHaveProperty("accessToken");
-    expect(body).toHaveProperty("refreshToken");
-    expect(body).toHaveProperty("expiresIn");
+    expect(body).toHaveProperty("access_token");
+    expect(body).toHaveProperty("refresh_token");
+    expect(typeof body.expires_in).toBe("number");
+    expect(typeof body.expires_at).toBe("number");
+    expect(body.token_type).toBe("bearer");
     expect(body.user).toMatchObject({
       email: "test@example.com",
-      role: "viewer",
-      is_active: true,
+      role: "authenticated",
+      aud: "authenticated",
+      app_metadata: { role: "viewer", is_active: true, provider: "email" },
     });
   });
 
