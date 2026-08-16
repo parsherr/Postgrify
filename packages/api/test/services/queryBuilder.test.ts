@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseWhereConditions,
   parseSelectColumns,
+  parseSelect,
   parseOrderBy,
   toColumnSql,
 } from "../../src/services/queryBuilder.js";
@@ -322,41 +323,54 @@ describe("parseSelectColumns", () => {
   it("E-18 reject unknown cast type in select", () => {
     expect(() => parseSelectColumns("id::notatype")).toThrow(/Invalid cast/);
   });
+});
 
-  it("E-19 JSON path select aliases last key", () => {
-    expect(parseSelectColumns("id,settings->>'theme'")).toBe(
-      `"id", "settings"->>'theme' AS "theme"`
+describe("parseSelect — aggregates (E-20)", () => {
+  it("plain columns unchanged (no GROUP BY)", () => {
+    const s = parseSelect("id,name");
+    expect(s.sql).toBe('"id", "name"');
+    expect(s.groupBySql).toBe("");
+    expect(s.hasAggregate).toBe(false);
+  });
+
+  it("amount.sum() with default alias", () => {
+    const s = parseSelect("amount.sum()");
+    expect(s.sql).toBe('SUM("amount") AS "sum"');
+    expect(s.groupBySql).toBe("");
+    expect(s.hasAggregate).toBe(true);
+  });
+
+  it("status + aliased sum/count → GROUP BY status", () => {
+    const s = parseSelect("status,total:amount.sum(),n:id.count()");
+    expect(s.sql).toBe(
+      '"status", SUM("amount") AS "total", COUNT("id") AS "n"'
     );
+    expect(s.groupBySql).toBe('GROUP BY "status"');
   });
 
-  it("E-19 nested JSON path aliases last key", () => {
-    expect(parseSelectColumns("attrs->'specs'->>'weight'")).toBe(
-      `"attrs"->'specs'->>'weight' AS "weight"`
-    );
+  it("avg with cast", () => {
+    const s = parseSelect("avg_price:price.avg()::int");
+    expect(s.sql).toBe('(AVG("price"))::int AS "avg_price"');
+    expect(s.groupBySql).toBe("");
   });
 
-  it("E-17 plain column alias", () => {
-    expect(parseSelectColumns("fullName:name")).toBe('"name" AS "fullName"');
+  it("bare count()", () => {
+    const s = parseSelect("count()");
+    expect(s.sql).toBe('COUNT(*) AS "count"');
   });
 
-  it("E-17 alias over JSON path", () => {
-    expect(parseSelectColumns("theme:settings->>'theme'")).toBe(
-      `"settings"->>'theme' AS "theme"`
-    );
+  it("rejects * with aggregates", () => {
+    expect(() => parseSelect("*,amount.sum()")).toThrow(/\*/);
   });
 
-  it("E-17 alias over cast", () => {
-    expect(parseSelectColumns("secs:duration::text")).toBe(
-      '("duration")::text AS "secs"'
-    );
+  it("rejects invalid agg column", () => {
+    expect(() => parseSelect("drop.sum()")).toThrow();
   });
 
-  it("E-17 rejects invalid alias", () => {
-    expect(() => parseSelectColumns("bad-name:id")).toThrow(/Invalid select alias/);
-  });
-
-  it("E-17 does not treat :: cast as alias", () => {
-    expect(parseSelectColumns("name::text")).toBe('("name")::text AS "name"');
+  it("alias on plain column", () => {
+    const s = parseSelect("fullName:name,n:id.count()");
+    expect(s.sql).toBe('"name" AS "fullName", COUNT("id") AS "n"');
+    expect(s.groupBySql).toBe('GROUP BY "name"');
   });
 });
 

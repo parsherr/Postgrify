@@ -21,7 +21,7 @@ import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
 import {
   parseWhereConditions,
-  parseSelectColumns,
+  parseSelect,
   parseOrderBy,
 } from "../../services/queryBuilder.js";
 import { TTL } from "../../services/cacheService.js";
@@ -102,9 +102,6 @@ async function handleGetList(
     select?: string;
     where?: string | string[];
     or?: string | string[];
-    and?: string | string[];
-    "not.or"?: string | string[];
-    "not.and"?: string | string[];
     order?: string;
     sort?: string;
     limit?: number;
@@ -119,41 +116,26 @@ async function handleGetList(
       ? [query.where]
       : [];
 
-  const asParamList = (v: string | string[] | undefined): string[] => {
-    if (!v) return [];
-    return Array.isArray(v) ? v.map(String) : [String(v)];
-  };
-
-  /**
-   * Legacy `or=a,b` → flat atoms. PostgREST `or=(a,and=(b,c))` kept whole
-   * (paren-aware; comma-split would break nested groups).
-   */
-  const expandOrParams = (rawValues: string[]): string[] =>
-    rawValues.flatMap((s) => {
-      const t = s.trim();
-      if (!t) return [];
-      if (t.includes("(")) return [t];
-      return t.split(",").map((c) => c.trim()).filter(Boolean);
-    });
-
-  const orList = expandOrParams(asParamList(query.or));
-  const andList = asParamList(query.and);
-  const notOrList = asParamList(query["not.or"]);
-  const notAndList = asParamList(query["not.and"]);
+  const orRaw = Array.isArray(query.or)
+    ? query.or
+    : query.or
+      ? [query.or]
+      : [];
+  const orList = orRaw.flatMap((s) =>
+    s.split(",").map((c) => c.trim()).filter(Boolean)
+  );
 
   let cols: string;
+  let groupBySql: string;
   let whereSql: string;
   let whereValues: unknown[];
   let orderSql: string;
 
   try {
-    cols = parseSelectColumns(query.select);
-    const parsed = parseWhereConditions(whereList, orList, {
-      and: andList,
-      notOr: notOrList,
-      notAnd: notAndList,
-      orRaw: orList.some((s) => s.includes("(")),
-    });
+    const selectParsed = parseSelect(query.select);
+    cols = selectParsed.sql;
+    groupBySql = selectParsed.groupBySql;
+    const parsed = parseWhereConditions(whereList, orList);
     whereSql = parsed.sql;
     whereValues = parsed.values;
     orderSql = parseOrderBy(query.order, query.sort);
@@ -198,6 +180,7 @@ async function handleGetList(
       const fullSql = `
         SELECT ${cols} FROM "${table}"
         ${whereSql}
+        ${groupBySql}
         ${orderSql}
         LIMIT $${whereValues.length + 1}
         OFFSET $${whereValues.length + 2}
@@ -243,22 +226,11 @@ export async function rowsRoute(server: FastifyInstance) {
             select: { type: "string" },
             where: { type: "array", items: { type: "string" } },
             or: {
-              type: "string",
-              description:
-                "OR group: legacy role.eq.admin,role.eq.mod or PostgREST " +
-                "or=(age.lt.18,and=(status.eq.open,total.gt.100))",
-            },
-            and: {
-              type: "string",
-              description: "AND group: and=(status.eq.pending,total.gt.100)",
-            },
-            "not.or": {
-              type: "string",
-              description: "Negated OR: not.or=(role.eq.banned,role.eq.deleted)",
-            },
-            "not.and": {
-              type: "string",
-              description: "Negated AND: not.and=(price.lt.10,stock.eq.0)",
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+              description: "OR-grouped conditions: role.eq.admin,role.eq.mod",
             },
             order: {
               type: "string",
@@ -294,10 +266,12 @@ export async function rowsRoute(server: FastifyInstance) {
           properties: {
             select: { type: "string" },
             where: { type: "array", items: { type: "string" } },
-            or: { type: "string" },
-            and: { type: "string" },
-            "not.or": { type: "string" },
-            "not.and": { type: "string" },
+            or: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
             order: { type: "string" },
             sort: { type: "string" },
             limit: { type: "integer", default: 100, minimum: 0, maximum: 1000 },
@@ -674,8 +648,11 @@ export async function rowsRoute(server: FastifyInstance) {
       const pkCol = resolvePkColumn(pk);
 
       let cols: string;
+      let groupBySql: string;
       try {
-        cols = parseSelectColumns(select);
+        const parsed = parseSelect(select);
+        cols = parsed.sql;
+        groupBySql = parsed.groupBySql;
       } catch (e) {
         return reply.status(400).send({
           error: "Invalid select",
@@ -686,7 +663,7 @@ export async function rowsRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const [row] = await sql.unsafe(
-        `SELECT ${cols} FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
+        `SELECT ${cols} FROM "${table}" WHERE "${pkCol}" = $1 ${groupBySql} LIMIT 1`,
         [id] as any[]
       );
 

@@ -12,13 +12,9 @@
  *   Array/range (E-12): tags.cs.{a,b} , schedule.ov.[2026-01-01,2026-06-01]
  *   like(any|all) (E-13): name.like(any).{A*,B*} , title.ilike(all).{*x*,*y*}
  *
- * OR / AND (E-15):
+ * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
  *   → WHERE "status" = 'active' AND ("role" = 'admin' OR "role" = 'mod')
- *   ?or=(age.lt.18,age.gt.65)
- *   ?and=(status.eq.pending,total.gt.100)
- *   ?or=(status.eq.pending,and=(total.gt.100,customer_id.eq.5))
- *   ?not.and=(price.lt.10,stock.eq.0)
  *
  * `is` operatörü değerleri:
  *   field.is.null     → "field" IS NULL
@@ -39,22 +35,7 @@ import {
   buildLikeAnyAllClause,
   matchLikeAnyAll,
 } from "./queryLikeAny.js";
-import { isFlatAtomList, parseLogicParam } from "./queryLogic.js";
-
-/** Extra PostgREST logic params beyond legacy flat `or` atoms. */
-export interface LogicFilterExtras {
-  /** Raw `and=` values, e.g. `(status.eq.pending,total.gt.100)` */
-  and?: string[];
-  /** Raw `not.or=` values */
-  notOr?: string[];
-  /** Raw `not.and=` values */
-  notAnd?: string[];
-  /**
-   * When true, treat `orConditions` as raw PostgREST values (may contain
-   * nested and= / or=) instead of a pre-split flat atom list.
-   */
-  orRaw?: boolean;
-}
+import { parseLogicParam, isFlatAtomList, splitTopLevelCommas } from "./queryLogic.js";
 
 export interface SelectOptions {
   select?: string;
@@ -128,7 +109,7 @@ const ALLOWED_CASTS = new Set([
 /**
  * Split optional ::type suffix. Type must be in ALLOWED_CASTS.
  */
-function splitCast(expr: string): { base: string; cast: string | null } {
+export function splitCast(expr: string): { base: string; cast: string | null } {
   const m = expr.match(/^(.*)::([a-zA-Z_][a-zA-Z0-9_]*)$/);
   if (!m) return { base: expr, cast: null };
   const cast = m[2].toLowerCase();
@@ -344,7 +325,7 @@ function parseCondition(
 export function parseWhereConditions(
   conditions: string[],
   orConditions: string[] = [],
-  extras: LogicFilterExtras = {}
+  options: { orRaw?: boolean; and?: string[]; notAnd?: string[] } = {}
 ): { sql: string; values: unknown[] } {
   const parts: string[] = [];
   const values: unknown[] = [];
@@ -356,10 +337,23 @@ export function parseWhereConditions(
   }
 
   if (orConditions.length > 0) {
-    const useTree =
-      extras.orRaw === true || !isFlatAtomList(orConditions);
+    const joined = orConditions.join(",");
+    // E-15: orRaw=true (explicit nested syntax) or auto-detect nested logic
+    const isNested = options.orRaw || !isFlatAtomList(splitTopLevelCommas(joined));
 
-    if (!useTree) {
+    if (isNested) {
+      // orRaw: item already has outer parens like "(a,and=(b,c))" — pass as-is.
+      // Auto-detect: wrap in or=(...) so parseLogicParam sees a group header.
+      const logicInput = options.orRaw ? joined : `or=(${joined})`;
+      const result = parseLogicParam(
+        logicInput,
+        "OR",
+        values.length,
+        (atom: string, offset: number) => parseCondition(atom, offset)
+      );
+      parts.push(result.sql);
+      values.push(...result.values);
+    } else {
       const orParts: string[] = [];
       for (const condition of orConditions) {
         const result = parseCondition(condition, values.length);
@@ -367,44 +361,30 @@ export function parseWhereConditions(
         values.push(...result.values);
       }
       parts.push(`(${orParts.join(" OR ")})`);
-    } else {
-      for (const raw of orConditions) {
-        const result = parseLogicParam(
-          raw,
-          "OR",
-          values.length,
-          parseCondition
-        );
-        parts.push(result.sql);
-        values.push(...result.values);
-      }
     }
   }
 
-  for (const raw of extras.and ?? []) {
-    const result = parseLogicParam(raw, "AND", values.length, parseCondition);
-    parts.push(result.sql);
-    values.push(...result.values);
-  }
-
-  for (const raw of extras.notOr ?? []) {
+  // E-15: top-level and=(...) groups
+  if (options.and && options.and.length > 0) {
+    const joined = options.and.join(",");
     const result = parseLogicParam(
-      raw,
-      "OR",
+      joined,
+      "AND",
       values.length,
-      parseCondition,
-      { not: true }
+      (atom: string, offset: number) => parseCondition(atom, offset)
     );
     parts.push(result.sql);
     values.push(...result.values);
   }
 
-  for (const raw of extras.notAnd ?? []) {
+  // E-15: top-level not.and=(...) groups
+  if (options.notAnd && options.notAnd.length > 0) {
+    const joined = options.notAnd.join(",");
     const result = parseLogicParam(
-      raw,
+      joined,
       "AND",
       values.length,
-      parseCondition,
+      (atom: string, offset: number) => parseCondition(atom, offset),
       { not: true }
     );
     parts.push(result.sql);
@@ -417,85 +397,8 @@ export function parseWhereConditions(
   };
 }
 
-/**
- * First `:` that is not part of `::` (cast). PostgREST alias:expr.
- * `fullName:name` → 8; `name::text` → -1; `theme:settings->>'x'::text` → 5.
- */
-function findAliasColon(item: string): number {
-  for (let i = 0; i < item.length; i++) {
-    if (item[i] !== ":") continue;
-    if (item[i + 1] === ":") {
-      i += 1;
-      continue;
-    }
-    return i;
-  }
-  return -1;
-}
-
-/**
- * Response key for bare JSON / cast selects (PostgREST: last path key, or base col).
- */
-function inferSelectAlias(columnExpr: string): string | null {
-  const { base, cast } = splitCast(columnExpr);
-  if (isValidIdentifier(base)) {
-    return cast ? base : null;
-  }
-  const textKey = base.match(/->>'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
-  if (textKey) return textKey[1];
-  const objKey = base.match(/->'([a-zA-Z_][a-zA-Z0-9_]*)'$/);
-  if (objKey) return objKey[1];
-  const idx = base.match(/->(\d+)$/);
-  if (idx) return idx[1];
-  return null;
-}
-
-/**
- * One select item → SQL fragment (E-17 alias, E-19 JSON path AS).
- */
-function parseSelectItem(item: string): string {
-  let alias: string | null = null;
-  let expr = item;
-
-  const colonIdx = findAliasColon(item);
-  if (colonIdx !== -1) {
-    alias = item.slice(0, colonIdx);
-    expr = item.slice(colonIdx + 1);
-    if (!alias || !isValidIdentifier(alias)) {
-      throw new Error(`Invalid select alias: ${alias ?? "(empty)"}`);
-    }
-    if (!expr) {
-      throw new Error(`Invalid select expression after alias: ${item}`);
-    }
-  }
-
-  let sql: string;
-  try {
-    sql = toColumnSql(expr);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/Invalid cast/i.test(msg)) throw e;
-    throw new Error(`Invalid column name in select: ${item}`);
-  }
-
-  const asName = alias ?? inferSelectAlias(expr);
-  if (asName) {
-    return `${sql} AS "${asName}"`;
-  }
-  return sql;
-}
-
-/**
- * Parse select=col1,alias:col2,json->>'k' into SQL fragment.
- * "*" or empty → "*". E-17 aliases; E-19 JSON paths get AS last-key.
- */
-export function parseSelectColumns(select?: string): string {
-  if (!select || select === "*") return "*";
-
-  const columns = select.split(",").map((c) => c.trim()).filter(Boolean);
-  if (columns.length === 0) return "*";
-  return columns.map(parseSelectItem).join(", ");
-}
+export { parseSelect, parseSelectColumns } from "./querySelect.js";
+export type { ParsedSelect } from "./querySelect.js";
 
 export function parseOrderBy(order?: string, sort?: string): string {
   if (!order && !sort) return "";
