@@ -23,6 +23,7 @@ import { authSettingsRoute } from "./settings.js";
 import { authAuditRoute } from "./audit.js";
 import { authOAuthRoute } from "./oauth.js";
 import { authSessionsRoute } from "./sessions.js";
+import { authAdminUsersRoute } from "./adminUsers.js";
 
 export async function authDbRoutes(server: FastifyInstance) {
   // Sıra önemli: önce DB adını çöz, sonra API key'i doğrula.
@@ -44,6 +45,7 @@ export async function authDbRoutes(server: FastifyInstance) {
 
   // Admin-gated endpoint'leri
   await server.register(authUsersRoute);         // user CRUD + me/password
+  await server.register(authAdminUsersRoute);    // E-38 admin get user
   await server.register(authSettingsRoute);      // per-DB auth settings
   await server.register(authAuditRoute);         // audit log
   await server.register(authSessionsRoute);      // session management
