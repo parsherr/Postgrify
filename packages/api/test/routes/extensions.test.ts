@@ -1,5 +1,5 @@
 /**
- * E-76 / E-77 extension route tests.
+ * E-76 / E-77 / E-78 extension route tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
@@ -293,6 +293,99 @@ describe("POST /db/:database/extensions (E-77)", () => {
       method: "POST",
       url: "/db/project1/extensions",
       payload: { name: "pg_trgm" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("DELETE /db/:database/extensions/:ext (E-78)", () => {
+  it("schema token drops extension → 200", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/pg_trgm",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ name: "pg_trgm", dropped: true });
+    expect(mockUnsafe).toHaveBeenCalledWith(
+      'DROP EXTENSION IF EXISTS "pg_trgm"'
+    );
+    expect(mockCacheDel).toHaveBeenCalledWith("postgrify:project1:extensions");
+  });
+
+  it("allows hyphenated names (uuid-ossp)", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/uuid-ossp",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockUnsafe).toHaveBeenCalledWith(
+      'DROP EXTENSION IF EXISTS "uuid-ossp"'
+    );
+  });
+
+  it("refuses dropping plpgsql → 400", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/plpgsql",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "Cannot drop the required plpgsql extension",
+      name: "plpgsql",
+    });
+    expect(mockUnsafe).not.toHaveBeenCalled();
+  });
+
+  it("dependent objects → 409", async () => {
+    mockUnsafe.mockRejectedValueOnce(
+      new Error(
+        'cannot drop extension pg_trgm because other objects depend on it'
+      )
+    );
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/pg_trgm",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ name: "pg_trgm" });
+  });
+
+  it("invalid name → 400", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/bad!name",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockUnsafe).not.toHaveBeenCalled();
+  });
+
+  it("admin token allowed", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/pg_trgm",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("read-only DB token denied", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/pg_trgm",
+      headers: { Authorization: `Bearer ${readToken}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("no token → 401", async () => {
+    const res = await server.inject({
+      method: "DELETE",
+      url: "/db/project1/extensions/pg_trgm",
     });
     expect(res.statusCode).toBe(401);
   });

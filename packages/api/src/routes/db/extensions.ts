@@ -2,7 +2,7 @@
  * PostgreSQL extension management (E-76 / E-77 / E-78):
  *   GET    /db/:database/extensions
  *   POST   /db/:database/extensions
- *   DELETE /db/:database/extensions/:ext (E-78 — later)
+ *   DELETE /db/:database/extensions/:ext
  *
  * Auth: schema scope (admin bypasses).
  *
@@ -133,6 +133,68 @@ export async function extensionsRoute(server: FastifyInstance) {
         default_version: (row?.default_version as string | null) ?? null,
         installed: Boolean(row?.installed),
       });
+    })
+  );
+
+  // ── E-78 DELETE /extensions/:ext ──────────────────────────────────────────
+  server.delete(
+    "/:database/extensions/:ext",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description:
+          "Disable a PostgreSQL extension (E-78): DROP EXTENSION IF EXISTS. " +
+          "Requires schema scope. Refuses dropping plpgsql. " +
+          "Dependent objects without CASCADE → 409.",
+        tags: ["schema"],
+        params: {
+          type: "object",
+          required: ["database", "ext"],
+          properties: {
+            database: { type: "string" },
+            ext: { type: "string" },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const { ext } = req.params as { ext: string };
+
+      try {
+        assertExtensionName(ext);
+      } catch (e) {
+        return reply.status(400).send({
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      // plpgsql is required for normal PostgreSQL operation — never drop via API.
+      if (ext.toLowerCase() === "plpgsql") {
+        return reply.status(400).send({
+          error: "Cannot drop the required plpgsql extension",
+          name: ext,
+        });
+      }
+
+      const sql = server.poolManager.getPool(dbName);
+      try {
+        await sql.unsafe(`DROP EXTENSION IF EXISTS "${ext}"`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/dependent objects|cannot drop extension/i.test(msg)) {
+          return reply.status(409).send({
+            error:
+              "Extension has dependent objects; drop them first or use CASCADE manually",
+            name: ext,
+          });
+        }
+        throw e;
+      }
+
+      await server.cache.del(server.cache.buildKey(dbName, "extensions"));
+
+      return reply.send({ name: ext, dropped: true });
     })
   );
 }
