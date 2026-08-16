@@ -90,6 +90,9 @@ export function buildGoTrueUser(user: AuthUserRow, now = new Date()): GoTrueUser
     user.metadata && typeof user.metadata === "object" && !Array.isArray(user.metadata)
       ? { ...user.metadata }
       : {};
+  // Never expose internal verification secrets in GoTrue user_metadata
+  delete meta.verification_token;
+  delete meta.verification_exp;
   if (user.full_name && meta.full_name === undefined) meta.full_name = user.full_name;
   if (user.avatar_url && meta.avatar_url === undefined) meta.avatar_url = user.avatar_url;
 

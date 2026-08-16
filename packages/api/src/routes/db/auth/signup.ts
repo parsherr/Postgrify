@@ -1,8 +1,9 @@
 /**
- * POST /:database/auth/signup — Yeni kullanıcı kaydı.
+ * POST /:database/auth/signup — C-10 GoTrue-compatible session shape.
  *
- * email_verify_required=true ise kullanıcı verify edilmeden giriş yapamaz.
- * SMTP yapılandırılmışsa verify emaili gönderilir; yoksa console'a loglanır.
+ * email_verify_required=false → 200 + access/refresh tokens (auto session).
+ * email_verify_required=true  → 200 + empty tokens, same shape.
+ * Request: full_name / metadata / data (Supabase SDK `data` object).
  *
  * Rate limit: 5 req/dk (spam kaydı önle).
  */
@@ -10,9 +11,15 @@
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { hashPassword } from "../../../services/passwordService.js";
+import { JwtService } from "../../../services/jwtService.js";
 import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js";
 import { sendEmail, buildVerifyEmail } from "../../../services/emailService.js";
 import { config } from "../../../config/env.js";
+import {
+  buildSessionResponse,
+  parseDurationMs,
+  type SessionResponse,
+} from "./sessionResponse.js";
 import crypto from "node:crypto";
 import { validatePassword, parsePolicyFromSettings } from "../../../utils/passwordPolicy.js";
 
@@ -24,44 +31,86 @@ function hashVerificationToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+function hashRefreshToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+type SignupBody = {
+  email: string;
+  password: string;
+  full_name?: string;
+  metadata?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+};
+
+function resolveSignupProfile(body: SignupBody): {
+  fullName: string | null;
+  extraMetadata: Record<string, unknown>;
+} {
+  const data = body.data && typeof body.data === "object" ? body.data : {};
+  const metadata =
+    body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const fullName =
+    body.full_name ??
+    (typeof data.full_name === "string" ? data.full_name : null) ??
+    (typeof metadata.full_name === "string" ? metadata.full_name : null);
+
+  const { full_name: _dFn, ...dataRest } = data;
+  const { full_name: _mFn, ...metaRest } = metadata;
+  return {
+    fullName,
+    extraMetadata: { ...metaRest, ...dataRest },
+  };
+}
+
 export async function authSignupRoute(server: FastifyInstance) {
+  const jwtService = new JwtService(() => config.JWT_SECRET);
+
   server.post(
     "/:database/auth/signup",
     {
       config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
       schema: {
-        description: "Register a new user. Sends verification email if SMTP is configured.",
+        description:
+          "Register a new user (GoTrue-compatible session, C-10). Sends verification email if SMTP configured.",
         tags: ["db-auth"],
         security: [],
         body: {
           type: "object",
           required: ["email", "password"],
           properties: {
-            email:     { type: "string", format: "email" },
-            password:  { type: "string", minLength: 8 },
+            email: { type: "string", format: "email" },
+            password: { type: "string", minLength: 8 },
             full_name: { type: "string" },
-            // Uygulama-specific alanlar için opsiyonel metadata (SORUN #6 düzeltmesi).
-            // Bu değerler _postgrify_auth.users.metadata JSONB kolonuna merge edilir.
-            // Örn: { username: "johndoe", plan: "free", referral: "xyz" }
-            metadata:  { type: "object", additionalProperties: true },
+            metadata: { type: "object", additionalProperties: true },
+            data: { type: "object", additionalProperties: true },
           },
         },
         response: {
-          201: {
+          200: {
             type: "object",
             properties: {
-              ok:                   { type: "boolean" },
-              email_verify_sent:    { type: "boolean" },
-              message:              { type: "string" },
+              access_token: { type: "string" },
+              token_type: { type: "string" },
+              expires_in: { type: "integer" },
+              expires_at: { type: "integer" },
+              refresh_token: { type: "string" },
               user: {
                 type: "object",
                 properties: {
-                  id:             { type: "string" },
-                  email:          { type: "string" },
-                  email_verified: { type: "boolean" },
-                  role:           { type: "string" },
+                  id: { type: "string" },
+                  aud: { type: "string" },
+                  role: { type: "string" },
+                  email: { type: "string" },
+                  email_confirmed_at: { type: ["string", "null"] },
+                  created_at: { type: "string" },
+                  updated_at: { type: "string" },
+                  app_metadata: { type: "object", additionalProperties: true },
+                  user_metadata: { type: "object", additionalProperties: true },
                 },
               },
+              email_verify_sent: { type: "boolean" },
+              message: { type: "string" },
             },
           },
         },
@@ -69,17 +118,13 @@ export async function authSignupRoute(server: FastifyInstance) {
     },
     asyncHandler(async (req, reply) => {
       const { database } = req.params as { database: string };
-      const { email, password, full_name, metadata: extraMetadata } = req.body as {
-        email: string;
-        password: string;
-        full_name?: string;
-        metadata?: Record<string, unknown>;
-      };
+      const body = req.body as SignupBody;
+      const { email, password } = body;
+      const { fullName, extraMetadata } = resolveSignupProfile(body);
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Signup feature flag kontrolü — case-insensitive karşılaştırma
       const signupEnabled = await getAuthSetting(sql, "email_signup_enabled", "true");
       if (signupEnabled.toLowerCase() !== "true") {
         return reply.status(403).send({
@@ -88,58 +133,66 @@ export async function authSignupRoute(server: FastifyInstance) {
         });
       }
 
-      // Şifre kompleksitesi — politika ayarlarından okunur
       const policySettings: Record<string, string> = {
-        min_password_length:       await getAuthSetting(sql, "min_password_length",       "8"),
-        password_require_uppercase: await getAuthSetting(sql, "password_require_uppercase", "false"),
-        password_require_number:    await getAuthSetting(sql, "password_require_number",    "false"),
-        password_require_special:   await getAuthSetting(sql, "password_require_special",   "false"),
+        min_password_length: await getAuthSetting(sql, "min_password_length", "8"),
+        password_require_uppercase: await getAuthSetting(
+          sql,
+          "password_require_uppercase",
+          "false"
+        ),
+        password_require_number: await getAuthSetting(
+          sql,
+          "password_require_number",
+          "false"
+        ),
+        password_require_special: await getAuthSetting(
+          sql,
+          "password_require_special",
+          "false"
+        ),
       };
       const policyCheck = validatePassword(password, parsePolicyFromSettings(policySettings));
       if (!policyCheck.valid) {
         return reply.status(400).send({ error: policyCheck.message });
       }
 
-      // Email unique kontrolü
       const [existing] = await sql`
         SELECT id FROM _postgrify_auth.users WHERE email = ${email.toLowerCase()}
       `;
       if (existing) {
-        // Timing-safe: her durumda aynı gecikme
         await hashPassword(password);
         return reply.status(409).send({ error: "Email already registered" });
       }
 
       const passwordHash = await hashPassword(password);
-      // getAuthSetting normalizeEdilmiş (lowercase) değer döner — === "true" güvenli
-      const isVerifyRequired = (await getAuthSetting(sql, "email_verify_required", "false")) === "true";
+      const isVerifyRequired =
+        (await getAuthSetting(sql, "email_verify_required", "false")) === "true";
 
-      // Yeni kullanıcının varsayılan rolünü auth_settings'den oku (SORUN #7 düzeltmesi).
-      // Geliştirici bunu 'editor' yaparak kullanıcıların kayıt sonrası veri yazabilmesini sağlar.
       const rawDefaultRole = await getAuthSetting(sql, "default_user_role", "viewer");
       const VALID_ROLES = ["viewer", "editor", "admin"] as const;
-      const defaultUserRole: typeof VALID_ROLES[number] = (VALID_ROLES as readonly string[]).includes(rawDefaultRole)
-        ? rawDefaultRole as typeof VALID_ROLES[number]
+      const defaultUserRole: (typeof VALID_ROLES)[number] = (
+        VALID_ROLES as readonly string[]
+      ).includes(rawDefaultRole)
+        ? (rawDefaultRole as (typeof VALID_ROLES)[number])
         : "viewer";
+
       const verificationToken = crypto.randomBytes(32).toString("hex");
-      // Güvenlik: DB'de plain token değil SHA-256 hash'i sakla.
-      // Email bağlantısında ham token kullanılır; DB dump'ında yalnızca hash görünür.
       const verificationTokenHash = hashVerificationToken(verificationToken);
-      const verificationExp = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 saat
+      const verificationExp = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
       const [user] = await sql`
         INSERT INTO _postgrify_auth.users
           (email, password_hash, full_name, email_verified, provider, role)
         VALUES
-          (${email.toLowerCase()}, ${passwordHash}, ${full_name ?? null}, false, 'email', ${defaultUserRole})
-        RETURNING id, email, email_verified, role
+          (${email.toLowerCase()}, ${passwordHash}, ${fullName}, false, 'email', ${defaultUserRole})
+        RETURNING id, email, email_verified, role, created_at, metadata, provider, full_name, is_active
       `;
 
-      // Verify token hash'ini kaydet (plain text değil).
-      // extraMetadata varsa verification token ile birlikte merge et (SORUN #6 düzeltmesi).
-      const baseMetadata = extraMetadata && Object.keys(extraMetadata).length > 0
-        ? extraMetadata
-        : {};
+      const baseMetadata =
+        Object.keys(extraMetadata).length > 0 ? { ...extraMetadata } : {};
+      if (fullName && baseMetadata.full_name === undefined) {
+        baseMetadata.full_name = fullName;
+      }
       const metadataWithToken = {
         ...baseMetadata,
         verification_token: verificationTokenHash,
@@ -151,38 +204,82 @@ export async function authSignupRoute(server: FastifyInstance) {
         WHERE id = ${user.id}
       `;
 
-      // Audit log
       await insertAuditLog(sql, "signup", user.id as string, {
         ip: req.ip,
         userAgent: req.headers["user-agent"],
       });
 
-      // Verify emaili gönder
       let emailSent = false;
       try {
-        await sendEmail(buildVerifyEmail({
-          appUrl: config.APP_URL,
-          database,
-          token: verificationToken,
-          email: user.email as string,
-        }));
+        await sendEmail(
+          buildVerifyEmail({
+            appUrl: config.APP_URL,
+            database,
+            token: verificationToken,
+            email: user.email as string,
+          })
+        );
         emailSent = true;
       } catch (err) {
         server.log.warn({ err }, "Failed to send verification email");
       }
 
-      return reply.status(201).send({
-        ok: true,
+      const userRow = {
+        id: user.id as string,
+        email: user.email as string,
+        role: user.role as string,
+        is_active: (user.is_active as boolean) !== false,
+        email_verified: user.email_verified as boolean,
+        created_at: user.created_at as string | Date | null,
+        metadata: baseMetadata,
+        provider: (user.provider as string) ?? "email",
+        full_name: (user.full_name as string | null) ?? fullName,
+        avatar_url: null as string | null,
+      };
+
+      let session: SessionResponse;
+      if (isVerifyRequired) {
+        const expiresIn = Math.floor(parseDurationMs(config.ACCESS_TOKEN_EXPIRY) / 1000);
+        session = {
+          access_token: "",
+          token_type: "bearer",
+          expires_in: expiresIn,
+          expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+          refresh_token: "",
+          user: buildSessionResponse({
+            accessToken: "",
+            refreshToken: "",
+            user: userRow,
+          }).user,
+        };
+      } else {
+        const accessToken = await jwtService.signDbUserToken(
+          database,
+          user.id as string,
+          user.email as string,
+          user.role as string,
+          config.ACCESS_TOKEN_EXPIRY
+        );
+        const refreshToken = crypto.randomBytes(48).toString("hex");
+        const refreshTokenHash = hashRefreshToken(refreshToken);
+        const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
+        await sql`
+          INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
+          VALUES (${user.id}, ${refreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
+        `;
+        session = buildSessionResponse({
+          accessToken,
+          refreshToken,
+          user: userRow,
+        });
+      }
+
+      return reply.status(200).send({
+        ...session,
         email_verify_sent: emailSent,
         message: isVerifyRequired
-          ? "Hesabınız oluşturuldu. Giriş yapmak için email adresinizi doğrulayın."
-          : "Hesabınız oluşturuldu.",
-        user: {
-          id:             user.id,
-          email:          user.email,
-          email_verified: user.email_verified,
-          role:           user.role,
-        },
+          ? "Account created. Please verify your email before signing in."
+          : "Account created.",
       });
     })
   );
