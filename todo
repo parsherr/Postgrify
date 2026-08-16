@@ -1,6 +1,8 @@
 - program tamamen ingilizceye cevirilmeli (multi language degil, single language english)
 - supabase RLS, RLS Policies ve Rules katmaninin aynisini eklememiz lazim
-
+- Tum API endpointleri bitirilmeli
+- gerekli tum api endpointleri destekleyen SDK yazilmali ve SDK icin docs yazilmali.
+- gercek kullanim senaryolarinda test edilip yasanilan sorunlara gore api ve sdk sistemleri gelistiirlmeli
 
 
 Supabasede olen diger kritik guvenlik katmanlari:
