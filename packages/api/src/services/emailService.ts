@@ -95,23 +95,26 @@ export function buildPasswordResetEmail(opts: {
   database: string;
   token: string;
   email: string;
+  redirectTo?: string;
 }): EmailOptions {
-  const url = `${opts.appUrl}/db/${opts.database}/auth/password/reset?token=${opts.token}`;
+  const params = new URLSearchParams({ token: opts.token });
+  if (opts.redirectTo) params.set("redirect_to", opts.redirectTo);
+  // Link goes to app reset UI (or API verify path); keep token + optional redirect_to
+  const url = `${opts.appUrl}/reset-password?${params.toString()}&database=${encodeURIComponent(opts.database)}`;
   return {
     to: opts.email,
-    subject: "Şifre sıfırlama isteği",
-    text: `Şifrenizi sıfırlamak için bu linke tıklayın: ${url}\n\nBu isteği siz yapmadıysanız bu emaili yoksayın.`,
+    subject: "Password reset request",
+    text: `Reset your password: ${url}\n\nIf you did not request this, ignore this email.`,
     html: emailTemplate({
-      title: "Şifre Sıfırlama",
-      preheader: "Şifrenizi sıfırlamak için istek aldık.",
+      title: "Password reset",
+      preheader: "Reset your password",
       body: `
-        <p>Merhaba,</p>
-        <p>Şifrenizi sıfırlamak için bir istek aldık.</p>
-        <p>Bu link <strong>1 saat</strong> geçerlidir.</p>
-        <p style="color:#888;font-size:12px;">Bu isteği siz yapmadıysanız bu emaili yoksayabilirsiniz.</p>
+        <p>Hello,</p>
+        <p>We received a request to reset your password.</p>
+        <p style="color:#888;font-size:12px;">If you did not request this, you can ignore this email.</p>
       `,
       ctaUrl: url,
-      ctaText: "Şifremi Sıfırla",
+      ctaText: "Reset password",
     }),
   };
 }
