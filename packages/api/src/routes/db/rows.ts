@@ -440,13 +440,15 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // ── PATCH — legacy (C-03 sonraki adım) ────────────────────────────────────
+  // ── C-03 PATCH batch (Prefer: return; where required — ADR-009) ───────────
   server.patch(
     "/:database/:table",
     {
       preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
-        description: "Update rows matching the where filter",
+        description:
+          "Update rows matching where filter (required). Prefer: return=minimal|representation. " +
+          "X-Postgrify-Require-Filter: true",
         tags: ["rows"],
         querystring: {
           type: "object",
@@ -460,6 +462,8 @@ export async function rowsRoute(server: FastifyInstance) {
       const dbName = req.dbName!;
       const { table } = req.params as { table: string };
       assertIdentifier(table, "table");
+      const prefer = parsePrefer(req.headers.prefer);
+      reply.header("X-Postgrify-Require-Filter", "true");
 
       const query = req.query as { where?: string | string[] };
       const whereList = Array.isArray(query.where)
@@ -476,20 +480,28 @@ export async function rowsRoute(server: FastifyInstance) {
       }
 
       const updates = req.body as Record<string, unknown>;
+      if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+        return reply.status(400).send({ error: "Update body must be a JSON object" });
+      }
+      const keys = Object.keys(updates);
+      if (keys.length === 0) {
+        return reply.status(400).send({ error: "Empty update body" });
+      }
+
       const { sql: whereSql, values: whereValues } = parseWhereConditions(whereList);
 
-      const sql = server.poolManager.getPool(dbName);
-      const setCols = Object.keys(updates)
+      const setCols = keys
         .map((k, i) => {
           assertIdentifier(k, "column");
           return `"${k}" = $${whereValues.length + i + 1}`;
         })
         .join(", ");
 
-      const updateSql = `
-        UPDATE "${table}" SET ${setCols} ${whereSql} RETURNING *
-      `;
+      const returning =
+        prefer.return === "representation" ? " RETURNING *" : "";
+      const updateSql = `UPDATE "${table}" SET ${setCols} ${whereSql}${returning}`;
 
+      const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updated = await sql.unsafe(updateSql, [
         ...whereValues,
@@ -500,7 +512,13 @@ export async function rowsRoute(server: FastifyInstance) {
         server.cache.buildKey(dbName, "rows", table, "*")
       );
 
-      return reply.send({ updated });
+      if (prefer.return === "representation") {
+        reply.header("Preference-Applied", "return=representation");
+        return reply.status(200).send(updated);
+      }
+
+      reply.header("Preference-Applied", "return=minimal");
+      return reply.status(204).send();
     })
   );
 

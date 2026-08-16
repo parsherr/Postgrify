@@ -160,14 +160,14 @@ describe("PATCH /db/:database/:table — toplu güncelleme", () => {
     expect(res.json().error).toMatch(/where filter required/i);
   });
 
-  it("where filtresi ile 200 döner", async () => {
+  it("where filtresi ile 204 döner (Prefer return=minimal default)", async () => {
     const res = await server.inject({
       method: "PATCH",
       url: "/db/project1/users?where=id.eq.1",
       headers: { Authorization: `Bearer ${dbToken}` },
       payload: { name: "Updated" },
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(204);
   });
 
   it("token olmadan 401 döner", async () => {
