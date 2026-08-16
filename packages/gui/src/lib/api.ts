@@ -184,10 +184,14 @@ export const api = {
     request<T>("GET", path, undefined, { ...options, withHeaders: true }) as Promise<
       ResponseWithHeaders<T>
     >,
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body) as Promise<T>,
-  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body) as Promise<T>,
-  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body) as Promise<T>,
-  delete: <T = void>(path: string) => request<T>("DELETE", path) as Promise<T>,
+  post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>("POST", path, body, options) as Promise<T>,
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>("PUT", path, body, options) as Promise<T>,
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>("PATCH", path, body, options) as Promise<T>,
+  delete: <T = void>(path: string, options?: RequestOptions) =>
+    request<T>("DELETE", path, undefined, options) as Promise<T>,
 };
 
 // ── Setup API (auth gerektirmez, doğrudan fetch) ──────────────────────────────

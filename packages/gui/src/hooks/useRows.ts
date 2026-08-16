@@ -76,7 +76,10 @@ export function useInsertRow() {
       db: string;
       table: string;
       data: Record<string, unknown>;
-    }) => api.post<Record<string, unknown>>(`/db/${db}/${table}`, data),
+    }) =>
+      api.post<Record<string, unknown>[]>(`/db/${db}/${table}`, data, {
+        headers: { Prefer: "return=representation" },
+      }),
     onSuccess: (_data, { db, table }) =>
       qc.invalidateQueries({ queryKey: queryKeys.rows(db, table) }),
   });
