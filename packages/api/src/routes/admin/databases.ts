@@ -5,6 +5,7 @@
  *   DELETE /admin/databases/:db   — DB sil (PostgreSQL seviyesinde DROP)
  *   GET    /admin/databases/:db/api-key        — API key'i döner
  *   POST   /admin/databases/:db/api-key/rotate — API key'i yeniler
+ *   POST   /admin/databases/:db/schema-cache/reload — E-27 schema cache invalidate
  */
 
 import type { FastifyInstance } from "fastify";
@@ -177,7 +178,7 @@ export async function databasesRoute(server: FastifyInstance) {
             type: "object",
             properties: {
               database: { type: "string" },
-              api_key:  { type: "string" },
+              api_key: { type: "string" },
             },
           },
         },
@@ -217,7 +218,7 @@ export async function databasesRoute(server: FastifyInstance) {
             type: "object",
             properties: {
               database: { type: "string" },
-              api_key:  { type: "string" },
+              api_key: { type: "string" },
             },
           },
         },
@@ -235,6 +236,43 @@ export async function databasesRoute(server: FastifyInstance) {
       const newKey = await provisionApiKey(dbSql);
 
       return reply.send({ database: db, api_key: newKey });
+    })
+  );
+
+  // POST /admin/databases/:db/schema-cache/reload (E-27)
+  server.post(
+    "/databases/:db/schema-cache/reload",
+    {
+      schema: {
+        description:
+          "Invalidate cached schema/introspection data for a database (E-27). " +
+          "Use after migrations so tables/views/functions/indexes lists refresh. " +
+          "Requires admin token. Returns 204.",
+        tags: ["admin"],
+        params: {
+          type: "object",
+          required: ["db"],
+          properties: { db: { type: "string" } },
+        },
+        response: {
+          204: { type: "null", description: "Cache cleared" },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const { db } = req.params as { db: string };
+
+      if (!isValidIdentifier(db)) {
+        return reply.status(400).send({ error: "Invalid database name" });
+      }
+
+      // Drop all postgrify:{db}:* keys (tables, schema, rows, views, ...).
+      // buildKey strips "*"; append wildcard after the db prefix.
+      const prefix = server.cache.buildKey(db);
+      await server.cache.invalidatePattern(`${prefix}:*`);
+
+      server.log.info({ db }, "Schema cache reloaded");
+      return reply.status(204).send();
     })
   );
 }
