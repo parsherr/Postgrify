@@ -1,15 +1,20 @@
 /**
- * Row CRUD route'ları:
- *   GET    /db/:database/:table          — Satır listele (filtre, sıralama, sayfalama)
- *   POST   /db/:database/:table          — Satır ekle (tekil veya dizi)
- *   PATCH  /db/:database/:table          — Toplu güncelle
- *   DELETE /db/:database/:table          — Toplu sil
- *   GET    /db/:database/:table/:id      — Tekil satır (?pk=kolon ile PK kolonu seçilebilir)
- *   PUT    /db/:database/:table/:id      — Satır güncelle (?pk=kolon ile PK kolonu seçilebilir)
- *   DELETE /db/:database/:table/:id      — Satır sil (?pk=kolon ile PK kolonu seçilebilir)
+ * Row CRUD route'ları.
+ *
+ * C-01 (aktif): GET list → PostgREST array + Content-Range + Prefer:count
+ * Mutations: legacy body shape korunuyor (sonraki turtle adımlarında Prefer eklenecek)
+ *
+ *   GET    /db/:database/:table
+ *   HEAD   /db/:database/:table   (E-01 — C-01 ile aynı SQL, body yok)
+ *   POST   /db/:database/:table
+ *   PATCH  /db/:database/:table
+ *   DELETE /db/:database/:table
+ *   GET    /db/:database/:table/:id
+ *   PUT    /db/:database/:table/:id
+ *   DELETE /db/:database/:table/:id
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
@@ -19,6 +24,8 @@ import {
   parseOrderBy,
 } from "../../services/queryBuilder.js";
 import { TTL } from "../../services/cacheService.js";
+import { parsePrefer } from "../../utils/prefer.js";
+import { setContentRange } from "../../utils/contentRange.js";
 import crypto from "node:crypto";
 
 function queryCacheKey(
@@ -35,24 +42,171 @@ function queryCacheKey(
   return cache.buildKey(dbName, "rows", table, hash);
 }
 
-/**
- * ?pk= query parametresinden primary key kolon adını okur.
- * Belirtilmezse "id" döner. Geçersiz identifier ise hata fırlatır.
- */
 function resolvePkColumn(pk: string | undefined): string {
   const col = pk ?? "id";
   assertIdentifier(col, "pk");
   return col;
 }
 
+async function resolveCount(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: { unsafe: (sql: string, params?: any[]) => Promise<any[]> },
+  table: string,
+  whereSql: string,
+  whereValues: unknown[],
+  mode: "exact" | "planned" | "estimated" | null
+): Promise<number | null> {
+  if (!mode) return null;
+
+  if (mode === "exact") {
+    const countSql = `SELECT count(*)::bigint AS total FROM "${table}" ${whereSql}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [row] = await tx.unsafe(countSql, whereValues as any[]);
+    return Number(row.total);
+  }
+
+  if (mode === "planned") {
+    const explainSql = `EXPLAIN (FORMAT JSON) SELECT 1 FROM "${table}" ${whereSql}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [plan] = await tx.unsafe(explainSql, whereValues as any[]);
+    const planJson = plan?.["QUERY PLAN"] ?? plan;
+    const root = Array.isArray(planJson) ? planJson[0] : planJson;
+    const rows = root?.Plan?.["Plan Rows"] ?? root?.plan?.["Plan Rows"];
+    return typeof rows === "number" ? rows : null;
+  }
+
+  // estimated — table stats (filter ignored; fast path like PostgREST)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [stat] = await tx.unsafe(
+    `SELECT GREATEST(reltuples::bigint, 0) AS total FROM pg_class WHERE relname = $1 LIMIT 1`,
+    [table] as any[]
+  );
+  return stat ? Number(stat.total) : null;
+}
+
+/**
+ * C-01 + E-01 shared list handler.
+ */
+async function handleGetList(
+  server: FastifyInstance,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  headOnly: boolean
+) {
+  const dbName = req.dbName!;
+  const { table } = req.params as { table: string };
+  assertIdentifier(table, "table");
+
+  const query = req.query as {
+    select?: string;
+    where?: string | string[];
+    or?: string | string[];
+    order?: string;
+    sort?: string;
+    limit?: number;
+    offset?: number;
+  };
+
+  const prefer = parsePrefer(req.headers.prefer);
+
+  const whereList = Array.isArray(query.where)
+    ? query.where
+    : query.where
+      ? [query.where]
+      : [];
+
+  const orRaw = Array.isArray(query.or)
+    ? query.or
+    : query.or
+      ? [query.or]
+      : [];
+  const orList = orRaw.flatMap((s) =>
+    s.split(",").map((c) => c.trim()).filter(Boolean)
+  );
+
+  let cols: string;
+  let whereSql: string;
+  let whereValues: unknown[];
+  let orderSql: string;
+
+  try {
+    cols = parseSelectColumns(query.select);
+    const parsed = parseWhereConditions(whereList, orList);
+    whereSql = parsed.sql;
+    whereValues = parsed.values;
+    orderSql = parseOrderBy(query.order, query.sort);
+  } catch (e) {
+    return reply.status(400).send({
+      error: "Invalid query parameters",
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  const limit = Math.min(query.limit ?? 100, 1000);
+  const offset = query.offset ?? 0;
+
+  const cacheKey = queryCacheKey(server.cache, dbName, table, {
+    ...query,
+    count: prefer.count,
+  });
+
+  if (!headOnly) {
+    const cached = await server.cache.get(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached) as {
+        rows: unknown[];
+        total: number | null;
+        limit: number;
+        offset: number;
+      };
+      setContentRange(reply, parsed.offset, parsed.rows.length, parsed.total);
+      return reply.send(parsed.rows);
+    }
+  }
+
+  const sql = server.poolManager.getPool(dbName);
+  const fullSql = `
+    SELECT ${cols} FROM "${table}"
+    ${whereSql}
+    ${orderSql}
+    LIMIT $${whereValues.length + 1}
+    OFFSET $${whereValues.length + 2}
+  `;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { rows, total } = await sql.begin("read only", async (tx: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = await tx.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
+    const total = await resolveCount(tx, table, whereSql, whereValues, prefer.count);
+    return { rows, total };
+  });
+
+  setContentRange(reply, offset, rows.length, total);
+
+  if (!headOnly) {
+    await server.cache.set(
+      cacheKey,
+      JSON.stringify({ rows, total, limit, offset }),
+      TTL.ROW_QUERY
+    );
+  }
+
+  // PostgREST: 206 when Range was used and count known — we use limit/offset; keep 200
+  // Body is the array (C-01). HEAD: empty body.
+  if (headOnly) return reply.status(200).send();
+  return reply.send(rows);
+}
+
 export async function rowsRoute(server: FastifyInstance) {
-  // GET /db/:database/:table
+  // ── C-01 GET list ─────────────────────────────────────────────────────────
   server.get(
     "/:database/:table",
     {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
-        description: "List rows with optional filtering, sorting and pagination",
+        description:
+          "List rows. Body is a JSON array. Pagination via Content-Range; " +
+          "Prefer: count=exact|planned|estimated for totals.",
         tags: ["rows"],
         querystring: {
           type: "object",
@@ -69,12 +223,12 @@ export async function rowsRoute(server: FastifyInstance) {
             order: {
               type: "string",
               description:
-                'Sort expression: "column.asc" / "column.desc" (combined), ' +
-                'or just direction "asc"/"desc" when ?sort=column is also provided.',
+                'Sort: "column.asc" / "column.desc" / "col.asc.nullsfirst", ' +
+                'or direction when ?sort=column is also provided.',
             },
             sort: {
               type: "string",
-              description: "Column to sort by when using separate ?sort=col&order=dir syntax.",
+              description: "Column to sort by when using ?sort=col&order=dir",
             },
             limit: { type: "integer", default: 100, maximum: 1000 },
             offset: { type: "integer", default: 0 },
@@ -82,96 +236,23 @@ export async function rowsRoute(server: FastifyInstance) {
         },
       },
     },
-    asyncHandler(async (req, reply) => {
-      const dbName = req.dbName!;
-      const { table } = req.params as { table: string };
-      assertIdentifier(table, "table");
-
-      const query = req.query as {
-        select?: string;
-        where?: string | string[];
-        or?: string | string[];
-        order?: string;
-        sort?: string;
-        limit?: number;
-        offset?: number;
-      };
-
-      const whereList = Array.isArray(query.where)
-        ? query.where
-        : query.where
-        ? [query.where]
-        : [];
-
-      // ?or=role.eq.admin,role.eq.mod → ["role.eq.admin", "role.eq.mod"]
-      // ya da ?or=role.eq.admin&or=role.eq.mod → ["role.eq.admin", "role.eq.mod"]
-      const orRaw = Array.isArray(query.or)
-        ? query.or
-        : query.or
-        ? [query.or]
-        : [];
-      const orList = orRaw.flatMap((s) => s.split(",").map((c) => c.trim()).filter(Boolean));
-
-      const cacheKey = queryCacheKey(server.cache, dbName, table, { ...query });
-      const cached = await server.cache.get(cacheKey);
-      if (cached) return reply.send(JSON.parse(cached));
-
-      let cols: string;
-      let whereSql: string;
-      let whereValues: unknown[];
-      let orderSql: string;
-
-      try {
-        cols = parseSelectColumns(query.select);
-        const parsed = parseWhereConditions(
-          whereList,
-          orList
-        );
-        whereSql   = parsed.sql;
-        whereValues = parsed.values;
-        orderSql   = parseOrderBy(query.order, query.sort);
-      } catch (e) {
-        return reply.status(400).send({
-          error: "Invalid query parameters",
-          message: e instanceof Error ? e.message : String(e),
-        });
-      }
-      const limit = Math.min(query.limit ?? 100, 1000);
-      const offset = query.offset ?? 0;
-
-      const sql = server.poolManager.getPool(dbName);
-      const fullSql = `
-        SELECT ${cols} FROM "${table}"
-        ${whereSql}
-        ${orderSql}
-        LIMIT $${whereValues.length + 1}
-        OFFSET $${whereValues.length + 2}
-      `;
-      const countSql = `SELECT count(*) AS total FROM "${table}" ${whereSql}`;
-
-      // Rows + count aynı read-only transaction içinde — tutarlı snapshot garantisi
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { rows, countResult } = await sql.begin("read only", async (tx) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = await tx.unsafe(fullSql, [...whereValues, limit, offset] as any[]);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const [countResult] = await tx.unsafe(countSql, whereValues as any[]);
-        return { rows, countResult };
-      });
-
-      const result = {
-        rows,
-        total: Number(countResult.total),
-        limit,
-        offset,
-      };
-
-      await server.cache.set(cacheKey, JSON.stringify(result), TTL.ROW_QUERY);
-      return reply.send(result);
-    })
+    asyncHandler(async (req, reply) => handleGetList(server, req, reply, false))
   );
 
-  // POST /db/:database/:table — satır ekle
+  // ── E-01 HEAD (same as GET, no body) — kept with C-01; verified after C-01 ─
+  server.head(
+    "/:database/:table",
+    {
+      preHandler: [server.authenticateAny, scopeGuard("read")],
+      schema: {
+        description: "HEAD list — Content-Range without body",
+        tags: ["rows"],
+      },
+    },
+    asyncHandler(async (req, reply) => handleGetList(server, req, reply, true))
+  );
+
+  // ── POST — legacy (C-02 sonraki adım) ─────────────────────────────────────
   server.post(
     "/:database/:table",
     {
@@ -200,7 +281,7 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // PATCH /db/:database/:table — toplu güncelle
+  // ── PATCH — legacy (C-03 sonraki adım) ────────────────────────────────────
   server.patch(
     "/:database/:table",
     {
@@ -225,12 +306,13 @@ export async function rowsRoute(server: FastifyInstance) {
       const whereList = Array.isArray(query.where)
         ? query.where
         : query.where
-        ? [query.where]
-        : [];
+          ? [query.where]
+          : [];
 
       if (whereList.length === 0) {
         return reply.status(400).send({
-          error: "where filter required for batch update to prevent accidental full-table update",
+          error:
+            "where filter required for batch update to prevent accidental full-table update",
         });
       }
 
@@ -250,7 +332,10 @@ export async function rowsRoute(server: FastifyInstance) {
       `;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const updated = await sql.unsafe(updateSql, [...whereValues, ...Object.values(updates)] as any[]);
+      const updated = await sql.unsafe(updateSql, [
+        ...whereValues,
+        ...Object.values(updates),
+      ] as any[]);
 
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "rows", table, "*")
@@ -260,7 +345,7 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // DELETE /db/:database/:table — toplu sil
+  // ── DELETE batch — legacy (C-04 sonraki adım) ─────────────────────────────
   server.delete(
     "/:database/:table",
     {
@@ -279,8 +364,8 @@ export async function rowsRoute(server: FastifyInstance) {
       const whereList = Array.isArray(query.where)
         ? query.where
         : query.where
-        ? [query.where]
-        : [];
+          ? [query.where]
+          : [];
 
       if (whereList.length === 0) {
         return reply.status(400).send({
@@ -292,7 +377,10 @@ export async function rowsRoute(server: FastifyInstance) {
 
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const deleted = await sql.unsafe(`DELETE FROM "${table}" ${whereSql} RETURNING *`, whereValues as any[]);
+      const deleted = await sql.unsafe(
+        `DELETE FROM "${table}" ${whereSql} RETURNING *`,
+        whereValues as any[]
+      );
 
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "rows", table, "*")
@@ -302,18 +390,22 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // GET /db/:database/:table/:id
+  // GET /:id — legacy (C-06 sonraki adım: select=)
   server.get(
     "/:database/:table/:id",
     {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
-        description: "Get a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
+        description:
+          "Get a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
         querystring: {
           type: "object",
           properties: {
-            pk: { type: "string", description: "Primary key column name (default: id)" },
+            pk: {
+              type: "string",
+              description: "Primary key column name (default: id)",
+            },
           },
         },
       },
@@ -337,18 +429,22 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // PUT /db/:database/:table/:id
+  // PUT /:id — legacy (C-05 sonraki adım)
   server.put(
     "/:database/:table/:id",
     {
       preHandler: [server.authenticateAny, scopeGuard("write")],
       schema: {
-        description: "Replace a row by primary key. Use ?pk=column to specify a non-id primary key column.",
+        description:
+          "Replace a row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
         querystring: {
           type: "object",
           properties: {
-            pk: { type: "string", description: "Primary key column name (default: id)" },
+            pk: {
+              type: "string",
+              description: "Primary key column name (default: id)",
+            },
           },
         },
       },
@@ -386,18 +482,22 @@ export async function rowsRoute(server: FastifyInstance) {
     })
   );
 
-  // DELETE /db/:database/:table/:id
+  // DELETE /:id — legacy
   server.delete(
     "/:database/:table/:id",
     {
       preHandler: [server.authenticateAny, scopeGuard("delete")],
       schema: {
-        description: "Delete a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
+        description:
+          "Delete a single row by primary key. Use ?pk=column to specify a non-id primary key column.",
         tags: ["rows"],
         querystring: {
           type: "object",
           properties: {
-            pk: { type: "string", description: "Primary key column name (default: id)" },
+            pk: {
+              type: "string",
+              description: "Primary key column name (default: id)",
+            },
           },
         },
       },

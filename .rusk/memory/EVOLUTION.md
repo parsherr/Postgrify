@@ -8,3 +8,8 @@
 ## 2026-08-04 — /loop cron 120m geçersiz
 **Hata:** `*/120 * * * *` geçerli bir cron ifadesi değil (dakika alanı 0-59).
 **Ders:** 120 dakika = 2 saat = `0 */2 * * *`. CronCreate'e vermeden önce dönüşümü doğrula.
+
+## 2026-08-16 — Endpoint audit kapsam tuzağı
+**Risk:** `should-corrected` (20) + `missing` (97) = 117 madde; Storage/MFA/SSO tek PR'ı şişirir.
+**Ders:** ADR-010 ile Storage/MFA/SSO scope-out; önce Prefer+rows+auth snake_case. Memory'de PLAN/ACTIVE güncelle, kör implementasyona girme.
+**Kaynak:** geliştici katkı çağrısı + kullanıcı PR açacak.

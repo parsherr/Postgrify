@@ -19,3 +19,23 @@
 ## ADR-005: Scope-based Authorization
 **Karar:** JWT claim'de scope dizisi: read/write/delete/schema/query
 **Neden:** Tek DB içinde okuma-yazma ayrımı; frontend-only client'lara write vermemek mümkün.
+
+## ADR-006: PUT /:id — upsert + Prefer (2026-08-16)
+**Karar:** Path `/:id` Postgrify DX olarak korunur. PUT satır yoksa INSERT (upsert); `Prefer: return` desteklenir. Full-table PostgREST `PUT ?pk=eq` ayrı shorthand filtrelerle gelir.
+**Neden:** Breaking path kaldırmak GUI/SDK'yı gereksiz kırar; semantik PostgREST'e yaklaşır.
+
+## ADR-007: List response = array + Content-Range (2026-08-16)
+**Karar:** `GET /db/:db/:table` `{rows,total,limit,offset}` wrapper'ı kaldırılır; body JSON array, sayım `Content-Range` + `Prefer: count=*`.
+**Neden:** PostgREST uyumu; gereksiz COUNT maliyeti kalkar. GUI `Prefer: count=exact` gönderir.
+
+## ADR-008: Auth snake_case + dual request accept (2026-08-16)
+**Karar:** Auth response alanları GoTrue snake_case. Request body hem `refresh_token` hem `refreshToken` kabul.
+**Neden:** SDK/Supabase client uyumu; mevcut client'lara yumuşak geçiş.
+
+## ADR-009: Batch mutate filter zorunlu kalır (2026-08-16)
+**Karar:** PATCH/DELETE without `where` → 400. Response'a `X-Postgrify-Require-Filter: true`.
+**Neden:** PostgREST full-table mutate'e izin verir; Postgrify güvenlik tercihi bilinçli sapma.
+
+## ADR-010: Scope-out Storage/MFA/SSO (2026-08-16)
+**Karar:** Bu PR'da Storage, MFA, OTP, PKCE, SSO yok; ayrı epic.
+**Neden:** Reviewable diff; önce query+auth sözleşmesi.

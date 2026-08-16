@@ -113,7 +113,9 @@ describe("GET /db/:database/:table", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(Array.isArray(body.rows)).toBe(true);
+    // C-01: body is a JSON array (PostgREST); Content-Range carries paging
+    expect(Array.isArray(body)).toBe(true);
+    expect(res.headers["content-range"]).toBeDefined();
   });
 
   it("token olmadan 401 döner", async () => {

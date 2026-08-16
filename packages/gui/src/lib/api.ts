@@ -77,13 +77,34 @@ async function doRefresh(): Promise<string | null> {
   }
 }
 
+export interface RequestOptions {
+  /** Extra request headers (e.g. Prefer: count=exact) */
+  headers?: Record<string, string>;
+  /** When true, return { data, headers } instead of parsed JSON only */
+  withHeaders?: boolean;
+}
+
+export interface ResponseWithHeaders<T> {
+  data: T;
+  headers: Headers;
+}
+
+async function parseBody<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as unknown as T;
+  return res.json() as Promise<T>;
+}
+
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown
-): Promise<T> {
+  body?: unknown,
+  options?: RequestOptions
+): Promise<T | ResponseWithHeaders<T>> {
   const token = getToken();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...options?.headers,
+  };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -93,24 +114,24 @@ async function request<T>(
   });
 
   if (res.status === 401) {
-    // Sessiz yenileme: eş zamanlı 401'ler tek promise paylaşır
     if (!refreshPromise) {
-      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
+      refreshPromise = doRefresh().finally(() => {
+        refreshPromise = null;
+      });
     }
 
     const newToken = await refreshPromise;
 
     if (!newToken) {
-      // Refresh başarısız — login'e yönlendir
       localStorage.removeItem(REFRESH_TOKEN_KEY);
       window.location.href = "/login";
       throw new Error("Unauthorized");
     }
 
-    // Orijinal isteği yeni token ile tekrarla
     const retryHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${newToken}`,
+      ...options?.headers,
     };
     const retryRes = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -129,12 +150,15 @@ async function request<T>(
       try {
         const err = (await retryRes.json()) as { error?: string; message?: string };
         message = err.error ?? err.message ?? message;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       throw new Error(message);
     }
 
-    if (retryRes.status === 204) return undefined as unknown as T;
-    return retryRes.json() as Promise<T>;
+    const data = await parseBody<T>(retryRes);
+    if (options?.withHeaders) return { data, headers: retryRes.headers };
+    return data;
   }
 
   if (!res.ok) {
@@ -142,20 +166,28 @@ async function request<T>(
     try {
       const err = (await res.json()) as { error?: string; message?: string };
       message = err.error ?? err.message ?? message;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new Error(message);
   }
 
-  if (res.status === 204) return undefined as unknown as T;
-  return res.json() as Promise<T>;
+  const data = await parseBody<T>(res);
+  if (options?.withHeaders) return { data, headers: res.headers };
+  return data;
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
-  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
-  delete: <T = void>(path: string) => request<T>("DELETE", path),
+  get: <T>(path: string, options?: RequestOptions) =>
+    request<T>("GET", path, undefined, options) as Promise<T>,
+  getWithHeaders: <T>(path: string, options?: RequestOptions) =>
+    request<T>("GET", path, undefined, { ...options, withHeaders: true }) as Promise<
+      ResponseWithHeaders<T>
+    >,
+  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body) as Promise<T>,
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body) as Promise<T>,
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body) as Promise<T>,
+  delete: <T = void>(path: string) => request<T>("DELETE", path) as Promise<T>,
 };
 
 // ── Setup API (auth gerektirmez, doğrudan fetch) ──────────────────────────────
