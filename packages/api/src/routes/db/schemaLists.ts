@@ -1,9 +1,10 @@
 /**
- * Schema introspection lists (E-64 / E-68 / E-73 / E-79):
- *   GET /db/:database/views
- *   GET /db/:database/functions
- *   GET /db/:database/indexes
- *   GET /db/:database/schemas
+ * Schema introspection lists (E-64 / E-68 / E-73 / E-79 / E-80):
+ *   GET  /db/:database/views
+ *   GET  /db/:database/functions
+ *   GET  /db/:database/indexes
+ *   GET  /db/:database/schemas
+ *   POST /db/:database/schemas
  *
  * Auth: schema scope (admin bypasses). Views/functions/indexes are public-schema
  * only (same as tables). Schemas lists all non-system namespaces.
@@ -12,6 +13,7 @@
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
+import { assertIdentifier } from "../../utils/identifier.js";
 import { TTL } from "../../services/cacheService.js";
 
 export async function schemaListsRoute(server: FastifyInstance) {
@@ -50,6 +52,66 @@ export async function schemaListsRoute(server: FastifyInstance) {
 
       await server.cache.set(cacheKey, JSON.stringify(schemas), TTL.SCHEMA);
       return reply.send(schemas);
+    })
+  );
+
+  // ── E-80 POST /schemas ────────────────────────────────────────────────────
+  server.post(
+    "/:database/schemas",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description:
+          "Create a PostgreSQL schema (E-80). Requires schema scope. " +
+          "Name must be a valid identifier (not pg_* / reserved).",
+        tags: ["schema"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string" },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const { name } = req.body as { name: string };
+
+      try {
+        assertIdentifier(name, "schema");
+      } catch (e) {
+        return reply.status(400).send({
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      const sql = server.poolManager.getPool(dbName);
+      try {
+        await sql.unsafe(`CREATE SCHEMA "${name}"`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/already exists/i.test(msg)) {
+          return reply.status(409).send({
+            error: "Schema already exists",
+            name,
+          });
+        }
+        throw e;
+      }
+
+      await server.cache.del(server.cache.buildKey(dbName, "schemas"));
+
+      const [ownerRow] = await sql`SELECT current_user AS owner`;
+      return reply.status(201).send({
+        name,
+        created: true,
+        owner: (ownerRow?.owner as string) ?? null,
+      });
     })
   );
 

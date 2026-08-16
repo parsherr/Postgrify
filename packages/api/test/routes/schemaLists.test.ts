@@ -1,8 +1,8 @@
 /**
- * E-64 / E-68 / E-73 / E-79 schema list route tests.
+ * E-64 / E-68 / E-73 / E-79 / E-80 schema list route tests.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { JwtService } from "../../src/services/jwtService.js";
@@ -47,18 +47,26 @@ const MOCK_INDEXES = [
   },
 ];
 
+const { mockUnsafe, mockCacheDel } = vi.hoisted(() => ({
+  mockUnsafe: vi.fn().mockResolvedValue([]),
+  mockCacheDel: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("postgres", () => {
   const sqlFn = vi.fn((strings: TemplateStringsArray) => {
     const q = strings?.join?.(" ") ?? strings?.[0] ?? "";
     if (q.includes("pg_namespace") && q.includes("pg_get_userbyid")) {
       return Promise.resolve(MOCK_SCHEMAS);
     }
+    if (q.includes("current_user")) {
+      return Promise.resolve([{ owner: "postgres" }]);
+    }
     if (q.includes("pg_get_viewdef")) return Promise.resolve(MOCK_VIEWS);
     if (q.includes("pg_get_function_result")) return Promise.resolve(MOCK_FUNCS);
     if (q.includes("pg_index")) return Promise.resolve(MOCK_INDEXES);
     return Promise.resolve([]);
   }) as unknown as Record<string, unknown>;
-  sqlFn.unsafe = vi.fn().mockResolvedValue([]);
+  sqlFn.unsafe = mockUnsafe;
   sqlFn.end = vi.fn().mockResolvedValue(undefined);
   return { default: vi.fn(() => sqlFn) };
 });
@@ -69,7 +77,7 @@ vi.mock("../../src/services/cacheService.js", () => ({
     disconnect: vi.fn().mockResolvedValue(undefined),
     get: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue(undefined),
-    del: vi.fn().mockResolvedValue(undefined),
+    del: mockCacheDel,
     invalidatePattern: vi.fn().mockResolvedValue(undefined),
     buildKey: (...p: string[]) => `postgrify:${p.join(":")}`,
   })),
@@ -136,6 +144,88 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.close();
   vi.unstubAllEnvs();
+});
+
+beforeEach(() => {
+  mockUnsafe.mockReset();
+  mockUnsafe.mockResolvedValue([]);
+  mockCacheDel.mockClear();
+});
+
+describe("POST /db/:database/schemas (E-80)", () => {
+  it("schema token creates schema → 201", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: { name: "app_api" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({
+      name: "app_api",
+      created: true,
+      owner: "postgres",
+    });
+    expect(mockUnsafe).toHaveBeenCalledWith('CREATE SCHEMA "app_api"');
+    expect(mockCacheDel).toHaveBeenCalledWith("postgrify:project1:schemas");
+  });
+
+  it("admin token allowed", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { name: "admin_schema" },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("duplicate name → 409", async () => {
+    mockUnsafe.mockRejectedValueOnce(
+      new Error('schema "app_api" already exists')
+    );
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: { name: "app_api" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({
+      error: "Schema already exists",
+      name: "app_api",
+    });
+  });
+
+  it("invalid identifier → 400", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+      payload: { name: "pg_toast" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockUnsafe).not.toHaveBeenCalled();
+  });
+
+  it("read-only DB token denied", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${readToken}` },
+      payload: { name: "nope" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("no token → 401", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/db/project1/schemas",
+      payload: { name: "nope" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
 });
 
 describe("GET /db/:database/schemas (E-79)", () => {
