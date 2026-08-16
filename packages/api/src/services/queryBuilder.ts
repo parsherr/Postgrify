@@ -108,7 +108,7 @@ const ALLOWED_CASTS = new Set([
 /**
  * Split optional ::type suffix. Type must be in ALLOWED_CASTS.
  */
-function splitCast(expr: string): { base: string; cast: string | null } {
+export function splitCast(expr: string): { base: string; cast: string | null } {
   const m = expr.match(/^(.*)::([a-zA-Z_][a-zA-Z0-9_]*)$/);
   if (!m) return { base: expr, cast: null };
   const cast = m[2].toLowerCase();
@@ -350,23 +350,8 @@ export function parseWhereConditions(
   };
 }
 
-export function parseSelectColumns(select?: string): string {
-  if (!select || select === "*") return "*";
-
-  const columns = select.split(",").map((c) => c.trim()).filter(Boolean);
-  const parts: string[] = [];
-  for (const col of columns) {
-    try {
-      parts.push(toColumnSql(col));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Preserve cast validation wording (E-18); otherwise generic select error.
-      if (/Invalid cast/i.test(msg)) throw e;
-      throw new Error(`Invalid column name in select: ${col}`);
-    }
-  }
-  return parts.join(", ");
-}
+export { parseSelect, parseSelectColumns } from "./querySelect.js";
+export type { ParsedSelect } from "./querySelect.js";
 
 export function parseOrderBy(order?: string, sort?: string): string {
   if (!order && !sort) return "";

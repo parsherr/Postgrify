@@ -21,7 +21,7 @@ import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
 import {
   parseWhereConditions,
-  parseSelectColumns,
+  parseSelect,
   parseOrderBy,
 } from "../../services/queryBuilder.js";
 import { TTL } from "../../services/cacheService.js";
@@ -126,12 +126,15 @@ async function handleGetList(
   );
 
   let cols: string;
+  let groupBySql: string;
   let whereSql: string;
   let whereValues: unknown[];
   let orderSql: string;
 
   try {
-    cols = parseSelectColumns(query.select);
+    const selectParsed = parseSelect(query.select);
+    cols = selectParsed.sql;
+    groupBySql = selectParsed.groupBySql;
     const parsed = parseWhereConditions(whereList, orList);
     whereSql = parsed.sql;
     whereValues = parsed.values;
@@ -177,6 +180,7 @@ async function handleGetList(
       const fullSql = `
         SELECT ${cols} FROM "${table}"
         ${whereSql}
+        ${groupBySql}
         ${orderSql}
         LIMIT $${whereValues.length + 1}
         OFFSET $${whereValues.length + 2}
@@ -644,8 +648,11 @@ export async function rowsRoute(server: FastifyInstance) {
       const pkCol = resolvePkColumn(pk);
 
       let cols: string;
+      let groupBySql: string;
       try {
-        cols = parseSelectColumns(select);
+        const parsed = parseSelect(select);
+        cols = parsed.sql;
+        groupBySql = parsed.groupBySql;
       } catch (e) {
         return reply.status(400).send({
           error: "Invalid select",
@@ -656,7 +663,7 @@ export async function rowsRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(dbName);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const [row] = await sql.unsafe(
-        `SELECT ${cols} FROM "${table}" WHERE "${pkCol}" = $1 LIMIT 1`,
+        `SELECT ${cols} FROM "${table}" WHERE "${pkCol}" = $1 ${groupBySql} LIMIT 1`,
         [id] as any[]
       );
 
