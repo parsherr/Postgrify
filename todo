@@ -1,0 +1,19 @@
+- program tamamen ingilizceye cevirilmeli (multi language degil, single language english)
+- supabase RLS, RLS Policies ve Rules katmaninin aynisini eklememiz lazim
+
+
+
+Supabasede olen diger kritik guvenlik katmanlari:
+- RLS (Row Level Security) — Hangi kullanıcının hangi satırlara SELECT / INSERT / UPDATE / DELETE yapabileceğini belirler.
+- RLS Policies — RLS’in içindeki kurallar; örn. auth.uid() = user_id.
+- Postgres Roles & Grants — anon, authenticated, service_role gibi roller ve tablo/schema/function üzerindeki GRANT / REVOKE yetkileri.
+- Database Constraints — PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, NOT NULL gibi veri bütünlüğü kuralları.
+- Security Definer / Invoker Functions — Fonksiyonların hangi yetkiyle çalışacağını kontrol eder; özellikle SECURITY DEFINER dikkatli kullanılmalı.
+- Schema / Table Permissions — Kullanıcının belirli schema veya tablolara erişimini kısıtlama.
+- JWT Claims — Token içine role, user ID veya custom claim koyup RLS policy'lerinde kullanma.
+- API Exposure / Schema Exposure — PostgREST üzerinden hangi schema'ların API'ye açılacağını kontrol etme.
+- Database Functions & RPC Permissions — RPC olarak çağrılabilen fonksiyonları rollerle sınırlandırma.
+- Secrets / Environment Variables — API key, service key ve diğer secret'ların client'a sızmasını önleme.
+- Network / Infrastructure Controls — IP kısıtlamaları, SSL/TLS, connection security gibi altyapı seviyeleri.
+- Rate Limiting / Abuse Protection — Özellikle Auth, API ve Edge Functions tarafında kötüye kullanımın sınırlandırılması.
+- Audit / Logging — Kim ne yaptı, hangi API/function/database işlemi gerçekleşti gibi aktivitelerin izlenmesi.

@@ -184,6 +184,12 @@ For all variables: [`exampleenv.md`](exampleenv.md)
 
 ---
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code standards, and how to submit a pull request.
+
+---
+
 ## License
 
 MIT
