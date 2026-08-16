@@ -25,15 +25,19 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 
-export function getGoogleAuthUrl(cfg: OAuthProviderConfig, state: string): string {
+export function getGoogleAuthUrl(
+  cfg: OAuthProviderConfig,
+  state: string,
+  scopes?: string
+): string {
   const params = new URLSearchParams({
-    client_id:     cfg.clientId,
-    redirect_uri:  cfg.redirectUri,
+    client_id: cfg.clientId,
+    redirect_uri: cfg.redirectUri,
     response_type: "code",
-    scope:         "openid email profile",
+    scope: scopes?.trim() || "openid email profile",
     state,
-    access_type:   "offline",
-    prompt:        "consent",
+    access_type: "offline",
+    prompt: "consent",
   });
   return `${GOOGLE_AUTH_URL}?${params}`;
 }
@@ -90,11 +94,15 @@ const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USERINFO_URL = "https://api.github.com/user";
 const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
 
-export function getGitHubAuthUrl(cfg: OAuthProviderConfig, state: string): string {
+export function getGitHubAuthUrl(
+  cfg: OAuthProviderConfig,
+  state: string,
+  scopes?: string
+): string {
   const params = new URLSearchParams({
-    client_id:    cfg.clientId,
+    client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
-    scope:        "read:user user:email",
+    scope: scopes?.trim() || "read:user user:email",
     state,
   });
   return `${GITHUB_AUTH_URL}?${params}`;
@@ -167,9 +175,14 @@ export async function exchangeGitHubCode(
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-export function getAuthUrl(provider: string, cfg: OAuthProviderConfig, state: string): string {
-  if (provider === "google") return getGoogleAuthUrl(cfg, state);
-  if (provider === "github") return getGitHubAuthUrl(cfg, state);
+export function getAuthUrl(
+  provider: string,
+  cfg: OAuthProviderConfig,
+  state: string,
+  scopes?: string
+): string {
+  if (provider === "google") return getGoogleAuthUrl(cfg, state, scopes);
+  if (provider === "github") return getGitHubAuthUrl(cfg, state, scopes);
   throw new Error(`Unknown OAuth provider: ${provider}`);
 }
 

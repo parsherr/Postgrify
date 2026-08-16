@@ -33,6 +33,8 @@ interface OAuthState {
   database: string;
   provider: string;
   exp: number;
+  /** C-14: same-origin post-login URL (validated) */
+  redirectTo?: string;
 }
 
 async function stateSet(
@@ -113,13 +115,14 @@ export async function authOAuthRoute(server: FastifyInstance) {
     }
   }
 
-  // ── GET /:database/auth/oauth/:provider ─────────────────────────────────
+  // ── GET /:database/auth/oauth/:provider (C-14 redirect_to + scopes) ─────
   server.get(
     "/:database/auth/oauth/:provider",
     {
       config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
       schema: {
-        description: "Initiate OAuth flow. Redirects to provider.",
+        description:
+          "Initiate OAuth flow (C-14). Optional redirect_to (same-origin) and scopes.",
         tags: ["db-auth"],
         security: [],
         params: {
@@ -129,10 +132,21 @@ export async function authOAuthRoute(server: FastifyInstance) {
             provider: { type: "string", enum: ["google", "github"] },
           },
         },
+        querystring: {
+          type: "object",
+          properties: {
+            redirect_to: { type: "string" },
+            scopes: { type: "string", description: "Space-separated OAuth scopes" },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
       const { database, provider } = req.params as { database: string; provider: string };
+      const { redirect_to: redirectTo, scopes } = req.query as {
+        redirect_to?: string;
+        scopes?: string;
+      };
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
@@ -145,7 +159,6 @@ export async function authOAuthRoute(server: FastifyInstance) {
         });
       }
 
-      // Provider config'i DB'den oku
       const [providerRow] = await sql`
         SELECT client_id, client_secret, redirect_uri
         FROM _postgrify_auth.oauth_providers
@@ -156,17 +169,25 @@ export async function authOAuthRoute(server: FastifyInstance) {
         return reply.status(404).send({ error: `OAuth provider '${provider}' not configured` });
       }
 
-      // CSRF state üret
       const state = crypto.randomBytes(16).toString("hex");
       await stateSet(redisClient, memStateStore, state, {
-        database, provider, exp: Date.now() + STATE_TTL_SECONDS * 1000,
+        database,
+        provider,
+        exp: Date.now() + STATE_TTL_SECONDS * 1000,
+        // Always run through same-origin guard (evil → APP_URL/auth/callback)
+        redirectTo: redirectTo ? safeAppRedirect(redirectTo) : undefined,
       });
 
-      const url = getAuthUrl(provider, {
-        clientId:     providerRow.client_id as string,
-        clientSecret: providerRow.client_secret as string,
-        redirectUri:  providerRow.redirect_uri as string,
-      }, state);
+      const url = getAuthUrl(
+        provider,
+        {
+          clientId: providerRow.client_id as string,
+          clientSecret: providerRow.client_secret as string,
+          redirectUri: providerRow.redirect_uri as string,
+        },
+        state,
+        scopes
+      );
 
       return reply.redirect(url);
     })
@@ -200,6 +221,7 @@ export async function authOAuthRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid or expired OAuth state" });
       }
       await stateDel(redisClient, memStateStore, state);
+      const pendingRedirect = stateData.redirectTo;
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
@@ -295,14 +317,16 @@ export async function authOAuthRoute(server: FastifyInstance) {
         }
       );
 
-      // signup_redirect_url varsa oraya yönlendir (C-13 GoTrue fragment).
-      const [redirectSetting] = await sql`
-        SELECT value FROM _postgrify_auth.auth_settings
-        WHERE key = 'signup_redirect_url'
-      `;
-
-      const rawRedirect =
-        (redirectSetting?.value as string) || `${config.APP_URL}/auth/callback`;
+      // C-14: prefer redirect_to from initiate state; else signup_redirect_url setting
+      let rawRedirect = pendingRedirect;
+      if (!rawRedirect) {
+        const [redirectSetting] = await sql`
+          SELECT value FROM _postgrify_auth.auth_settings
+          WHERE key = 'signup_redirect_url'
+        `;
+        rawRedirect =
+          (redirectSetting?.value as string) || `${config.APP_URL}/auth/callback`;
+      }
       const safeBase = safeAppRedirect(rawRedirect);
       const expiresIn = expirySeconds(config.ACCESS_TOKEN_EXPIRY);
       const fragment = sessionFragment({

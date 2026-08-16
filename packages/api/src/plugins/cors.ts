@@ -24,5 +24,8 @@ export const corsPlugin = fp(async (server: FastifyInstance) => {
       "Range-Unit",
     ],
     credentials: true,
+    // E-02: let OPTIONS reach the table handler (Allow header), not only CORS 204.
+    strictPreflight: false,
+    preflightContinue: true,
   });
 });
