@@ -111,8 +111,16 @@ const MOCK_USERS = [
 ];
 
 describe("GET /:database/auth/users", () => {
+  function mockListQueries(users = MOCK_USERS, total = users.length) {
+    sqlFnRef.mockImplementation(async (strings: TemplateStringsArray) => {
+      const q = strings.join(" ");
+      if (q.includes("count(*)")) return [{ total }];
+      return users;
+    });
+  }
+
   it("Admin token → 200, users listesi döner", async () => {
-    sqlFnRef.mockResolvedValue(MOCK_USERS);
+    mockListQueries();
 
     const res = await server.inject({
       method: "GET",
@@ -124,10 +132,34 @@ describe("GET /:database/auth/users", () => {
     const body = res.json();
     expect(body.users).toHaveLength(2);
     expect(body.total).toBe(2);
+    expect(body.page).toBe(1);
+    expect(body.per_page).toBe(50);
+    expect(body.aud).toBe("authenticated");
+    expect(body.last_page).toBe(1);
+    expect(body.next_page).toBeNull();
+  });
+
+  it("page/per_page pagination (C-17)", async () => {
+    mockListQueries([MOCK_USERS[0]], 3);
+
+    const res = await server.inject({
+      method: "GET",
+      url: "/testdb/auth/users?page=1&per_page=1",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.users).toHaveLength(1);
+    expect(body.total).toBe(3);
+    expect(body.page).toBe(1);
+    expect(body.per_page).toBe(1);
+    expect(body.next_page).toBe(2);
+    expect(body.last_page).toBe(3);
   });
 
   it("read scope DB token → 200", async () => {
-    sqlFnRef.mockResolvedValue(MOCK_USERS);
+    mockListQueries();
 
     const res = await server.inject({
       method: "GET",
@@ -226,6 +258,32 @@ describe("PATCH /:database/auth/users/:id", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain("No fields");
+  });
+
+  it("email_confirm + ban_duration (C-18)", async () => {
+    sqlFnRef.unsafe = vi.fn().mockResolvedValue([{
+      id: "uuid-1",
+      email: "a@ex.com",
+      role: "viewer",
+      is_active: true,
+      email_verified: true,
+      locked_until: "2099-01-01T00:00:00.000Z",
+      created_at: "2024-01-01",
+      last_login: null,
+      metadata: {},
+    }]);
+
+    const res = await server.inject({
+      method: "PATCH",
+      url: "/testdb/auth/users/uuid-1",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { email_confirm: true, ban_duration: "24h" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const sql = (sqlFnRef.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(sql).toContain("email_verified = TRUE");
+    expect(sql).toContain("locked_until");
   });
 });
 

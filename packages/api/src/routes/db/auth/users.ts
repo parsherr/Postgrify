@@ -68,34 +68,92 @@ function authGuard(server: FastifyInstance, scope: Parameters<typeof scopeGuard>
 
 export async function authUsersRoute(server: FastifyInstance) {
   const jwtService = new JwtService(() => config.JWT_SECRET);
-  // ── GET /:database/auth/users ──────────────────────────────────────────────
+  // ── GET /:database/auth/users (C-17 pagination + filters) ─────────────────
   server.get(
     "/:database/auth/users",
     {
       preHandler: [...authGuard(server, "read")],
       schema: {
-        description: "List all auth users for this database (password_hash excluded)",
+        description:
+          "List auth users (C-17). Supports page/per_page and email/role/is_active filters.",
         tags: ["db-auth"],
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "integer", minimum: 1, default: 1 },
+            per_page: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            email: { type: "string" },
+            role: { type: "string", enum: ["viewer", "editor", "admin"] },
+            is_active: { type: "boolean" },
+            created_after: { type: "string", format: "date-time" },
+            created_before: { type: "string", format: "date-time" },
+          },
+        },
       },
     },
     asyncHandler(async (req, reply) => {
       const sql = server.poolManager.getPool(req.dbName!);
       await ensureAuthSchema(sql);
 
+      const q = req.query as {
+        page?: number;
+        per_page?: number;
+        email?: string;
+        role?: string;
+        is_active?: boolean;
+        created_after?: string;
+        created_before?: string;
+      };
+      const page = Math.max(1, q.page ?? 1);
+      const perPage = Math.min(100, Math.max(1, q.per_page ?? 50));
+      const offset = (page - 1) * perPage;
+
+      let where = sql`TRUE`;
+      if (q.email) {
+        where = sql`${where} AND email ILIKE ${"%" + q.email + "%"}`;
+      }
+      if (q.role) {
+        where = sql`${where} AND role = ${q.role}`;
+      }
+      if (q.is_active !== undefined) {
+        where = sql`${where} AND is_active = ${q.is_active}`;
+      }
+      if (q.created_after) {
+        where = sql`${where} AND created_at >= ${q.created_after}`;
+      }
+      if (q.created_before) {
+        where = sql`${where} AND created_at <= ${q.created_before}`;
+      }
+
+      const [countRow] = await sql`
+        SELECT count(*)::int AS total
+        FROM _postgrify_auth.users
+        WHERE ${where}
+      `;
+      const total = Number(countRow?.total ?? 0);
+      const lastPage = Math.max(1, Math.ceil(total / perPage));
+
       const users = await sql`
-        SELECT id, email, role, is_active, created_at, last_login,
-               -- Güvenlik: reset/magic token hash'leri metadata'dan çıkarıyoruz.
-               -- Bu alanlar DB dump veya admin API üzerinden sızdırılmamalı.
-               -- Metadata array veya scalar olabilir (bozuk veri durumu) — önce object'e normalize et.
+        SELECT id, email, role, is_active, created_at, last_login, email_verified, full_name,
                ((CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
                  - 'reset_token' - 'reset_token_exp'
-                 - 'magic_token' - 'magic_token_exp') AS metadata
+                 - 'magic_token' - 'magic_token_exp'
+                 - 'verification_token' - 'verification_exp') AS metadata
         FROM _postgrify_auth.users
+        WHERE ${where}
         ORDER BY created_at ASC
+        LIMIT ${perPage} OFFSET ${offset}
       `;
 
-      // SQL katmanında JSONB - ile filtrelendi; sanitizeUser JS katmanında ek güvenlik sağlar
-      return reply.send({ users: users.map((u) => sanitizeUser(u as Record<string, unknown>)), total: users.length });
+      return reply.send({
+        users: users.map((u) => sanitizeUser(u as Record<string, unknown>)),
+        aud: "authenticated",
+        total,
+        page,
+        per_page: perPage,
+        next_page: page < lastPage ? page + 1 : null,
+        last_page: lastPage,
+      });
     })
   );
 
@@ -146,20 +204,28 @@ export async function authUsersRoute(server: FastifyInstance) {
     })
   );
 
-  // ── PATCH /:database/auth/users/:id ───────────────────────────────────────
+  // ── PATCH /:database/auth/users/:id (C-18) ────────────────────────────────
   server.patch(
     "/:database/auth/users/:id",
     {
       preHandler: [...authGuard(server, "write")],
       schema: {
-        description: "Update role or active status of an auth user",
+        description:
+          "Update auth user (C-18): email/role/is_active, email_confirm, ban_duration, metadata, password",
         tags: ["db-auth"],
         body: {
           type: "object",
           properties: {
-            email:     { type: "string", format: "email" },
-            role:      { type: "string", enum: ["viewer", "editor", "admin"] },
+            email: { type: "string", format: "email" },
+            role: { type: "string", enum: ["viewer", "editor", "admin"] },
             is_active: { type: "boolean" },
+            full_name: { type: "string" },
+            email_confirm: { type: "boolean" },
+            ban_duration: { type: "string", description: 'e.g. "24h", "72h", or "none" to unban' },
+            password: { type: "string", minLength: 8 },
+            user_metadata: { type: "object", additionalProperties: true },
+            app_metadata: { type: "object", additionalProperties: true },
+            metadata: { type: "object", additionalProperties: true },
           },
         },
       },
@@ -170,6 +236,13 @@ export async function authUsersRoute(server: FastifyInstance) {
         email?: string;
         role?: string;
         is_active?: boolean;
+        full_name?: string;
+        email_confirm?: boolean;
+        ban_duration?: string;
+        password?: string;
+        user_metadata?: Record<string, unknown>;
+        app_metadata?: Record<string, unknown>;
+        metadata?: Record<string, unknown>;
       };
 
       if (Object.keys(body).length === 0) {
@@ -179,14 +252,13 @@ export async function authUsersRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(req.dbName!);
       await ensureAuthSchema(sql);
 
-      // Dinamik SET kısmını güvenli şekilde oluştur
       const setClauses: string[] = [];
       const values: unknown[] = [];
       let paramIndex = 1;
 
       if (body.email !== undefined) {
         setClauses.push(`email = $${paramIndex++}`);
-        values.push(body.email);
+        values.push(body.email.toLowerCase());
       }
       if (body.role !== undefined) {
         setClauses.push(`role = $${paramIndex++}`);
@@ -196,6 +268,58 @@ export async function authUsersRoute(server: FastifyInstance) {
         setClauses.push(`is_active = $${paramIndex++}`);
         values.push(body.is_active);
       }
+      if (body.full_name !== undefined) {
+        setClauses.push(`full_name = $${paramIndex++}`);
+        values.push(body.full_name);
+      }
+      if (body.email_confirm === true) {
+        setClauses.push(`email_verified = TRUE`);
+      }
+      if (body.ban_duration !== undefined) {
+        if (body.ban_duration === "none" || body.ban_duration === "0") {
+          setClauses.push(`locked_until = NULL`);
+        } else {
+          const match = body.ban_duration.match(/^(\d+)([smhd])$/);
+          if (!match) {
+            return reply.status(400).send({
+              error: "Invalid ban_duration (use e.g. 24h, 72h, or none)",
+            });
+          }
+          const n = parseInt(match[1], 10);
+          const mult: Record<string, number> = {
+            s: 1000,
+            m: 60_000,
+            h: 3_600_000,
+            d: 86_400_000,
+          };
+          const until = new Date(Date.now() + n * (mult[match[2]] ?? 3_600_000)).toISOString();
+          setClauses.push(`locked_until = $${paramIndex++}`);
+          values.push(until);
+        }
+      }
+      if (body.password !== undefined) {
+        const passwordHash = await hashPassword(body.password);
+        setClauses.push(`password_hash = $${paramIndex++}`);
+        values.push(passwordHash);
+      }
+
+      // metadata merges
+      const metaUpdates: Record<string, unknown> = {};
+      if (body.user_metadata) Object.assign(metaUpdates, body.user_metadata);
+      if (body.metadata) Object.assign(metaUpdates, body.metadata);
+      if (body.app_metadata) {
+        metaUpdates.app_metadata = body.app_metadata;
+      }
+      if (Object.keys(metaUpdates).length > 0) {
+        setClauses.push(
+          `metadata = COALESCE(metadata, '{}'::jsonb) || $${paramIndex++}::jsonb`
+        );
+        values.push(JSON.stringify(metaUpdates));
+      }
+
+      if (setClauses.length === 0) {
+        return reply.status(400).send({ error: "No fields to update" });
+      }
 
       values.push(id);
       const setStr = setClauses.join(", ");
@@ -204,9 +328,10 @@ export async function authUsersRoute(server: FastifyInstance) {
         `UPDATE _postgrify_auth.users
          SET ${setStr}
          WHERE id = $${paramIndex}
-         RETURNING id, email, role, is_active, created_at, last_login,
+         RETURNING id, email, role, is_active, created_at, last_login, email_verified, full_name, locked_until,
                    (metadata - 'reset_token' - 'reset_token_exp'
-                             - 'magic_token' - 'magic_token_exp') AS metadata`,
+                             - 'magic_token' - 'magic_token_exp'
+                             - 'verification_token' - 'verification_exp') AS metadata`,
         values as Parameters<typeof sql.unsafe>[1]
       );
 
@@ -214,7 +339,15 @@ export async function authUsersRoute(server: FastifyInstance) {
         return reply.status(404).send({ error: "User not found" });
       }
 
-      return reply.send(rows[0]);
+      if (body.password !== undefined) {
+        await sql`
+          UPDATE _postgrify_auth.sessions
+          SET revoked = true, revoked_at = COALESCE(revoked_at, now())
+          WHERE user_id = ${id} AND revoked = false
+        `;
+      }
+
+      return reply.send(sanitizeUser(rows[0] as Record<string, unknown>));
     })
   );
 

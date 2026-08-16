@@ -35,6 +35,9 @@ vi.mock("postgres", () => {
       if (query.includes("select key, value from _postgrify_auth.auth_settings")) {
         return Object.entries(mockSettings).map(([key, value]) => ({ key, value }));
       }
+      if (query.includes("from _postgrify_auth.oauth_providers")) {
+        return [];
+      }
       // INSERT/UPDATE settings (ON CONFLICT)
       if (query.includes("insert into _postgrify_auth.auth_settings")) {
         return [];
@@ -100,6 +103,7 @@ beforeAll(async () => {
   });
 
   server.decorate("authenticateAdmin", async () => {});
+  server.decorate("jwtService", jwtSvc);
 
   server.decorate("authenticateAny", async (req: Parameters<typeof server.authenticateAny>[0], reply: Parameters<typeof server.authenticateAny>[1]) => {
     const auth = req.headers.authorization;
@@ -159,7 +163,7 @@ describe("SORUN #7 — default_user_role ayarı", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("schema scope olmadan GET settings erişilemez", async () => {
+  it("schema scope olmadan GET settings public GoTrue shape döner (C-20)", async () => {
     const readOnlyToken = await jwtSvc.signDbToken("testdb", ["read"]);
     const res = await server.inject({
       method: "GET",
@@ -167,6 +171,20 @@ describe("SORUN #7 — default_user_role ayarı", () => {
       headers: { authorization: `Bearer ${readOnlyToken}` },
     });
 
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty("external");
+    expect(body).toHaveProperty("disable_signup");
+    expect(body).not.toHaveProperty("default_user_role");
+  });
+
+  it("auth olmadan GET settings public (C-20)", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/testdb/auth/settings",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().external.email).toBe(true);
   });
 });
