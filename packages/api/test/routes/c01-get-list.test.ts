@@ -208,4 +208,30 @@ describe("C-01 GET /db/:database/:table", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("E-23 Accept: text/csv → CSV body + Content-Type", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users",
+      headers: {
+        Authorization: `Bearer ${readToken}`,
+        Accept: "text/csv",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(String(res.headers["content-type"])).toContain("text/csv");
+    expect(res.body).toBe("id,name\n1,Alice\n2,Bob");
+    expect(res.headers["content-range"]).toBeTruthy();
+  });
+
+  it("E-23 without Accept stays JSON array", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users",
+      headers: { Authorization: `Bearer ${readToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.json())).toBe(true);
+    expect(String(res.headers["content-type"])).toContain("application/json");
+  });
 });
