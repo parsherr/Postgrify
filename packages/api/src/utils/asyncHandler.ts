@@ -25,11 +25,20 @@ export function asyncHandler(handler: AsyncHandler): RouteHandlerMethod {
 
 function getStatusFromError(err: unknown): number {
   if (err instanceof Error) {
-    if (err.message.includes("does not exist")) return 404;
-    if (err.message.includes("Invalid") || err.message.includes("Unknown"))
+    const msg = err.message;
+    // Client SQL / FTS mistakes first — PG says "configuration X does not exist"
+    // which must not become a generic 404 (E-11 live harden).
+    if (
+      /invalid input syntax|syntax error in tsquery|text search configuration|cannot cast|could not convert/i.test(
+        msg
+      )
+    ) {
       return 400;
-    if (err.message.includes("permission denied")) return 403;
-    if (err.message.includes("duplicate key")) return 409;
+    }
+    if (msg.includes("does not exist")) return 404;
+    if (msg.includes("Invalid") || msg.includes("Unknown")) return 400;
+    if (msg.includes("permission denied")) return 403;
+    if (msg.includes("duplicate key")) return 409;
   }
   return 500;
 }
