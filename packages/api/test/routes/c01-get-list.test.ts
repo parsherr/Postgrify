@@ -1,15 +1,16 @@
 /**
- * C-01 follow-up — pagination via Content-Range (replaces SORUN #9 body fields).
+ * C-01 — GET /db/:database/:table PostgREST-compatible list response.
  *
- * Before: { rows, total, limit, offset }
- * After:  array body + Content-Range / Prefer:count=exact
+ * Contract (PostgREST v12 pagination_count):
+ * - Body is a JSON array (not { rows, total, ... })
+ * - Content-Range + Range-Unit: items always set
+ * - Without Prefer:count → Content-Range end with /*
+ * - Prefer: count=exact → COUNT(*) and Content-Range …/total + X-Total-Count
  *
- * Client hasMore:
- *   parse Content-Range "start-end/total"
- *   hasMore = end + 1 < total  (when total is not *)
+ * Ref: https://docs.postgrest.org/en/v12/references/api/pagination_count.html
  */
 
-import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { JwtService } from "../../src/services/jwtService.js";
@@ -21,8 +22,8 @@ vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", ADMIN_SECRET);
 
 const MOCK_ROWS = [
-  { id: "1", name: "Alice" },
-  { id: "2", name: "Bob" },
+  { id: 1, name: "Alice" },
+  { id: 2, name: "Bob" },
 ];
 
 vi.mock("postgres", () => {
@@ -34,6 +35,12 @@ vi.mock("postgres", () => {
       const tx = {
         unsafe: vi.fn().mockImplementation((sql: string) => {
           if (/count\(\*\)/i.test(sql)) return Promise.resolve([{ total: "42" }]);
+          if (/EXPLAIN/i.test(sql)) {
+            return Promise.resolve([
+              { "QUERY PLAN": [{ Plan: { "Plan Rows": 99 } }] },
+            ]);
+          }
+          if (/reltuples/i.test(sql)) return Promise.resolve([{ total: "1000" }]);
           return Promise.resolve(MOCK_ROWS);
         }),
       };
@@ -56,20 +63,6 @@ vi.mock("../../src/services/cacheService.js", () => ({
   })),
   TTL: { ROW_QUERY: 30, SCHEMA: 300, TABLE_LIST: 120, DB_SIZE: 60 },
 }));
-
-function parseContentRange(header: string | undefined): {
-  start: number;
-  end: number;
-  total: number | null;
-} {
-  const m = header?.match(/^(\d+)-(\d+)\/(\d+|\*)$/);
-  if (!m) throw new Error(`bad Content-Range: ${header}`);
-  return {
-    start: Number(m[1]),
-    end: Number(m[2]),
-    total: m[3] === "*" ? null : Number(m[3]),
-  };
-}
 
 let server: FastifyInstance;
 let readToken: string;
@@ -128,22 +121,34 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("C-01 pagination via Content-Range", () => {
-  it("array body + Content-Range /* without Prefer:count", async () => {
+describe("C-01 GET /db/:database/:table", () => {
+  it("body is a JSON array (no rows/total wrapper)", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users",
+      headers: { Authorization: `Bearer ${readToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toEqual(MOCK_ROWS);
+    expect(body).not.toHaveProperty("rows");
+    expect(body).not.toHaveProperty("total");
+  });
+
+  it("sets Content-Range with /* when Prefer:count is absent", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/project1/users?limit=2&offset=0",
       headers: { Authorization: `Bearer ${readToken}` },
     });
     expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.json())).toBe(true);
-    const cr = parseContentRange(res.headers["content-range"] as string);
-    expect(cr.start).toBe(0);
-    expect(cr.end).toBe(1);
-    expect(cr.total).toBeNull();
+    expect(res.headers["range-unit"]).toBe("items");
+    expect(res.headers["content-range"]).toBe("0-1/*");
+    expect(res.headers["x-total-count"]).toBeUndefined();
   });
 
-  it("Prefer:count=exact enables hasMore = end+1 < total", async () => {
+  it("Prefer: count=exact → Content-Range …/total and X-Total-Count", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/project1/users?limit=2&offset=0",
@@ -153,26 +158,54 @@ describe("C-01 pagination via Content-Range", () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    const rows = res.json() as unknown[];
-    const cr = parseContentRange(res.headers["content-range"] as string);
-    expect(cr.total).toBe(42);
-    const hasMore = cr.total !== null && cr.end + 1 < cr.total;
-    expect(hasMore).toBe(true);
-    expect(rows.length).toBe(2);
+    expect(res.headers["content-range"]).toBe("0-1/42");
+    expect(res.headers["x-total-count"]).toBe("42");
+    expect(Array.isArray(res.json())).toBe(true);
   });
 
-  it("limit/offset query params drive Content-Range window", async () => {
+  it("Prefer: count=planned uses EXPLAIN plan rows", async () => {
     const res = await server.inject({
       method: "GET",
-      url: "/project1/users?limit=2&offset=40",
+      url: "/project1/users?limit=2",
+      headers: {
+        Authorization: `Bearer ${readToken}`,
+        Prefer: "count=planned",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-range"]).toBe("0-1/99");
+  });
+
+  it("Prefer: count=estimated uses reltuples", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users?limit=2",
+      headers: {
+        Authorization: `Bearer ${readToken}`,
+        Prefer: "count=estimated",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-range"]).toBe("0-1/1000");
+  });
+
+  it("offset reflected in Content-Range start-end", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users?limit=2&offset=10",
       headers: {
         Authorization: `Bearer ${readToken}`,
         Prefer: "count=exact",
       },
     });
-    const cr = parseContentRange(res.headers["content-range"] as string);
-    expect(cr.start).toBe(40);
-    expect(cr.end).toBe(41);
-    expect(cr.total).toBe(42);
+    expect(res.headers["content-range"]).toBe("10-11/42");
+  });
+
+  it("still requires auth (401 without token)", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users",
+    });
+    expect(res.statusCode).toBe(401);
   });
 });

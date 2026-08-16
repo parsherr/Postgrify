@@ -20,16 +20,18 @@
  *   ?order=created_at.desc         (birleşik format)
  *   ?sort=created_at&order=desc    (ayrı format — Supabase/PostgREST uyumlu)
  *   İkisi birlikte verilirse "sort+order" önceliklidir.
+ *
+ * NOTE (turtle C-01): FTS / nested or / alias select sonraki adımlarda eklenecek.
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
 
 export interface SelectOptions {
-  select?: string;   // "id,name,email"
-  where?: string[];  // ["age.gt.18", "status.eq.active"]
-  or?: string[];     // ["role.eq.admin", "role.eq.mod"] → OR ile birleştirilir
-  order?: string;    // "created_at.desc" (birleşik) VEYA yalnızca yön ("desc") — sort ile birlikte
-  sort?: string;     // "created_at" — order="desc" ile birlikte kullanılır
+  select?: string;
+  where?: string[];
+  or?: string[];
+  order?: string;
+  sort?: string;
   limit?: number;
   offset?: number;
 }
@@ -39,8 +41,6 @@ export interface WhereClause {
   values: unknown[];
 }
 
-// `not` kaldırıldı — `neq` alias'ı olarak davranıyordu ama değer yok sayılıyordu.
-// `neq` kullanın: field.neq.value
 const OPERATORS: Record<string, string> = {
   eq: "=",
   neq: "!=",
@@ -54,16 +54,11 @@ const OPERATORS: Record<string, string> = {
   is: "IS",
 };
 
-// `is` operatörünün kabul ettiği değerler
 const IS_VALUES: Record<string, string> = {
   null: "NULL",
   not_null: "NOT NULL",
 };
 
-/**
- * Tek bir "field.op.value" string'ini parse ederek SQL parçası ve değer üretir.
- * Değerler values dizisine offset kadar kaydırılmış placeholder ile eklenir.
- */
 function parseCondition(
   condition: string,
   offset: number
@@ -111,25 +106,15 @@ function parseCondition(
         `Invalid value for "is" operator: "${value}". Valid values: null, not_null`
       );
     }
-    // IS NULL / IS NOT NULL — değer parametrize edilmez
     return { sql: `"${column}" IS ${isTarget}`, values: [] };
   }
 
-  // Standart operatörler
   return {
     sql: `"${column}" ${pgOp} $${offset + 1}`,
     values: [value],
   };
 }
 
-/**
- * WHERE koşullarını parse eder.
- *
- * @param conditions AND ile birleştirilecek koşullar: ["age.gt.18", "status.eq.active"]
- * @param orConditions OR ile birleştirilecek koşullar: ["role.eq.admin", "role.eq.mod"]
- *
- * Üretilen SQL: WHERE "age" > $1 AND "status" = $2 AND ("role" = $3 OR "role" = $4)
- */
 export function parseWhereConditions(
   conditions: string[],
   orConditions: string[] = []
@@ -150,7 +135,6 @@ export function parseWhereConditions(
       orParts.push(result.sql);
       values.push(...result.values);
     }
-    // OR grubunu parantez içine al — AND ile karışmasın
     parts.push(`(${orParts.join(" OR ")})`);
   }
 
@@ -160,9 +144,6 @@ export function parseWhereConditions(
   };
 }
 
-/**
- * SELECT kolon listesini parse eder. "*" veya boş → tüm kolonlar.
- */
 export function parseSelectColumns(select?: string): string {
   if (!select || select === "*") return "*";
 
@@ -176,47 +157,64 @@ export function parseSelectColumns(select?: string): string {
 }
 
 /**
- * Sıralama ifadesi oluşturur. İki kullanım biçimi:
- *
- * 1. Birleşik format:  parseOrderBy("created_at.desc")
- * 2. Ayrı format:      parseOrderBy("desc", "created_at")
- *    — sort=created_at&order=desc (Supabase/PostgREST uyumlu)
- *
- * @param order  "column.direction" veya yalnızca yön ("asc"|"desc")
- * @param sort   Kolon adı (order yalnızca yön içerdiğinde kullanılır)
+ * Sıralama. C-01: PostgREST `order=col.asc.nullsfirst,col2.desc` multi desteklenir.
+ * Legacy: sort=col&order=asc
  */
 export function parseOrderBy(order?: string, sort?: string): string {
   if (!order && !sort) return "";
 
-  let column: string;
-  let direction: string;
-
   if (sort) {
-    // Ayrı format: sort=created_at&order=desc
-    column = sort;
-    direction = (order ?? "asc").toUpperCase();
-  } else if (order) {
-    const lastDot = order.lastIndexOf(".");
-    if (lastDot === -1) {
-      // Sadece yön verilmiş ama sort yok — geçersiz, boş döndür
-      throw new Error(
-        `Invalid order format: "${order}". Use "column.asc" or "column.desc", ` +
+    const column = sort;
+    const direction = (order ?? "asc").toUpperCase();
+    if (!isValidIdentifier(column)) {
+      throw new Error(`Invalid column name in order: ${column}`);
+    }
+    if (direction !== "ASC" && direction !== "DESC") {
+      throw new Error(`Invalid order direction: "${direction}". Use asc or desc`);
+    }
+    return `ORDER BY "${column}" ${direction}`;
+  }
+
+  if (!order) return "";
+
+  if (order === "asc" || order === "desc") {
+    throw new Error(
+      `Invalid order format: "${order}". Use "column.asc" or "column.desc", ` +
         `or use ?sort=column&order=asc separately.`
+    );
+  }
+
+  const clauses = order.split(",").map((c) => c.trim()).filter(Boolean);
+  const sqlClauses: string[] = [];
+
+  for (const clause of clauses) {
+    const parts = clause.split(".");
+    if (parts.length < 2) {
+      throw new Error(
+        `Invalid order format: "${clause}". Use "column.asc" or "column.desc".`
       );
     }
-    column = order.slice(0, lastDot);
-    direction = order.slice(lastDot + 1).toUpperCase();
-  } else {
-    return "";
+    const column = parts[0];
+    const direction = parts[1].toUpperCase();
+    const nulls = parts[2]?.toLowerCase();
+
+    if (!isValidIdentifier(column)) {
+      throw new Error(`Invalid column name in order: ${column}`);
+    }
+    if (direction !== "ASC" && direction !== "DESC") {
+      throw new Error(`Invalid order direction: "${parts[1]}". Use asc or desc`);
+    }
+
+    let sql = `"${column}" ${direction}`;
+    if (nulls === "nullsfirst") sql += " NULLS FIRST";
+    else if (nulls === "nullslast") sql += " NULLS LAST";
+    else if (nulls) {
+      throw new Error(
+        `Invalid nulls ordering: "${parts[2]}". Use nullsfirst or nullslast`
+      );
+    }
+    sqlClauses.push(sql);
   }
 
-  if (!isValidIdentifier(column)) {
-    throw new Error(`Invalid column name in order: ${column}`);
-  }
-
-  if (direction !== "ASC" && direction !== "DESC") {
-    throw new Error(`Invalid order direction: "${direction}". Use asc or desc`);
-  }
-
-  return `ORDER BY "${column}" ${direction}`;
+  return `ORDER BY ${sqlClauses.join(", ")}`;
 }
