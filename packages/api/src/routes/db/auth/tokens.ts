@@ -320,7 +320,7 @@ export async function authTokensRoute(server: FastifyInstance) {
           await sql`
             UPDATE _postgrify_auth.sessions
             SET revoked = true, revoked_at = COALESCE(revoked_at, now())
-            WHERE user_id = ${revoked.user_id} AND revoked = false
+            WHERE user_id = ${revoked.user_id as string} AND revoked = false
           `;
           await insertAuditLog(sql, "refresh_token_reuse", revoked.user_id as string, {
             ip: req.ip,
@@ -341,11 +341,14 @@ export async function authTokensRoute(server: FastifyInstance) {
         return reply.status(403).send({ error: "Account is disabled" });
       }
 
+      const sessionId = session.id as string;
+      const sessionUserId = session.user_id as string;
+
       // Eski token'ı revoke et (token rotation) — only if still active row
       await sql`
         UPDATE _postgrify_auth.sessions
         SET revoked = true, revoked_at = now()
-        WHERE id = ${session.id} AND revoked = false
+        WHERE id = ${sessionId} AND revoked = false
       `;
 
       const newRefreshToken = crypto.randomBytes(48).toString("hex");
@@ -354,12 +357,12 @@ export async function authTokensRoute(server: FastifyInstance) {
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
-        VALUES (${session.user_id}, ${newRefreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
+        VALUES (${sessionUserId}, ${newRefreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
       `;
 
       const accessToken = await jwtService.signDbUserToken(
         database,
-        session.user_id as string,
+        sessionUserId,
         session.email as string,
         session.role as string,
         config.ACCESS_TOKEN_EXPIRY
@@ -370,7 +373,7 @@ export async function authTokensRoute(server: FastifyInstance) {
           accessToken,
           refreshToken: newRefreshToken,
           user: {
-            id: session.user_id as string,
+            id: sessionUserId,
             email: session.email as string,
             role: session.role as string,
             is_active: session.is_active as boolean,
