@@ -386,18 +386,29 @@ export async function authTokensRoute(server: FastifyInstance) {
     })
   );
 
-  // ── POST /:database/auth/logout ───────────────────────────────────────────
+  // ── POST /:database/auth/logout (C-09) ────────────────────────────────────
   server.post(
     "/:database/auth/logout",
     {
       schema: {
-        description: "Revoke a refresh token (logout)",
+        description:
+          "Logout — revoke session(s). Prefer Authorization Bearer; body refresh_token still accepted (C-09)",
         tags: ["db-auth"],
         security: [],
+        querystring: {
+          type: "object",
+          properties: {
+            scope: {
+              type: "string",
+              enum: ["global", "local", "others"],
+              default: "local",
+            },
+          },
+        },
         body: {
           type: "object",
-          required: ["refreshToken"],
           properties: {
+            refresh_token: { type: "string" },
             refreshToken: { type: "string" },
           },
         },
@@ -405,29 +416,95 @@ export async function authTokensRoute(server: FastifyInstance) {
     },
     asyncHandler(async (req, reply) => {
       const { database } = req.params as { database: string };
-      const { refreshToken } = req.body as { refreshToken: string };
+      const { scope = "local" } = req.query as {
+        scope?: "global" | "local" | "others";
+      };
+      const refreshToken = pickRefreshToken(
+        (req.body as Record<string, unknown> | null) ?? {}
+      );
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Hash üzerinden revoke — plain text DB'de aranmaz
-      const tokenHash = hashRefreshToken(refreshToken);
+      let userId: string | null = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        const payload = await jwtService.verifyDbUser(authHeader.slice(7));
+        if (payload?.sub) userId = payload.sub;
+      }
 
-      // Önce user_id'yi bul (audit log için), sonra revoke et
-      const [session] = await sql`
-        SELECT user_id FROM _postgrify_auth.sessions
-        WHERE refresh_token = ${tokenHash}
-      `;
+      let refreshHash: string | null = null;
+      if (refreshToken) {
+        refreshHash = hashRefreshToken(refreshToken);
+        const [session] = await sql`
+          SELECT user_id FROM _postgrify_auth.sessions
+          WHERE refresh_token = ${refreshHash}
+        `;
+        if (session?.user_id) {
+          if (userId && userId !== session.user_id) {
+            return reply.status(403).send({ error: "Token does not belong to this user" });
+          }
+          userId = session.user_id as string;
+        }
+      }
+
+      if (scope === "global") {
+        if (!userId) {
+          return reply.status(401).send({
+            error: "Authorization Bearer or refresh_token required for scope=global",
+          });
+        }
+        await sql`
+          UPDATE _postgrify_auth.sessions
+          SET revoked = true, revoked_at = COALESCE(revoked_at, now())
+          WHERE user_id = ${userId} AND revoked = false
+        `;
+        await insertAuditLog(sql, "logout", userId, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          metadata: { scope: "global" },
+        });
+        return reply.status(204).send();
+      }
+
+      if (scope === "others") {
+        if (!userId || !refreshHash) {
+          return reply.status(400).send({
+            error: "scope=others requires Authorization Bearer and refresh_token (session to keep)",
+          });
+        }
+        await sql`
+          UPDATE _postgrify_auth.sessions
+          SET revoked = true, revoked_at = COALESCE(revoked_at, now())
+          WHERE user_id = ${userId}
+            AND revoked = false
+            AND refresh_token <> ${refreshHash}
+        `;
+        await insertAuditLog(sql, "logout", userId, {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+          metadata: { scope: "others" },
+        });
+        return reply.status(204).send();
+      }
+
+      // local (default) — revoke one refresh token
+      if (!refreshHash) {
+        return reply.status(400).send({
+          error: "refresh_token required for scope=local (or use scope=global with Bearer)",
+        });
+      }
 
       await sql`
         UPDATE _postgrify_auth.sessions
-        SET revoked = true
-        WHERE refresh_token = ${tokenHash}
+        SET revoked = true, revoked_at = COALESCE(revoked_at, now())
+        WHERE refresh_token = ${refreshHash}
       `;
-      if (session) {
-        await insertAuditLog(sql, "logout", session.user_id as string, {
+      if (userId) {
+        await insertAuditLog(sql, "logout", userId, {
           ip: req.ip,
           userAgent: req.headers["user-agent"] as string | undefined,
+          metadata: { scope: "local" },
         });
       }
 
