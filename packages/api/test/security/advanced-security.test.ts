@@ -167,7 +167,8 @@ describe("EMAIL-1: email enumeration koruması", () => {
   it("forgot endpoint kullanıcı bulunamasa da 200 döndürüyor", () => {
     // email enumeration: kullanıcı yoksa da aynı response dönmeli
     // Bu, "Email sent if account exists" pattern'ını kontrol eder
-    expect(passwordResetSrc).toContain("ok: true");
+    // C-15/C-16: GoTrue-compatible empty {} response (no ok:true)
+    expect(passwordResetSrc).toContain("reply.send({}");
     // "User not found" gibi bilgi sızdıran mesaj olmamalı
     expect(passwordResetSrc).not.toContain('"User not found"');
     expect(passwordResetSrc).not.toContain('"Email not registered"');
@@ -178,7 +179,8 @@ describe("EMAIL-1: email enumeration koruması", () => {
     // if (user) bloğu dışında reply.send({ ok: true }) olmalı
     const sendIdx = passwordResetSrc.lastIndexOf("reply.send");
     const sendSlice = passwordResetSrc.slice(Math.max(0, sendIdx - 50), sendIdx + 100);
-    expect(sendSlice).toContain("ok: true");
+    // C-15/C-16: GoTrue-compatible empty {} response
+    expect(sendSlice).toContain("reply.send({}");
   });
 });
 
