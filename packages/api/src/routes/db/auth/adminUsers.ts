@@ -22,15 +22,25 @@ const UUID_RE =
 const SENSITIVE_METADATA_KEYS = [
   "reset_token",
   "reset_token_expires",
+  "reset_token_exp",
   "magic_link_token",
   "magic_link_token_expires",
   "magic_token",
   "magic_token_expires",
+  "magic_token_exp",
   "verification_token",
   "verification_token_expires",
   "verification_exp",
-  "reset_token_exp",
-  "magic_token_exp",
+  // email change tokens
+  "email_change_token",
+  "email_change_token_expires",
+  "email_change_token_exp",
+  "new_email",
+  // OTP / phone
+  "otp",
+  "otp_expires",
+  "otp_exp",
+  "phone_change_token",
 ];
 
 function stripSensitiveMetadata(
@@ -46,27 +56,23 @@ function stripSensitiveMetadata(
   return cleaned;
 }
 
+function toIso(v: string | Date | null | undefined): string | null {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+}
+
 function buildIdentity(user: {
   id: string;
   email: string;
   provider: string | null;
   provider_id: string | null;
   created_at: string | Date | null;
+  updated_at: string | Date | null;
   last_login: string | Date | null;
 }) {
   const provider = user.provider || "email";
-  const createdAt =
-    user.created_at instanceof Date
-      ? user.created_at.toISOString()
-      : user.created_at
-        ? new Date(user.created_at).toISOString()
-        : new Date().toISOString();
-  const lastSignIn =
-    user.last_login instanceof Date
-      ? user.last_login.toISOString()
-      : user.last_login
-        ? new Date(user.last_login).toISOString()
-        : null;
+  const createdAt = toIso(user.created_at) ?? new Date().toISOString();
+  const updatedAt = toIso(user.updated_at) ?? createdAt;
 
   return {
     id: user.provider_id || user.id,
@@ -77,8 +83,8 @@ function buildIdentity(user: {
     },
     provider,
     created_at: createdAt,
-    updated_at: createdAt,
-    last_sign_in_at: lastSignIn,
+    updated_at: updatedAt,
+    last_sign_in_at: toIso(user.last_login),
   };
 }
 
@@ -125,6 +131,7 @@ export async function authAdminUsersRoute(server: FastifyInstance) {
           role,
           is_active,
           created_at,
+          updated_at,
           last_login,
           email_verified,
           full_name,
@@ -169,8 +176,7 @@ export async function authAdminUsersRoute(server: FastifyInstance) {
           created_at,
           expires_at,
           ip,
-          user_agent,
-          revoked
+          user_agent
         FROM _postgrify_auth.sessions
         WHERE user_id = ${id}::uuid
           AND revoked = false
@@ -191,6 +197,7 @@ export async function authAdminUsersRoute(server: FastifyInstance) {
             provider: (row.provider as string | null) ?? "email",
             provider_id: (row.provider_id as string | null) ?? null,
             created_at: row.created_at as string | Date | null,
+            updated_at: row.updated_at as string | Date | null,
             last_login: row.last_login as string | Date | null,
           }),
         ],
