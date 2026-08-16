@@ -8,6 +8,7 @@
  *   eq, neq, gt, gte, lt, lte, like, ilike, in, is
  *   FTS (E-11): fts, plfts, phfts, wfts — optional lang: plfts(turkish)
  *   JSONB (E-14): settings->>'theme'.eq.dark , attrs->'specs'->>'weight'.lt.5
+ *   Cast (E-18): col::numeric , settings->>'n'::float — allowlisted types only
  *
  * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
@@ -66,51 +67,101 @@ const IS_VALUES: Record<string, string> = {
   not_null: "NOT NULL",
 };
 
+/** E-18: allowlisted PostgreSQL types for ::cast (never user-arbitrary). */
+const ALLOWED_CASTS = new Set([
+  "text",
+  "int",
+  "int2",
+  "int4",
+  "int8",
+  "integer",
+  "bigint",
+  "smallint",
+  "float4",
+  "float8",
+  "float",
+  "real",
+  "numeric",
+  "decimal",
+  "bool",
+  "boolean",
+  "json",
+  "jsonb",
+  "uuid",
+  "date",
+  "time",
+  "timestamp",
+  "timestamptz",
+]);
+
 /**
- * E-14: Safe SQL expression for a column or JSON/JSONB path.
+ * Split optional ::type suffix. Type must be in ALLOWED_CASTS.
+ */
+function splitCast(expr: string): { base: string; cast: string | null } {
+  const m = expr.match(/^(.*)::([a-zA-Z_][a-zA-Z0-9_]*)$/);
+  if (!m) return { base: expr, cast: null };
+  const cast = m[2].toLowerCase();
+  if (!ALLOWED_CASTS.has(cast)) {
+    throw new Error(
+      `Invalid cast type: ${m[2]}. Allowed: ${[...ALLOWED_CASTS].join(", ")}`
+    );
+  }
+  if (!m[1]) {
+    throw new Error(`Invalid cast expression: ${expr}`);
+  }
+  return { base: m[1], cast };
+}
+
+/**
+ * E-14 + E-18: Safe SQL expression for a column / JSON path / optional ::cast.
  *
  * Allowed: name | settings->>'theme' | attrs->'specs'->>'weight' | data->0->>'name'
+ *          name::text | attrs->'specs'->>'weight'::numeric
  * Keys: [a-zA-Z_][a-zA-Z0-9_]* only. Indexes: non-negative integers.
  */
 export function toColumnSql(columnExpr: string): string {
-  if (isValidIdentifier(columnExpr)) {
-    return `"${columnExpr}"`;
-  }
+  const { base, cast } = splitCast(columnExpr);
 
-  const rootMatch = columnExpr.match(
-    /^([a-zA-Z_][a-zA-Z0-9_]{0,62})((?:->|->>).+)$/
-  );
-  if (!rootMatch) {
-    throw new Error(`Invalid column name: ${columnExpr}`);
-  }
-
-  const root = rootMatch[1];
-  if (!isValidIdentifier(root)) {
-    throw new Error(`Invalid column name: ${root}`);
-  }
-
-  let rest = rootMatch[2];
-  let sql = `"${root}"`;
-
-  while (rest.length > 0) {
-    const seg = rest.match(
-      /^(->>|->)(?:'([a-zA-Z_][a-zA-Z0-9_]{0,62})'|(\d+))(.*)$/
+  let sql: string;
+  if (isValidIdentifier(base)) {
+    sql = `"${base}"`;
+  } else {
+    const rootMatch = base.match(
+      /^([a-zA-Z_][a-zA-Z0-9_]{0,62})((?:->|->>).+)$/
     );
-    if (!seg) {
-      throw new Error(`Invalid JSON path segment in: ${columnExpr}`);
+    if (!rootMatch) {
+      throw new Error(`Invalid column name: ${columnExpr}`);
     }
-    const arrow = seg[1];
-    const key = seg[2];
-    const index = seg[3];
-    rest = seg[4];
-    if (key !== undefined) {
-      sql += `${arrow}'${key}'`;
-    } else {
-      sql += `${arrow}${index}`;
+
+    const root = rootMatch[1];
+    if (!isValidIdentifier(root)) {
+      throw new Error(`Invalid column name: ${root}`);
+    }
+
+    let rest = rootMatch[2];
+    sql = `"${root}"`;
+
+    while (rest.length > 0) {
+      const seg = rest.match(
+        /^(->>|->)(?:'([a-zA-Z_][a-zA-Z0-9_]{0,62})'|(\d+))(.*)$/
+      );
+      if (!seg) {
+        throw new Error(`Invalid JSON path segment in: ${columnExpr}`);
+      }
+      const arrow = seg[1];
+      const key = seg[2];
+      const index = seg[3];
+      rest = seg[4];
+      if (key !== undefined) {
+        sql += `${arrow}'${key}'`;
+      } else {
+        sql += `${arrow}${index}`;
+      }
     }
   }
 
-  return sql;
+  // Parenthesize before cast so JSON ->> result is cast, not the key literal.
+  return cast ? `(${sql})::${cast}` : sql;
 }
 
 /**
@@ -274,13 +325,19 @@ export function parseWhereConditions(
 export function parseSelectColumns(select?: string): string {
   if (!select || select === "*") return "*";
 
-  const columns = select.split(",").map((c) => c.trim());
+  const columns = select.split(",").map((c) => c.trim()).filter(Boolean);
+  const parts: string[] = [];
   for (const col of columns) {
-    if (!isValidIdentifier(col)) {
+    try {
+      parts.push(toColumnSql(col));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Preserve cast validation wording (E-18); otherwise generic select error.
+      if (/Invalid cast/i.test(msg)) throw e;
       throw new Error(`Invalid column name in select: ${col}`);
     }
   }
-  return columns.map((c) => `"${c}"`).join(", ");
+  return parts.join(", ");
 }
 
 export function parseOrderBy(order?: string, sort?: string): string {

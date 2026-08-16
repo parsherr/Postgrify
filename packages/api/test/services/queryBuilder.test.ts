@@ -312,6 +312,50 @@ describe("parseSelectColumns", () => {
   it("geçersiz kolon adında hata fırlatır", () => {
     expect(() => parseSelectColumns("id,drop,name")).toThrow();
   });
+
+  it("E-18 select cast duration::text", () => {
+    expect(parseSelectColumns("id,duration::text")).toBe(
+      '"id", ("duration")::text'
+    );
+  });
+
+  it("E-18 reject unknown cast type in select", () => {
+    expect(() => parseSelectColumns("id::notatype")).toThrow(/Invalid cast/);
+  });
+});
+
+describe("toColumnSql / cast (E-18)", () => {
+  it("plain::numeric", () => {
+    expect(toColumnSql("amount::numeric")).toBe('("amount")::numeric');
+  });
+
+  it("json path::float", () => {
+    expect(toColumnSql("attrs->'specs'->>'weight'::float")).toBe(
+      "(\"attrs\"->'specs'->>'weight')::float"
+    );
+  });
+
+  it("rejects dangerous cast type", () => {
+    expect(() => toColumnSql("id::pg_catalog")).toThrow(/Invalid cast/);
+  });
+});
+
+describe("parseWhereConditions — cast (E-18)", () => {
+  it("json text extract cast to float then lt", () => {
+    const { sql, values } = parseWhereConditions([
+      "attrs->'specs'->>'weight'::float.lt.5",
+    ]);
+    expect(sql).toBe(
+      "WHERE (\"attrs\"->'specs'->>'weight')::float < $1"
+    );
+    expect(values).toEqual(["5"]);
+  });
+
+  it("amount::int.gte.10", () => {
+    const { sql, values } = parseWhereConditions(["amount::int.gte.10"]);
+    expect(sql).toBe('WHERE ("amount")::int >= $1');
+    expect(values).toEqual(["10"]);
+  });
 });
 
 describe("parseOrderBy", () => {
