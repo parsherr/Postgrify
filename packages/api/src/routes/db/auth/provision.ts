@@ -190,7 +190,8 @@ export type AuditEvent =
   | "password_changed"
   | "raw_sql_exec"
   | "account_deleted"
-  | "refresh_token_reuse";
+  | "refresh_token_reuse"
+  | "generate_link";
 
 /**
  * Per-DB auth ayarını okur. Yoksa default değeri döner.

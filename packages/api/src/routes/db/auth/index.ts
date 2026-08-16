@@ -24,6 +24,7 @@ import { authAuditRoute } from "./audit.js";
 import { authOAuthRoute } from "./oauth.js";
 import { authSessionsRoute } from "./sessions.js";
 import { authAdminUsersRoute } from "./adminUsers.js";
+import { authGenerateLinkRoute } from "./generateLink.js";
 
 export async function authDbRoutes(server: FastifyInstance) {
   // Sıra önemli: önce DB adını çöz, sonra API key'i doğrula.
@@ -49,4 +50,5 @@ export async function authDbRoutes(server: FastifyInstance) {
   await server.register(authAuditRoute);         // audit log
   await server.register(authSessionsRoute);      // session management
   await server.register(authAdminUsersRoute);    // GET /admin/users/:id (E-38)
+  await server.register(authGenerateLinkRoute);  // POST /admin/generate-link (E-39)
 }
