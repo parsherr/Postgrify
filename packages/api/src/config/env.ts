@@ -48,7 +48,7 @@ const envSchema = z.object({
     .default("false"),
 
   // Sunucu
-  PORT: z.coerce.number().default(3000),
+  PORT: z.coerce.number().default(6880),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
