@@ -6,6 +6,7 @@
  *
  * Desteklenen operatörler (where ve or param'larında):
  *   eq, neq, gt, gte, lt, lte, like, ilike, in, is
+ *   FTS (E-11): fts, plfts, phfts, wfts — optional lang: plfts(turkish)
  *
  * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
@@ -20,8 +21,6 @@
  *   ?order=created_at.desc         (birleşik format)
  *   ?sort=created_at&order=desc    (ayrı format — Supabase/PostgREST uyumlu)
  *   İkisi birlikte verilirse "sort+order" önceliklidir.
- *
- * NOTE (turtle C-01): FTS / nested or / alias select sonraki adımlarda eklenecek.
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
@@ -54,10 +53,58 @@ const OPERATORS: Record<string, string> = {
   is: "IS",
 };
 
+/** PostgREST-compatible FTS operator → PostgreSQL tsquery constructor. */
+const FTS_FUNCS: Record<string, string> = {
+  fts: "to_tsquery",
+  plfts: "plainto_tsquery",
+  phfts: "phraseto_tsquery",
+  wfts: "websearch_to_tsquery",
+};
+
+/** text-regconfig names only — passed as $n::regconfig, never concatenated. */
+const FTS_LANG_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
 const IS_VALUES: Record<string, string> = {
   null: "NULL",
   not_null: "NOT NULL",
 };
+
+function parseFtsCondition(
+  column: string,
+  rest: string,
+  offset: number
+): { sql: string; values: unknown[] } | null {
+  // body.plfts(turkish).yapay+zeka  OR  body.wfts.laptop+gaming
+  const match = rest.match(
+    /^(fts|plfts|phfts|wfts)(?:\(([a-zA-Z_][a-zA-Z0-9_]{0,62})\))?\.(.*)$/
+  );
+  if (!match) return null;
+
+  const kind = match[1];
+  const lang = match[2];
+  const rawQuery = match[3];
+  const fn = FTS_FUNCS[kind];
+  if (!fn) return null;
+
+  if (!rawQuery || rawQuery.trim() === "") {
+    throw new Error(`Empty FTS query for operator "${kind}"`);
+  }
+
+  if (lang) {
+    if (!FTS_LANG_RE.test(lang)) {
+      throw new Error(`Invalid FTS language config: ${lang}`);
+    }
+    return {
+      sql: `"${column}" @@ ${fn}($${offset + 1}::regconfig, $${offset + 2})`,
+      values: [lang, rawQuery],
+    };
+  }
+
+  return {
+    sql: `"${column}" @@ ${fn}($${offset + 1})`,
+    values: [rawQuery],
+  };
+}
 
 function parseCondition(
   condition: string,
@@ -68,25 +115,29 @@ function parseCondition(
     throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
   }
 
-  const rest = condition.slice(dotIndex + 1);
-  const opDotIndex = rest.indexOf(".");
-
-  if (opDotIndex === -1) {
-    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
-  }
-
   const column = condition.slice(0, dotIndex);
-  const op = rest.slice(0, opDotIndex);
-  const value = rest.slice(opDotIndex + 1);
+  const rest = condition.slice(dotIndex + 1);
 
   if (!isValidIdentifier(column)) {
     throw new Error(`Invalid column name: ${column}`);
   }
 
+  const fts = parseFtsCondition(column, rest, offset);
+  if (fts) return fts;
+
+  const opDotIndex = rest.indexOf(".");
+  if (opDotIndex === -1) {
+    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
+  }
+
+  const op = rest.slice(0, opDotIndex);
+  const value = rest.slice(opDotIndex + 1);
+
   const pgOp = OPERATORS[op];
   if (!pgOp) {
     throw new Error(
-      `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}`
+      `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}, ` +
+        `${Object.keys(FTS_FUNCS).join(", ")} (optional lang: plfts(english))`
     );
   }
 

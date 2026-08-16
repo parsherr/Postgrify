@@ -111,6 +111,56 @@ describe("parseWhereConditions", () => {
   });
 });
 
+describe("parseWhereConditions — FTS (E-11)", () => {
+  it("plfts without lang → plainto_tsquery($1)", () => {
+    const { sql, values } = parseWhereConditions(["body.plfts.yapay zeka"]);
+    expect(sql).toBe('WHERE "body" @@ plainto_tsquery($1)');
+    expect(values).toEqual(["yapay zeka"]);
+  });
+
+  it("plfts(turkish) → regconfig param + query", () => {
+    const { sql, values } = parseWhereConditions([
+      "body.plfts(turkish).yapay+zeka",
+    ]);
+    expect(sql).toBe(
+      'WHERE "body" @@ plainto_tsquery($1::regconfig, $2)'
+    );
+    expect(values).toEqual(["turkish", "yapay+zeka"]);
+  });
+
+  it("fts / phfts / wfts map to correct constructors", () => {
+    expect(parseWhereConditions(["t.fts.foo"]).sql).toContain("to_tsquery($1)");
+    expect(parseWhereConditions(["t.phfts.foo bar"]).sql).toContain(
+      "phraseto_tsquery($1)"
+    );
+    expect(parseWhereConditions(["t.wfts.laptop"]).sql).toContain(
+      "websearch_to_tsquery($1)"
+    );
+  });
+
+  it("empty FTS query throws", () => {
+    expect(() => parseWhereConditions(["body.plfts."])).toThrow(/Empty FTS/);
+  });
+
+  it("FTS + AND keeps placeholder order", () => {
+    const { sql, values } = parseWhereConditions([
+      "status.eq.active",
+      "body.plfts(english).neural",
+    ]);
+    expect(sql).toBe(
+      'WHERE "status" = $1 AND "body" @@ plainto_tsquery($2::regconfig, $3)'
+    );
+    expect(values).toEqual(["active", "english", "neural"]);
+  });
+
+  it("rejects injection-shaped lang via unknown operator path", () => {
+    // lang with ); would fail FTS regex → falls through to unknown op
+    expect(() =>
+      parseWhereConditions(["body.plfts(english);drop).x"])
+    ).toThrow();
+  });
+});
+
 describe("parseWhereConditions — OR desteği", () => {
   it("tek OR koşulunu parantez içinde üretir", () => {
     const { sql, values } = parseWhereConditions([], ["role.eq.admin"]);

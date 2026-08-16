@@ -65,4 +65,26 @@ describe("asyncHandler", () => {
     await wrapped(mockRequest(), reply);
     expect(reply.status).toHaveBeenCalledWith(400);
   });
+
+  it("text search configuration does not exist → 400 (not 404)", async () => {
+    const handler = vi.fn().mockRejectedValue(
+      new Error('text search configuration "not_a_real_config" does not exist')
+    );
+    const wrapped = asyncHandler(handler);
+    const reply = mockReply();
+
+    await wrapped(mockRequest(), reply);
+    expect(reply.status).toHaveBeenCalledWith(400);
+  });
+
+  it("syntax error in tsquery → 400", async () => {
+    const handler = vi.fn().mockRejectedValue(
+      new Error('syntax error in tsquery: "(((bad"')
+    );
+    const wrapped = asyncHandler(handler);
+    const reply = mockReply();
+
+    await wrapped(mockRequest(), reply);
+    expect(reply.status).toHaveBeenCalledWith(400);
+  });
 });
