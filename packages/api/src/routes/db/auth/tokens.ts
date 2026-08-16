@@ -15,7 +15,7 @@ import { verifyPassword } from "../../../services/passwordService.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js";
-import { buildSessionResponse, parseDurationMs } from "./sessionResponse.js";
+import { buildSessionResponse, parseDurationMs, pickRefreshToken } from "./sessionResponse.js";
 import crypto from "node:crypto";
 
 /**
@@ -233,61 +233,121 @@ export async function authTokensRoute(server: FastifyInstance) {
     })
   );
 
-  // ── POST /:database/auth/refresh ──────────────────────────────────────────
+  // ── POST /:database/auth/refresh (C-08) ───────────────────────────────────
   server.post(
     "/:database/auth/refresh",
     {
       config: { rateLimit: RATE_LIMIT },
       schema: {
-        description: "Exchange a refresh token for a new access token",
+        description:
+          "Exchange refresh token for GoTrue-compatible session (snake_case, C-08)",
         tags: ["db-auth"],
         security: [],
         body: {
           type: "object",
-          required: ["refreshToken"],
           properties: {
+            refresh_token: { type: "string" },
             refreshToken: { type: "string" },
+          },
+          anyOf: [{ required: ["refresh_token"] }, { required: ["refreshToken"] }],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              access_token: { type: "string" },
+              token_type: { type: "string" },
+              expires_in: { type: "integer" },
+              expires_at: { type: "integer" },
+              refresh_token: { type: ["string", "null"] },
+              user: sessionUserSchema,
+            },
           },
         },
       },
     },
     asyncHandler(async (req, reply) => {
       const { database } = req.params as { database: string };
-      const { refreshToken } = req.body as { refreshToken: string };
+      const refreshToken = pickRefreshToken(req.body as Record<string, unknown>);
+      if (!refreshToken) {
+        return reply.status(400).send({ error: "refresh_token is required" });
+      }
 
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Gelen token'ı hash'le ve DB'deki hash ile karşılaştır.
-      // Plain text asla DB'de aranmaz — hash üzerinden lookup yapılır.
       const incomingHash = hashRefreshToken(refreshToken);
 
-      const [session] = await sql`
-        SELECT s.id, s.user_id, s.expires_at,
-               u.email, u.role, u.is_active
+      let session = (
+        await sql`
+        SELECT s.id, s.user_id, s.expires_at, s.revoked, s.revoked_at,
+               u.email, u.role, u.is_active, u.email_verified,
+               u.created_at, u.metadata, u.provider, u.full_name, u.avatar_url
         FROM _postgrify_auth.sessions s
         JOIN _postgrify_auth.users u ON u.id = s.user_id
         WHERE s.refresh_token = ${incomingHash}
           AND s.revoked = false
           AND s.expires_at > now()
-      `;
+      `
+      )[0] as Record<string, unknown> | undefined;
 
       if (!session) {
-        return reply.status(401).send({ error: "Invalid or expired refresh token" });
+        const revoked = (
+          await sql`
+          SELECT s.id, s.user_id, s.revoked_at,
+                 u.email, u.role, u.is_active, u.email_verified,
+                 u.created_at, u.metadata, u.provider, u.full_name, u.avatar_url
+          FROM _postgrify_auth.sessions s
+          JOIN _postgrify_auth.users u ON u.id = s.user_id
+          WHERE s.refresh_token = ${incomingHash}
+            AND s.revoked = true
+        `
+        )[0] as Record<string, unknown> | undefined;
+
+        if (!revoked) {
+          return reply.status(401).send({ error: "Invalid or expired refresh token" });
+        }
+
+        const reuseMs = config.REFRESH_TOKEN_REUSE_INTERVAL_SECONDS * 1000;
+        const revokedAtMs = revoked.revoked_at
+          ? new Date(revoked.revoked_at as string).getTime()
+          : 0;
+        const withinGrace =
+          reuseMs > 0 && revokedAtMs > 0 && Date.now() - revokedAtMs <= reuseMs;
+
+        if (!withinGrace) {
+          // Reuse outside grace → revoke entire user session family (attack signal)
+          await sql`
+            UPDATE _postgrify_auth.sessions
+            SET revoked = true, revoked_at = COALESCE(revoked_at, now())
+            WHERE user_id = ${revoked.user_id} AND revoked = false
+          `;
+          await insertAuditLog(sql, "refresh_token_reuse", revoked.user_id as string, {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+            metadata: { reason: "reuse_outside_grace" },
+          });
+          return reply.status(401).send({ error: "Invalid or expired refresh token" });
+        }
+
+        // Grace: allow another rotation without family revoke (ADR-012)
+        if (!revoked.is_active) {
+          return reply.status(403).send({ error: "Account is disabled" });
+        }
+        session = revoked;
       }
 
       if (!session.is_active) {
         return reply.status(403).send({ error: "Account is disabled" });
       }
 
-      // Eski token'ı revoke et (token rotation)
+      // Eski token'ı revoke et (token rotation) — only if still active row
       await sql`
         UPDATE _postgrify_auth.sessions
-        SET revoked = true
-        WHERE id = ${session.id}
+        SET revoked = true, revoked_at = now()
+        WHERE id = ${session.id} AND revoked = false
       `;
 
-      // Yeni refresh token üret — DB'ye hash'ini kaydet
       const newRefreshToken = crypto.randomBytes(48).toString("hex");
       const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
       const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
@@ -297,7 +357,6 @@ export async function authTokensRoute(server: FastifyInstance) {
         VALUES (${session.user_id}, ${newRefreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
       `;
 
-      // Yeni access token
       const accessToken = await jwtService.signDbUserToken(
         database,
         session.user_id as string,
@@ -306,11 +365,24 @@ export async function authTokensRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
-      return reply.send({
-        accessToken,
-        refreshToken: newRefreshToken,
-        expiresIn: config.ACCESS_TOKEN_EXPIRY,
-      });
+      return reply.send(
+        buildSessionResponse({
+          accessToken,
+          refreshToken: newRefreshToken,
+          user: {
+            id: session.user_id as string,
+            email: session.email as string,
+            role: session.role as string,
+            is_active: session.is_active as boolean,
+            email_verified: session.email_verified as boolean,
+            created_at: session.created_at as string | Date | null,
+            metadata: session.metadata as Record<string, unknown> | null,
+            provider: session.provider as string | null,
+            full_name: session.full_name as string | null,
+            avatar_url: session.avatar_url as string | null,
+          },
+        })
+      );
     })
   );
 

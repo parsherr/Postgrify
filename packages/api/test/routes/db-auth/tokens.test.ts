@@ -233,8 +233,7 @@ describe("POST /:database/auth/login", () => {
 describe("POST /:database/auth/refresh", () => {
   it("Geçerli refresh token → 200, yeni tokens döner", async () => {
     sqlFnRef
-      // 1) ensureAuthSchema unsafe call — skip via default []
-      // 2) SELECT sessions JOIN users
+      // 1) SELECT sessions JOIN users (active)
       .mockResolvedValueOnce([{
         id: "session-uuid-1",
         user_id: "user-uuid-1",
@@ -242,10 +241,14 @@ describe("POST /:database/auth/refresh", () => {
         email: "test@example.com",
         role: "viewer",
         is_active: true,
+        email_verified: true,
+        created_at: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+        provider: "email",
       }])
-      // 3) UPDATE sessions SET revoked = true
+      // 2) UPDATE sessions SET revoked
       .mockResolvedValueOnce([])
-      // 4) INSERT new session
+      // 3) INSERT new session
       .mockResolvedValueOnce([]);
 
     const res = await server.inject({
@@ -256,13 +259,44 @@ describe("POST /:database/auth/refresh", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).toHaveProperty("accessToken");
-    expect(body).toHaveProperty("refreshToken");
-    expect(body).toHaveProperty("expiresIn");
+    expect(body).toHaveProperty("access_token");
+    expect(body).toHaveProperty("refresh_token");
+    expect(typeof body.expires_in).toBe("number");
+    expect(body.token_type).toBe("bearer");
+    expect(body.user).toMatchObject({ email: "test@example.com", role: "authenticated" });
+  });
+
+  it("accepts refresh_token snake_case body", async () => {
+    sqlFnRef
+      .mockResolvedValueOnce([
+        {
+          id: "session-uuid-1",
+          user_id: "user-uuid-1",
+          expires_at: new Date(Date.now() + 86400000).toISOString(),
+          email: "test@example.com",
+          role: "viewer",
+          is_active: true,
+          email_verified: true,
+          created_at: "2026-01-01T00:00:00.000Z",
+          metadata: {},
+          provider: "email",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const res = await server.inject({
+      method: "POST",
+      url: "/testdb/auth/refresh",
+      payload: { refresh_token: "valid-refresh-token-abc" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().access_token).toEqual(expect.any(String));
   });
 
   it("Geçersiz/revoked refresh token → 401", async () => {
-    sqlFnRef.mockResolvedValue([]); // session bulunamadı
+    // active lookup empty, then revoked lookup empty
+    sqlFnRef.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
     const res = await server.inject({
       method: "POST",
@@ -282,6 +316,10 @@ describe("POST /:database/auth/refresh", () => {
       email: "test@example.com",
       role: "viewer",
       is_active: false, // disabled
+      email_verified: true,
+      created_at: "2026-01-01T00:00:00.000Z",
+      metadata: {},
+      provider: "email",
     }]);
 
     const res = await server.inject({
