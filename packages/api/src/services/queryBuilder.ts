@@ -9,6 +9,7 @@
  *   FTS (E-11): fts, plfts, phfts, wfts — optional lang: plfts(turkish)
  *   JSONB (E-14): settings->>'theme'.eq.dark , attrs->'specs'->>'weight'.lt.5
  *   Cast (E-18): col::numeric , settings->>'n'::float — allowlisted types only
+ *   Array/range (E-12): tags.cs.{a,b} , schedule.ov.[2026-01-01,2026-06-01]
  *
  * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
@@ -24,6 +25,11 @@
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
+import {
+  buildArrayRangeClause,
+  isArrayRangeOp,
+  ARRAY_RANGE_OPS,
+} from "./queryArrayRange.js";
 
 export interface SelectOptions {
   select?: string;
@@ -170,7 +176,7 @@ export function toColumnSql(columnExpr: string): string {
  */
 function splitFieldAndRest(condition: string): { field: string; rest: string } {
   const opStart =
-    /(?:^|\.)((?:fts|plfts|phfts|wfts)(?:\([a-zA-Z_][a-zA-Z0-9_]{0,62}\))?|eq|neq|gt|gte|lt|lte|like|ilike|in|is)\./g;
+    /(?:^|\.)((?:fts|plfts|phfts|wfts)(?:\([a-zA-Z_][a-zA-Z0-9_]{0,62}\))?|eq|neq|gt|gte|lt|lte|like|ilike|in|is|cs|cd|ov|sl|sr|nxl|nxr|adj)\./g;
 
   let match: RegExpExecArray | null;
   let last: RegExpExecArray | null = null;
@@ -260,11 +266,16 @@ function parseCondition(
   const op = rest.slice(0, opDotIndex);
   const value = rest.slice(opDotIndex + 1);
 
+  if (isArrayRangeOp(op)) {
+    return buildArrayRangeClause(columnSql, op, value, offset);
+  }
+
   const pgOp = OPERATORS[op];
   if (!pgOp) {
     throw new Error(
       `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}, ` +
-        `${Object.keys(FTS_FUNCS).join(", ")} (optional lang: plfts(english))`
+        `${Object.keys(FTS_FUNCS).join(", ")}, ` +
+        `${Object.keys(ARRAY_RANGE_OPS).join(", ")}`
     );
   }
 
