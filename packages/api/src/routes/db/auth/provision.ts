@@ -191,7 +191,8 @@ export type AuditEvent =
   | "raw_sql_exec"
   | "account_deleted"
   | "refresh_token_reuse"
-  | "generate_link";
+  | "generate_link"
+  | "user_ban";
 
 /**
  * Per-DB auth ayarını okur. Yoksa default değeri döner.
