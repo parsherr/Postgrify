@@ -27,6 +27,7 @@ import { metaRoute } from "./meta.js";
 import { backupRoute } from "./backup.js";
 import { uploadRoute } from "./upload.js";
 import { rpcRoute } from "./rpc.js";
+import { schemaListsRoute } from "./schemaLists.js";
 
 export async function dbRoutes(server: FastifyInstance) {
   // P2: geliştirme modunda X-API-Key header'ı CRUD/query/upload endpoint'lerine
@@ -64,4 +65,5 @@ export async function dbRoutes(server: FastifyInstance) {
   await server.register(rpcRoute);
   await server.register(backupRoute);
   await server.register(uploadRoute);
+  await server.register(schemaListsRoute);
 }
