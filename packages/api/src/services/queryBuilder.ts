@@ -10,6 +10,7 @@
  *   JSONB (E-14): settings->>'theme'.eq.dark , attrs->'specs'->>'weight'.lt.5
  *   Cast (E-18): col::numeric , settings->>'n'::float — allowlisted types only
  *   Array/range (E-12): tags.cs.{a,b} , schedule.ov.[2026-01-01,2026-06-01]
+ *   like(any|all) (E-13): name.like(any).{A*,B*} , title.ilike(all).{*x*,*y*}
  *
  * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
@@ -30,6 +31,10 @@ import {
   isArrayRangeOp,
   ARRAY_RANGE_OPS,
 } from "./queryArrayRange.js";
+import {
+  buildLikeAnyAllClause,
+  matchLikeAnyAll,
+} from "./queryLikeAny.js";
 
 export interface SelectOptions {
   select?: string;
@@ -176,7 +181,7 @@ export function toColumnSql(columnExpr: string): string {
  */
 function splitFieldAndRest(condition: string): { field: string; rest: string } {
   const opStart =
-    /(?:^|\.)((?:fts|plfts|phfts|wfts)(?:\([a-zA-Z_][a-zA-Z0-9_]{0,62}\))?|eq|neq|gt|gte|lt|lte|like|ilike|in|is|cs|cd|ov|sl|sr|nxl|nxr|adj)\./g;
+    /(?:^|\.)((?:fts|plfts|phfts|wfts)(?:\([a-zA-Z_][a-zA-Z0-9_]{0,62}\))?|(?:i?like)\((?:any|all)\)|eq|neq|gt|gte|lt|lte|like|ilike|in|is|cs|cd|ov|sl|sr|nxl|nxr|adj)\./g;
 
   let match: RegExpExecArray | null;
   let last: RegExpExecArray | null = null;
@@ -256,6 +261,17 @@ function parseCondition(
   const fts = parseFtsCondition(columnSql, rest, offset);
   if (fts) return fts;
 
+  const likeAny = matchLikeAnyAll(rest);
+  if (likeAny) {
+    return buildLikeAnyAllClause(
+      columnSql,
+      likeAny.kind,
+      likeAny.quantifier,
+      likeAny.value,
+      offset
+    );
+  }
+
   const opDotIndex = rest.indexOf(".");
   if (opDotIndex === -1) {
     throw new Error(
@@ -275,7 +291,8 @@ function parseCondition(
     throw new Error(
       `Unknown operator: ${op}. Valid: ${Object.keys(OPERATORS).join(", ")}, ` +
         `${Object.keys(FTS_FUNCS).join(", ")}, ` +
-        `${Object.keys(ARRAY_RANGE_OPS).join(", ")}`
+        `${Object.keys(ARRAY_RANGE_OPS).join(", ")}, ` +
+        `like(any|all), ilike(any|all)`
     );
   }
 
