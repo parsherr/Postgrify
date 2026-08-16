@@ -1,12 +1,14 @@
 /**
- * Schema introspection lists (E-64 / E-68 / E-73 / E-79):
+ * Schema introspection lists (E-64 / E-68 / E-73 / E-79 / E-82):
  *   GET /db/:database/views
  *   GET /db/:database/functions
  *   GET /db/:database/indexes
  *   GET /db/:database/schemas
+ *   GET /db/:database/roles
  *
  * Auth: schema scope (admin bypasses). Views/functions/indexes are public-schema
- * only (same as tables). Schemas lists all non-system namespaces.
+ * only (same as tables). Schemas lists all non-system namespaces. Roles exclude
+ * pg_* system roles.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -202,6 +204,53 @@ export async function schemaListsRoute(server: FastifyInstance) {
 
       await server.cache.set(cacheKey, JSON.stringify(indexes), TTL.SCHEMA);
       return reply.send(indexes);
+    })
+  );
+
+  // ── E-82 GET /roles ───────────────────────────────────────────────────────
+  server.get(
+    "/:database/roles",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description:
+          "List non-system PostgreSQL roles (E-82): name, is_superuser, " +
+          "can_login, member_of. Excludes pg_* roles.",
+        tags: ["schema"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const cacheKey = server.cache.buildKey(dbName, "roles");
+      const cached = await server.cache.get(cacheKey);
+      if (cached) return reply.send(JSON.parse(cached));
+
+      const sql = server.poolManager.getPool(dbName);
+      const roles = await sql`
+        SELECT
+          r.rolname AS name,
+          r.rolsuper AS is_superuser,
+          r.rolcanlogin AS can_login,
+          COALESCE(
+            (
+              SELECT array_agg(m.rolname ORDER BY m.rolname)
+              FROM pg_catalog.pg_auth_members am
+              JOIN pg_catalog.pg_roles m ON m.oid = am.roleid
+              WHERE am.member = r.oid
+            ),
+            ARRAY[]::name[]
+          ) AS member_of
+        FROM pg_catalog.pg_roles r
+        WHERE r.rolname NOT LIKE 'pg_%'
+        ORDER BY r.rolname
+      `;
+
+      await server.cache.set(cacheKey, JSON.stringify(roles), TTL.SCHEMA);
+      return reply.send(roles);
     })
   );
 }
