@@ -1,5 +1,5 @@
 /**
- * E-64 / E-68 / E-73 schema list route tests.
+ * E-64 / E-68 / E-73 / E-79 schema list route tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -12,6 +12,10 @@ const JWT_SECRET = "test-secret-must-be-at-least-32-characters";
 vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 
+const MOCK_SCHEMAS = [
+  { name: "public", owner: "postgres" },
+  { name: "_postgrify_auth", owner: "postgres" },
+];
 const MOCK_VIEWS = [
   {
     schema: "public",
@@ -45,7 +49,10 @@ const MOCK_INDEXES = [
 
 vi.mock("postgres", () => {
   const sqlFn = vi.fn((strings: TemplateStringsArray) => {
-    const q = strings?.[0] ?? "";
+    const q = strings?.join?.(" ") ?? strings?.[0] ?? "";
+    if (q.includes("pg_namespace") && q.includes("pg_get_userbyid")) {
+      return Promise.resolve(MOCK_SCHEMAS);
+    }
     if (q.includes("pg_get_viewdef")) return Promise.resolve(MOCK_VIEWS);
     if (q.includes("pg_get_function_result")) return Promise.resolve(MOCK_FUNCS);
     if (q.includes("pg_index")) return Promise.resolve(MOCK_INDEXES);
@@ -129,6 +136,49 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.close();
   vi.unstubAllEnvs();
+});
+
+describe("GET /db/:database/schemas (E-79)", () => {
+  it("schema token lists name + owner", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${schemaToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body[0]).toEqual({ name: "public", owner: "postgres" });
+    expect(body.some((s: { name: string }) => s.name === "_postgrify_auth")).toBe(
+      true
+    );
+  });
+
+  it("admin token allowed", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("read-only DB token denied", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/schemas",
+      headers: { Authorization: `Bearer ${readToken}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("no token → 401", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/db/project1/schemas",
+    });
+    expect(res.statusCode).toBe(401);
+  });
 });
 
 describe("GET /db/:database/views (E-64)", () => {

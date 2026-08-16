@@ -1,10 +1,12 @@
 /**
- * Schema introspection lists (E-64 / E-68 / E-73):
+ * Schema introspection lists (E-64 / E-68 / E-73 / E-79):
  *   GET /db/:database/views
  *   GET /db/:database/functions
  *   GET /db/:database/indexes
+ *   GET /db/:database/schemas
  *
- * Auth: schema scope (admin bypasses). Public schema only — same as tables.
+ * Auth: schema scope (admin bypasses). Views/functions/indexes are public-schema
+ * only (same as tables). Schemas lists all non-system namespaces.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -13,6 +15,44 @@ import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { TTL } from "../../services/cacheService.js";
 
 export async function schemaListsRoute(server: FastifyInstance) {
+  // ── E-79 GET /schemas ─────────────────────────────────────────────────────
+  server.get(
+    "/:database/schemas",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description:
+          "List non-system schemas in the database (name + owner). " +
+          "Excludes pg_* and information_schema.",
+        tags: ["schema"],
+        params: {
+          type: "object",
+          properties: { database: { type: "string" } },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const cacheKey = server.cache.buildKey(dbName, "schemas");
+      const cached = await server.cache.get(cacheKey);
+      if (cached) return reply.send(JSON.parse(cached));
+
+      const sql = server.poolManager.getPool(dbName);
+      const schemas = await sql`
+        SELECT
+          n.nspname AS name,
+          pg_catalog.pg_get_userbyid(n.nspowner) AS owner
+        FROM pg_catalog.pg_namespace n
+        WHERE n.nspname NOT LIKE 'pg_%'
+          AND n.nspname <> 'information_schema'
+        ORDER BY n.nspname
+      `;
+
+      await server.cache.set(cacheKey, JSON.stringify(schemas), TTL.SCHEMA);
+      return reply.send(schemas);
+    })
+  );
+
   // ── E-64 GET /views ───────────────────────────────────────────────────────
   server.get(
     "/:database/views",
