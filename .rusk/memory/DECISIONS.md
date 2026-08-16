@@ -32,6 +32,18 @@
 **Karar:** Auth response alanları GoTrue snake_case. Request body hem `refresh_token` hem `refreshToken` kabul.
 **Neden:** SDK/Supabase client uyumu; mevcut client'lara yumuşak geçiş.
 
+## ADR-011: user.role = authenticated; Postgrify role in app_metadata (2026-08-16)
+**Karar:** Login `user.role` GoTrue gibi `"authenticated"`; Postgrify scope (`viewer|editor|admin`) → `app_metadata.role` (+ `is_active`).
+**Neden:** Supabase client uyumu; JWT scope ayrı claim'de kalır (`signDbUserToken`).
+
+## ADR-012: Refresh reuse grace (2026-08-16)
+**Karar:** `REFRESH_TOKEN_REUSE_INTERVAL_SECONDS` (default 10) içinde revoked token ile tekrar refresh → yeni rotation (plaintext successor saklanmaz). Interval dışı → kullanıcının tüm aktif session'ları revoke + audit `refresh_token_reuse`.
+**Neden:** Eşzamanlı client isteklerine tolerans; GoTrue family revoke saldırı modeline yaklaşım.
+
+## ADR-013: Public auth settings + admin enrich (2026-08-16)
+**Karar:** `GET /db/:db/auth/settings` auth gerektirmez (api key hâlâ group hook). Response GoTrue public shape (`external`, `disable_signup`, `mailer_autoconfirm`). Admin/schema Bearer ile aynı path flat string ayarları + aliases döner (GUI `=== "true"` kırılmaz).
+**Neden:** SDK/frontend provider keşfi; mevcut AuthsTab string karşılaştırmaları korunur.
+
 ## ADR-009: Batch mutate filter zorunlu kalır (2026-08-16)
 **Karar:** PATCH/DELETE without `where` → 400. Response'a `X-Postgrify-Require-Filter: true`.
 **Neden:** PostgREST full-table mutate'e izin verir; Postgrify güvenlik tercihi bilinçli sapma.

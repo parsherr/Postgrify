@@ -1,22 +1,14 @@
-# Active Work — 2026-08-16 (TURTLE + LOOP)
+# Active Work — 2026-08-16 (TURTLE + LIVE DOCKER)
 
 ## Kural
-Her adımda bu dosyayı güncelle. Canlı Docker/curl → geliştirme bitince.
+Sormadan devam. PR body’de Made with Cursor yok (`gh pr edit`).
+Live: `http://localhost:6880` — smoke `.rusk/memory/smoke-live.ps1`
 
-## Açık PR’lar
-| ID | PR |
-|----|-----|
-| C-01 | https://github.com/parsherr/Postgrify/pull/1 |
-| E-01 | https://github.com/parsherr/Postgrify/pull/2 |
-| C-02 | https://github.com/parsherr/Postgrify/pull/3 |
-| C-03 | https://github.com/parsherr/Postgrify/pull/4 |
-| C-04 | https://github.com/parsherr/Postgrify/pull/5 |
-| C-05+C-06 | https://github.com/parsherr/Postgrify/pull/6 |
+## Stack
+Admin `admin@postgrify.local` / `postgrify-admin` · DB `smoke_db`
 
 ## Şu an
-🎯 **E-02** `OPTIONS /db/:database/:table`
+🎯 **C-17 / C-18 / C-20** users pagination + PATCH enrich + public settings — commit/PR
 
 ## Kuyruk
-- C-07 login snake_case → C-08 refresh → C-09 logout → C-10/19 signup → …
-- E-09 RPC, E-25 ready
-- En sonda: Docker + curl smoke
+E-09/E-10 RPC → E-25 /ready → kalan missing criticals → smoke genişlet

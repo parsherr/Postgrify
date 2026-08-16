@@ -1,16 +1,17 @@
 /**
  * Per-DB auth ayarları:
  *
- *   GET  /:database/auth/settings           — tüm ayarları getir
- *   PUT  /:database/auth/settings           — ayarları güncelle
+ *   GET  /:database/auth/settings           — public GoTrue shape; admin+schema → full
+ *   PUT  /:database/auth/settings           — ayarları güncelle (schema)
  *   GET  /:database/auth/settings/oauth     — OAuth provider listesi
  *   POST /:database/auth/settings/oauth     — OAuth provider ekle/güncelle
  *   DELETE /:database/auth/settings/oauth/:provider — OAuth provider sil
  *
- * Tüm ayar endpoint'leri admin scope gerektirir.
+ * C-20: GET is public (apiKey still required via group hook). With admin/schema
+ * Bearer, response includes full settings plus typed aliases for the GUI.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { scopeGuard } from "../../../middleware/scopeGuard.js";
 import { ensureAuthSchema } from "./provision.js";
@@ -30,32 +31,129 @@ const AUTH_SETTING_KEYS = [
 
 type AuthSettingKey = (typeof AUTH_SETTING_KEYS)[number];
 
+const BOOL_SETTING_KEYS = new Set([
+  "email_signup_enabled",
+  "magic_link_enabled",
+  "email_verify_required",
+  "oauth_enabled",
+]);
+
 const adminGuard = (server: FastifyInstance) =>
   [server.authenticate, scopeGuard("schema")] as const;
 
+function asBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === "true";
+}
+
+async function loadSettingMap(
+  sql: ReturnType<FastifyInstance["poolManager"]["getPool"]>
+): Promise<Record<string, string>> {
+  const rows = await sql`
+    SELECT key, value FROM _postgrify_auth.auth_settings
+    ORDER BY key
+  `;
+  return Object.fromEntries(rows.map((r) => [r.key as string, r.value as string]));
+}
+
+async function loadOAuthFlags(
+  sql: ReturnType<FastifyInstance["poolManager"]["getPool"]>
+): Promise<{ google: boolean; github: boolean }> {
+  const rows = await sql`
+    SELECT provider, enabled
+    FROM _postgrify_auth.oauth_providers
+  `;
+  let google = false;
+  let github = false;
+  for (const row of rows) {
+    if (row.provider === "google" && row.enabled) google = true;
+    if (row.provider === "github" && row.enabled) github = true;
+  }
+  return { google, github };
+}
+
+function buildPublicSettings(
+  settings: Record<string, string>,
+  oauth: { google: boolean; github: boolean }
+) {
+  const emailEnabled = asBool(settings.email_signup_enabled, true);
+  const magicLink = asBool(settings.magic_link_enabled, false);
+  const verifyRequired = asBool(settings.email_verify_required, false);
+
+  return {
+    external: {
+      email: emailEnabled,
+      google: oauth.google,
+      github: oauth.github,
+      apple: false,
+      phone: false,
+      magic_link: magicLink,
+    },
+    disable_signup: !emailEnabled,
+    mailer_autoconfirm: !verifyRequired,
+    phone_autoconfirm: false,
+    sms_provider: "",
+  };
+}
+
+function buildAdminSettings(
+  settings: Record<string, string>,
+  oauth: { google: boolean; github: boolean }
+) {
+  const publicShape = buildPublicSettings(settings, oauth);
+
+  // Flat keys stay strings for GUI (AuthsTab compares === "true").
+  // Typed GoTrue aliases are added alongside.
+  const typed: Record<string, unknown> = { ...settings };
+  for (const key of BOOL_SETTING_KEYS) {
+    if (settings[key] !== undefined) {
+      typed[`${key}_bool`] = asBool(settings[key], false);
+    }
+  }
+
+  return {
+    ...typed,
+    ...publicShape,
+  };
+}
+
+async function requesterHasSchemaAccess(
+  server: FastifyInstance,
+  req: FastifyRequest
+): Promise<boolean> {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return false;
+  const payload = await server.jwtService.verifyAdminOrDb(auth.slice(7));
+  if (!payload) return false;
+  if (payload.role === "admin") return true;
+  if (payload.sub === req.dbName && payload.scope?.includes("schema")) {
+    return true;
+  }
+  return false;
+}
+
 export async function authSettingsRoute(server: FastifyInstance) {
-  // ── GET /:database/auth/settings ────────────────────────────────────────
+  // ── GET /:database/auth/settings (C-20 public + admin enrich) ───────────
   server.get(
     "/:database/auth/settings",
     {
-      preHandler: [...adminGuard(server)],
       schema: {
-        description: "Get all auth settings for this database.",
+        description:
+          "Public GoTrue-style auth settings (C-20). With admin/schema Bearer, also returns full flat settings for the admin GUI.",
         tags: ["db-auth"],
-        security: [{ bearerAuth: [] }],
       },
     },
     asyncHandler(async (req, reply) => {
       const sql = server.poolManager.getPool(req.dbName!);
       await ensureAuthSchema(sql);
 
-      const rows = await sql`
-        SELECT key, value FROM _postgrify_auth.auth_settings
-        ORDER BY key
-      `;
+      const settings = await loadSettingMap(sql);
+      const oauth = await loadOAuthFlags(sql);
 
-      const settings = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-      return reply.send(settings);
+      if (await requesterHasSchemaAccess(server, req)) {
+        return reply.send(buildAdminSettings(settings, oauth));
+      }
+      return reply.send(buildPublicSettings(settings, oauth));
     })
   );
 
@@ -71,15 +169,15 @@ export async function authSettingsRoute(server: FastifyInstance) {
         body: {
           type: "object",
           properties: {
-            email_signup_enabled:  { type: "string", enum: ["true", "false"] },
-            magic_link_enabled:    { type: "string", enum: ["true", "false"] },
+            email_signup_enabled: { type: "string", enum: ["true", "false"] },
+            magic_link_enabled: { type: "string", enum: ["true", "false"] },
             email_verify_required: { type: "string", enum: ["true", "false"] },
-            oauth_enabled:         { type: "string", enum: ["true", "false"] },
-            signup_redirect_url:   { type: "string" },
-            token_expiry:          { type: "string", pattern: "^\\d+[smhd]$" },
-            refresh_token_expiry:  { type: "string", pattern: "^\\d+[smhd]$" },
+            oauth_enabled: { type: "string", enum: ["true", "false"] },
+            signup_redirect_url: { type: "string" },
+            token_expiry: { type: "string", pattern: "^\\d+[smhd]$" },
+            refresh_token_expiry: { type: "string", pattern: "^\\d+[smhd]$" },
             // Yeni kullanıcıların varsayılan rolü (SORUN #7 düzeltmesi)
-            default_user_role:     { type: "string", enum: ["viewer", "editor", "admin"] },
+            default_user_role: { type: "string", enum: ["viewer", "editor", "admin"] },
           },
           additionalProperties: false,
         },
@@ -120,10 +218,9 @@ export async function authSettingsRoute(server: FastifyInstance) {
         `;
       }
 
-      const rows = await sql`
-        SELECT key, value FROM _postgrify_auth.auth_settings ORDER BY key
-      `;
-      return reply.send(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+      const settings = await loadSettingMap(sql);
+      const oauth = await loadOAuthFlags(sql);
+      return reply.send(buildAdminSettings(settings, oauth));
     })
   );
 
@@ -165,11 +262,11 @@ export async function authSettingsRoute(server: FastifyInstance) {
           type: "object",
           required: ["provider", "client_id", "client_secret", "redirect_uri"],
           properties: {
-            provider:      { type: "string", enum: ["google", "github"] },
-            client_id:     { type: "string", minLength: 1 },
+            provider: { type: "string", enum: ["google", "github"] },
+            client_id: { type: "string", minLength: 1 },
             client_secret: { type: "string", minLength: 1 },
-            redirect_uri:  { type: "string", minLength: 1 },
-            enabled:       { type: "boolean" },
+            redirect_uri: { type: "string", minLength: 1 },
+            enabled: { type: "boolean" },
           },
         },
       },
