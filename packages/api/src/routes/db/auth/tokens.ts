@@ -1,9 +1,9 @@
 /**
  * DB Auth Token routes — email+şifre ile login, JWT üretimi ve logout.
  *
- *   POST /:database/auth/login   — kimlik doğrula, accessToken + refreshToken döner
+ *   POST /:database/auth/login   — C-07 GoTrue snake_case session
  *   POST /:database/auth/logout  — refresh token revoke et
- *   POST /:database/auth/refresh — yeni access token al
+ *   POST /:database/auth/refresh — yeni access token al (C-08 snake_case sonraki adım)
  *
  * Bu endpoint'ler authenticate preHandler gerektirmez — public.
  * Rate limit: 10 req/dk (brute-force koruması).
@@ -15,6 +15,7 @@ import { verifyPassword } from "../../../services/passwordService.js";
 import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 import { ensureAuthSchema, insertAuditLog, getAuthSetting } from "./provision.js";
+import { buildSessionResponse, parseDurationMs } from "./sessionResponse.js";
 import crypto from "node:crypto";
 
 /**
@@ -34,6 +35,21 @@ function hashRefreshToken(token: string): string {
 
 const RATE_LIMIT = { max: 10, timeWindow: "1 minute" } as const;
 
+const sessionUserSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    aud: { type: "string" },
+    role: { type: "string" },
+    email: { type: "string" },
+    email_confirmed_at: { type: ["string", "null"] },
+    created_at: { type: "string" },
+    updated_at: { type: "string" },
+    app_metadata: { type: "object", additionalProperties: true },
+    user_metadata: { type: "object", additionalProperties: true },
+  },
+} as const;
+
 export async function authTokensRoute(server: FastifyInstance) {
   const jwtService = new JwtService(() => config.JWT_SECRET);
 
@@ -43,14 +59,15 @@ export async function authTokensRoute(server: FastifyInstance) {
     {
       config: { rateLimit: RATE_LIMIT },
       schema: {
-        description: "Login with email + password, returns access token and refresh token",
+        description:
+          "Login with email + password (GoTrue-compatible snake_case session, C-07)",
         tags: ["db-auth"],
         security: [],
         body: {
           type: "object",
           required: ["email", "password"],
           properties: {
-            email:    { type: "string", format: "email" },
+            email: { type: "string", format: "email" },
             password: { type: "string", minLength: 1 },
           },
         },
@@ -58,18 +75,12 @@ export async function authTokensRoute(server: FastifyInstance) {
           200: {
             type: "object",
             properties: {
-              accessToken:  { type: "string" },
-              refreshToken: { type: ["string", "null"] },
-              expiresIn:    { type: "string" },
-              user: {
-                type: "object",
-                properties: {
-                  id:        { type: "string" },
-                  email:     { type: "string" },
-                  role:      { type: "string" },
-                  is_active: { type: "boolean" },
-                },
-              },
+              access_token: { type: "string" },
+              token_type: { type: "string" },
+              expires_in: { type: "integer" },
+              expires_at: { type: "integer" },
+              refresh_token: { type: ["string", "null"] },
+              user: sessionUserSchema,
             },
           },
         },
@@ -82,10 +93,11 @@ export async function authTokensRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Kullanıcıyı bul (hash + lockout kolonları dahil — sadece bu sorguda)
+      // Kullanıcıyı bul (hash + lockout + GoTrue user alanları)
       const [user] = await sql`
         SELECT id, email, password_hash, role, is_active,
-               email_verified, failed_attempts, locked_until
+               email_verified, failed_attempts, locked_until,
+               created_at, metadata, provider, full_name, avatar_url
         FROM _postgrify_auth.users
         WHERE email = ${email.toLowerCase()}
       `;
@@ -145,8 +157,8 @@ export async function authTokensRoute(server: FastifyInstance) {
           await getAuthSetting(sql, "account_lockout_minutes", "15"),
           10
         );
-        const newAttempts = (user.failed_attempts as number ?? 0) + 1;
-        const shouldLock  = newAttempts >= maxAttempts;
+        const newAttempts = ((user.failed_attempts as number) ?? 0) + 1;
+        const shouldLock = newAttempts >= maxAttempts;
         const lockedUntil = shouldLock
           ? new Date(Date.now() + lockMinutes * 60_000).toISOString()
           : null;
@@ -193,24 +205,31 @@ export async function authTokensRoute(server: FastifyInstance) {
       // Ham token yalnızca client'ta tutulur; DB'de SHA-256 hash'i saklanır.
       const refreshToken = crypto.randomBytes(48).toString("hex");
       const refreshTokenHash = hashRefreshToken(refreshToken);
-      const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
+      const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
         VALUES (${user.id}, ${refreshTokenHash}, ${expiresAt.toISOString()}, ${req.ip}, ${req.headers["user-agent"] ?? null})
       `;
 
-      return reply.send({
-        accessToken,
-        refreshToken,
-        expiresIn: config.ACCESS_TOKEN_EXPIRY,
-        user: {
-          id:        user.id,
-          email:     user.email,
-          role:      user.role,
-          is_active: user.is_active,
-        },
-      });
+      return reply.send(
+        buildSessionResponse({
+          accessToken,
+          refreshToken,
+          user: {
+            id: user.id as string,
+            email: user.email as string,
+            role: user.role as string,
+            is_active: user.is_active as boolean,
+            email_verified: user.email_verified as boolean,
+            created_at: user.created_at as string | Date | null,
+            metadata: user.metadata as Record<string, unknown> | null,
+            provider: user.provider as string | null,
+            full_name: user.full_name as string | null,
+            avatar_url: user.avatar_url as string | null,
+          },
+        })
+      );
     })
   );
 
@@ -271,7 +290,7 @@ export async function authTokensRoute(server: FastifyInstance) {
       // Yeni refresh token üret — DB'ye hash'ini kaydet
       const newRefreshToken = crypto.randomBytes(48).toString("hex");
       const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
-      const expiresAt = new Date(Date.now() + parseDuration(config.REFRESH_TOKEN_EXPIRY));
+      const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
 
       await sql`
         INSERT INTO _postgrify_auth.sessions (user_id, refresh_token, expires_at, ip, user_agent)
@@ -343,22 +362,4 @@ export async function authTokensRoute(server: FastifyInstance) {
       return reply.status(204).send();
     })
   );
-}
-
-/**
- * "15m", "7d", "24h" gibi expiry string'ini milisaniyeye çevirir.
- */
-function parseDuration(expiry: string): number {
-  const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) return 7 * 24 * 60 * 60 * 1000; // default 7 days
-
-  const value = parseInt(match[1], 10);
-  const unit = match[2];
-  const multipliers: Record<string, number> = {
-    s: 1_000,
-    m: 60_000,
-    h: 3_600_000,
-    d: 86_400_000,
-  };
-  return value * (multipliers[unit] ?? 86_400_000);
 }
