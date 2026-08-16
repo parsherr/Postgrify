@@ -2,6 +2,7 @@
  * Row CRUD route'ları.
  *
  * C-01 (aktif): GET list → PostgREST array + Content-Range + Prefer:count
+ * E-23: Accept: text/csv → CSV body
  * Mutations: legacy body shape korunuyor (sonraki turtle adımlarında Prefer eklenecek)
  *
  *   GET    /db/:database/:table
@@ -29,6 +30,7 @@ import { buildEmbedSelectFragments } from "../../services/queryEmbedSql.js";
 import { TTL } from "../../services/cacheService.js";
 import { parsePrefer } from "../../utils/prefer.js";
 import { setContentRange } from "../../utils/contentRange.js";
+import { rowsToCsv, wantsCsv } from "../../utils/csv.js";
 import crypto from "node:crypto";
 
 function queryCacheKey(
@@ -171,6 +173,11 @@ async function handleGetList(
         offset: number;
       };
       setContentRange(reply, parsed.offset, parsed.rows.length, parsed.total);
+      if (wantsCsv(req.headers.accept)) {
+        return reply
+          .type("text/csv")
+          .send(rowsToCsv(parsed.rows as Record<string, unknown>[]));
+      }
       return reply.send(parsed.rows);
     }
   }
@@ -230,7 +237,13 @@ async function handleGetList(
   }
 
   // Body is the array (C-01). HEAD (E-01): empty body — RFC 9110.
+  // E-23: Accept: text/csv → CSV body (header + rows).
   if (headOnly) return reply.status(200).send();
+  if (wantsCsv(req.headers.accept)) {
+    return reply
+      .type("text/csv")
+      .send(rowsToCsv(rows as Record<string, unknown>[]));
+  }
   return reply.send(rows);
 }
 
@@ -242,8 +255,8 @@ export async function rowsRoute(server: FastifyInstance) {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
         description:
-          "List rows. Body is a JSON array. Pagination via Content-Range; " +
-          "Prefer: count=exact|planned|estimated for totals.",
+          "List rows. Body is a JSON array (or text/csv when Accept: text/csv). " +
+          "Pagination via Content-Range; Prefer: count=exact|planned|estimated for totals.",
         tags: ["rows"],
         querystring: {
           type: "object",
