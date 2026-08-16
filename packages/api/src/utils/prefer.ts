@@ -12,12 +12,15 @@ export type PreferReturn = "minimal" | "representation" | "headers-only";
 export type PreferCount = "exact" | "planned" | "estimated" | null;
 export type PreferResolution = "merge-duplicates" | "ignore-duplicates" | null;
 export type PreferMissing = "default" | "null" | null;
+export type PreferParams = "single-object" | "multiple-objects" | null;
 
 export interface PreferOptions {
   return: PreferReturn;
   count: PreferCount;
   resolution: PreferResolution;
   missing: PreferMissing;
+  /** RPC: how JSON body maps to function args (E-10). */
+  params: PreferParams;
 }
 
 const DEFAULTS: PreferOptions = {
@@ -25,6 +28,7 @@ const DEFAULTS: PreferOptions = {
   count: null,
   resolution: null,
   missing: null,
+  params: null,
 };
 
 /**
@@ -59,6 +63,10 @@ export function parsePrefer(header: string | string[] | undefined): PreferOption
     } else if (key === "missing") {
       if (value === "default" || value === "null") {
         result.missing = value;
+      }
+    } else if (key === "params") {
+      if (value === "single-object" || value === "multiple-objects") {
+        result.params = value;
       }
     }
   }
