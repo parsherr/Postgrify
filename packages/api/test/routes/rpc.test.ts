@@ -92,7 +92,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  sqlFnRef.mockResolvedValue([{ "?column?": 1 }]); // functionExists
+  // resolvePublicFunction → provolatile stable by default
+  sqlFnRef.mockResolvedValue([{ provolatile: "s" }]);
   sqlFnRef.unsafe = vi.fn().mockResolvedValue([{ id: 1, name: "Ali" }]);
 });
 
@@ -140,6 +141,30 @@ describe("GET /:database/rpc/:function (E-09)", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toBe(42);
+  });
+
+  it("GET VOLATILE → 405", async () => {
+    sqlFnRef.mockResolvedValue([{ provolatile: "v" }]);
+    const res = await server.inject({
+      method: "GET",
+      url: "/testdb/rpc/do_side_effect",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(405);
+    expect(res.json().message).toMatch(/VOLATILE/i);
+  });
+
+  it("invalid arg type → 400 not 500", async () => {
+    sqlFnRef.mockResolvedValue([{ provolatile: "s" }]);
+    sqlFnRef.unsafe = vi
+      .fn()
+      .mockRejectedValue(new Error('invalid input syntax for type integer: "abc"'));
+    const res = await server.inject({
+      method: "GET",
+      url: "/testdb/rpc/smoke_add?a=abc&b=1",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });
 
@@ -191,6 +216,21 @@ describe("POST /:database/rpc/:function (E-10)", () => {
       payload: {},
     });
     expect(res.statusCode).toBe(204);
+  });
+
+  it("POST VOLATILE allowed", async () => {
+    sqlFnRef.mockResolvedValue([{ provolatile: "v" }]);
+    sqlFnRef.unsafe = vi.fn().mockResolvedValue([{ smoke_touch: "touched" }]);
+    const res = await server.inject({
+      method: "POST",
+      url: "/testdb/rpc/do_side_effect",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json",
+      },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
   });
 });
 

@@ -8,6 +8,10 @@
  *   params=single-object  → body passed as single jsonb argument
  *   return=minimal        → 204 when no representation needed / void-like empty
  *
+ * Safety (above PostgREST default):
+ *   GET rejects VOLATILE functions (405) — side effects require POST
+ *   Client SQL/type errors → 400 (not opaque 500)
+ *
  * Optional query (GET and POST): limit, offset, order=col.asc|col.desc
  */
 
@@ -156,19 +160,27 @@ function unwrapResult(rows: Record<string, unknown>[]): unknown {
   return rows;
 }
 
-async function functionExists(
+async function resolvePublicFunction(
   sql: ReturnType<FastifyInstance["poolManager"]["getPool"]>,
   fnName: string
-): Promise<boolean> {
+): Promise<{ provolatile: "i" | "s" | "v" } | null> {
   const rows = await sql`
-    SELECT 1
+    SELECT p.provolatile
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
       AND p.proname = ${fnName}
     LIMIT 1
   `;
-  return rows.length > 0;
+  if (rows.length === 0) return null;
+  return { provolatile: rows[0].provolatile as "i" | "s" | "v" };
+}
+
+function isClientSqlError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /invalid input syntax|cannot cast|could not convert|function .* is not unique|ambiguous function|cannot call/i.test(
+    msg
+  );
 }
 
 function preferRequestsMinimal(
@@ -205,16 +217,34 @@ async function executeRpc(
   }
 
   const sql = server.poolManager.getPool(req.dbName!);
-
-  if (!(await functionExists(sql, fnName))) {
+  const meta = await resolvePublicFunction(sql, fnName);
+  if (!meta) {
     return reply.status(404).send({ error: `Function not found: ${fnName}` });
   }
 
+  // GET must not run VOLATILE side effects (PostgREST footgun → industry harden).
+  if (req.method === "GET" && meta.provolatile === "v") {
+    return reply.status(405).send({
+      error: "Method Not Allowed",
+      message:
+        "VOLATILE functions cannot be called with GET. Use POST /rpc/:function instead.",
+    });
+  }
+
   const values = [...call.values, ...wrapped.extra];
-  const rows = (await sql.unsafe(
-    wrapped.text,
-    values as never[]
-  )) as Record<string, unknown>[];
+  let rows: Record<string, unknown>[];
+  try {
+    rows = (await sql.unsafe(
+      wrapped.text,
+      values as never[]
+    )) as Record<string, unknown>[];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isClientSqlError(err)) {
+      return reply.status(400).send({ error: msg });
+    }
+    throw err;
+  }
 
   // RPC default is representation (unlike table mutations). Only 204 when asked.
   if (preferRequestsMinimal(req.headers.prefer)) {
