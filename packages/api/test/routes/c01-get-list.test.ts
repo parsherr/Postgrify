@@ -208,4 +208,42 @@ describe("C-01 GET /db/:database/:table", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("E-21 Range: 0-0 → 206 + Content-Range", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users",
+      headers: {
+        Authorization: `Bearer ${readToken}`,
+        Range: "0-0",
+        "Range-Unit": "items",
+      },
+    });
+    expect(res.statusCode).toBe(206);
+    expect(res.headers["range-unit"]).toBe("items");
+    // Mock returns 2 rows regardless of LIMIT; Content-Range reflects returned rows.
+    expect(res.headers["content-range"]).toMatch(/^0-\d+\//);
+    expect(Array.isArray(res.json())).toBe(true);
+  });
+
+  it("E-21 Range items=0-19 → 206", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users?limit=100",
+      headers: {
+        Authorization: `Bearer ${readToken}`,
+        Range: "items=0-19",
+      },
+    });
+    expect(res.statusCode).toBe(206);
+  });
+
+  it("without Range stays 200", async () => {
+    const res = await server.inject({
+      method: "GET",
+      url: "/project1/users?limit=2",
+      headers: { Authorization: `Bearer ${readToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+  });
 });

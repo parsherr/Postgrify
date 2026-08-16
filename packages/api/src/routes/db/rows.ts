@@ -2,6 +2,7 @@
  * Row CRUD route'ları.
  *
  * C-01 (aktif): GET list → PostgREST array + Content-Range + Prefer:count
+ * E-21: Range / Range-Unit: items → limit/offset + 206 Partial Content
  * Mutations: legacy body shape korunuyor (sonraki turtle adımlarında Prefer eklenecek)
  *
  *   GET    /db/:database/:table
@@ -28,7 +29,10 @@ import {
 import { buildEmbedSelectFragments } from "../../services/queryEmbedSql.js";
 import { TTL } from "../../services/cacheService.js";
 import { parsePrefer } from "../../utils/prefer.js";
-import { setContentRange } from "../../utils/contentRange.js";
+import {
+  setContentRange,
+  resolveListWindow,
+} from "../../utils/contentRange.js";
 import crypto from "node:crypto";
 
 function queryCacheKey(
@@ -150,14 +154,20 @@ async function handleGetList(
     });
   }
 
-  const limit = Math.min(query.limit ?? 100, 1000);
-  const offset = query.offset ?? 0;
+  const { limit, offset, fromRange } = resolveListWindow(
+    query,
+    req.headers.range,
+    req.headers["range-unit"]
+  );
 
   // E-01: HEAD + limit=0 → skip row SELECT (PostgREST optimization); COUNT if Prefer:count
   const skipRowFetch = headOnly && limit === 0;
 
   const cacheKey = queryCacheKey(server.cache, dbName, table, {
     ...query,
+    limit,
+    offset,
+    fromRange,
     count: prefer.count,
   });
 
@@ -171,6 +181,7 @@ async function handleGetList(
         offset: number;
       };
       setContentRange(reply, parsed.offset, parsed.rows.length, parsed.total);
+      if (fromRange) reply.status(206);
       return reply.send(parsed.rows);
     }
   }
@@ -230,8 +241,10 @@ async function handleGetList(
   }
 
   // Body is the array (C-01). HEAD (E-01): empty body — RFC 9110.
-  if (headOnly) return reply.status(200).send();
-  return reply.send(rows);
+  // E-21: successful Range requests use 206 Partial Content.
+  const status = fromRange ? 206 : 200;
+  if (headOnly) return reply.status(status).send();
+  return reply.status(status).send(rows);
 }
 
 export async function rowsRoute(server: FastifyInstance) {
@@ -242,7 +255,8 @@ export async function rowsRoute(server: FastifyInstance) {
       preHandler: [server.authenticateAny, scopeGuard("read")],
       schema: {
         description:
-          "List rows. Body is a JSON array. Pagination via Content-Range; " +
+          "List rows. Body is a JSON array. Pagination via Content-Range, " +
+          "Range/Range-Unit: items (206), or ?limit=&offset=; " +
           "Prefer: count=exact|planned|estimated for totals.",
         tags: ["rows"],
         querystring: {
