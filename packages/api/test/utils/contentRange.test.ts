@@ -1,9 +1,13 @@
 /**
- * Unit tests for Content-Range helper (C-01 / E-01).
+ * Unit tests for Content-Range helper (C-01 / E-01 / E-21).
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { setContentRange, parseRangeHeader } from "../../src/utils/contentRange.js";
+import {
+  setContentRange,
+  parseRangeHeader,
+  resolveListWindow,
+} from "../../src/utils/contentRange.js";
 
 function mockReply() {
   const headers: Record<string, string> = {};
@@ -49,11 +53,47 @@ describe("parseRangeHeader", () => {
     expect(parseRangeHeader("items=0-19")).toEqual({ offset: 0, limit: 20 });
   });
 
+  it("parses bare 0-19", () => {
+    expect(parseRangeHeader("0-19")).toEqual({ offset: 0, limit: 20 });
+  });
+
   it("returns null for invalid", () => {
     expect(parseRangeHeader("bytes=0-19")).toBeNull();
+    expect(parseRangeHeader("10-5")).toBeNull();
     expect(parseRangeHeader(undefined)).toBeNull();
   });
 });
 
-// silence unused vi in case
+describe("resolveListWindow (E-21)", () => {
+  it("Range overrides query limit/offset", () => {
+    expect(
+      resolveListWindow({ limit: 50, offset: 10 }, "0-19", "items")
+    ).toEqual({ offset: 0, limit: 20, fromRange: true });
+  });
+
+  it("falls back to query when Range absent", () => {
+    expect(
+      resolveListWindow({ limit: 5, offset: 3 }, undefined, undefined)
+    ).toEqual({
+      offset: 3,
+      limit: 5,
+      fromRange: false,
+    });
+  });
+
+  it("ignores Range when Range-Unit is not items", () => {
+    expect(
+      resolveListWindow({ limit: 10, offset: 0 }, "0-19", "bytes")
+    ).toEqual({ offset: 0, limit: 10, fromRange: false });
+  });
+
+  it("caps Range page size at 1000", () => {
+    expect(resolveListWindow({}, "0-5000", "items")).toEqual({
+      offset: 0,
+      limit: 1000,
+      fromRange: true,
+    });
+  });
+});
+
 void vi;

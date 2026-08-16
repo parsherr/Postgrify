@@ -29,7 +29,7 @@ import {
 import { buildEmbedSelectFragments } from "../../services/queryEmbedSql.js";
 import { TTL } from "../../services/cacheService.js";
 import { parsePrefer } from "../../utils/prefer.js";
-import { setContentRange } from "../../utils/contentRange.js";
+import { setContentRange, resolveListWindow } from "../../utils/contentRange.js";
 import { rowsToCsv, wantsCsv } from "../../utils/csv.js";
 import crypto from "node:crypto";
 
@@ -152,14 +152,19 @@ async function handleGetList(
     });
   }
 
-  const limit = Math.min(query.limit ?? 100, 1000);
-  const offset = query.offset ?? 0;
+  // E-21: Range header overrides ?limit=&?offset= when Range-Unit is items (or absent).
+  const { limit, offset, fromRange } = resolveListWindow(
+    query,
+    req.headers.range,
+    req.headers["range-unit"]
+  );
 
   // E-01: HEAD + limit=0 → skip row SELECT (PostgREST optimization); COUNT if Prefer:count
   const skipRowFetch = headOnly && limit === 0;
 
   const cacheKey = queryCacheKey(server.cache, dbName, table, {
     ...query,
+    range: req.headers.range,
     count: prefer.count,
   });
 
@@ -237,14 +242,17 @@ async function handleGetList(
   }
 
   // Body is the array (C-01). HEAD (E-01): empty body — RFC 9110.
+  // E-21: Range request → 206 Partial Content.
   // E-23: Accept: text/csv → CSV body (header + rows).
   if (headOnly) return reply.status(200).send();
+  const statusCode = fromRange ? 206 : 200;
   if (wantsCsv(req.headers.accept)) {
     return reply
+      .status(statusCode)
       .type("text/csv")
       .send(rowsToCsv(rows as Record<string, unknown>[]));
   }
-  return reply.send(rows);
+  return reply.status(statusCode).send(rows);
 }
 
 export async function rowsRoute(server: FastifyInstance) {

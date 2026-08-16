@@ -54,3 +54,35 @@ export function parseRangeHeader(
   if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
   return { offset: start, limit: end - start + 1 };
 }
+
+const MAX_PAGE_SIZE = 1000;
+const DEFAULT_PAGE_SIZE = 100;
+
+/**
+ * E-21: Resolve list window from Range (+ optional Range-Unit: items)
+ * or fall back to ?limit=&offset=. Range overrides query params when valid.
+ */
+export function resolveListWindow(
+  query: { limit?: number; offset?: number },
+  rangeHeader: string | string[] | undefined,
+  rangeUnit: string | string[] | undefined
+): { limit: number; offset: number; fromRange: boolean } {
+  const unitRaw = Array.isArray(rangeUnit) ? rangeUnit[0] : rangeUnit;
+  const rangeRaw = Array.isArray(rangeHeader) ? rangeHeader[0] : rangeHeader;
+  const unitOk = !unitRaw || unitRaw.toLowerCase() === "items";
+  const parsed = unitOk ? parseRangeHeader(rangeRaw) : null;
+
+  if (parsed) {
+    return {
+      offset: parsed.offset,
+      limit: Math.min(parsed.limit, MAX_PAGE_SIZE),
+      fromRange: true,
+    };
+  }
+
+  return {
+    limit: Math.min(query.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
+    offset: query.offset ?? 0,
+    fromRange: false,
+  };
+}
