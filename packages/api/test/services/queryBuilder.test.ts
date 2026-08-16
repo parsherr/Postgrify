@@ -7,6 +7,7 @@ import {
   parseWhereConditions,
   parseSelectColumns,
   parseOrderBy,
+  toColumnSql,
 } from "../../src/services/queryBuilder.js";
 
 describe("parseWhereConditions", () => {
@@ -158,6 +159,73 @@ describe("parseWhereConditions — FTS (E-11)", () => {
     expect(() =>
       parseWhereConditions(["body.plfts(english);drop).x"])
     ).toThrow();
+  });
+});
+
+describe("toColumnSql / JSONB paths (E-14)", () => {
+  it("plain identifier", () => {
+    expect(toColumnSql("settings")).toBe('"settings"');
+  });
+
+  it("settings->>'theme'", () => {
+    expect(toColumnSql("settings->>'theme'")).toBe("\"settings\"->>'theme'");
+  });
+
+  it("nested attrs->'specs'->>'weight'", () => {
+    expect(toColumnSql("attrs->'specs'->>'weight'")).toBe(
+      "\"attrs\"->'specs'->>'weight'"
+    );
+  });
+
+  it("array index data->0->>'name'", () => {
+    expect(toColumnSql("data->0->>'name'")).toBe("\"data\"->0->>'name'");
+  });
+
+  it("rejects injection in key", () => {
+    expect(() => toColumnSql("settings->>'theme';drop--'")).toThrow();
+  });
+});
+
+describe("parseWhereConditions — JSONB (E-14)", () => {
+  it("settings->>'theme'.eq.dark", () => {
+    const { sql, values } = parseWhereConditions([
+      "settings->>'theme'.eq.dark",
+    ]);
+    expect(sql).toBe("WHERE \"settings\"->>'theme' = $1");
+    expect(values).toEqual(["dark"]);
+  });
+
+  it("nested path lt (text compare — ->> yields text)", () => {
+    const { sql, values } = parseWhereConditions([
+      "attrs->'specs'->>'weight'.lt.5",
+    ]);
+    expect(sql).toBe("WHERE \"attrs\"->'specs'->>'weight' < $1");
+    expect(values).toEqual(["5"]);
+  });
+
+  it("json path + AND plain column", () => {
+    const { sql, values } = parseWhereConditions([
+      "settings->>'theme'.eq.dark",
+      "id.gt.1",
+    ]);
+    expect(sql).toBe(
+      "WHERE \"settings\"->>'theme' = $1 AND \"id\" > $2"
+    );
+    expect(values).toEqual(["dark", "1"]);
+  });
+
+  it("json path is.null", () => {
+    const { sql, values } = parseWhereConditions([
+      "settings->>'theme'.is.null",
+    ]);
+    expect(sql).toBe("WHERE \"settings\"->>'theme' IS NULL");
+    expect(values).toEqual([]);
+  });
+
+  it("rejects bad json path", () => {
+    expect(() =>
+      parseWhereConditions(["settings->>'thm;drop'.eq.x"])
+    ).toThrow(/Invalid/);
   });
 });
 

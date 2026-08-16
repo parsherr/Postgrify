@@ -7,6 +7,7 @@
  * Desteklenen operatörler (where ve or param'larında):
  *   eq, neq, gt, gte, lt, lte, like, ilike, in, is
  *   FTS (E-11): fts, plfts, phfts, wfts — optional lang: plfts(turkish)
+ *   JSONB (E-14): settings->>'theme'.eq.dark , attrs->'specs'->>'weight'.lt.5
  *
  * OR desteği:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
@@ -15,12 +16,10 @@
  * `is` operatörü değerleri:
  *   field.is.null     → "field" IS NULL
  *   field.is.not_null → "field" IS NOT NULL
- *   (Diğer değerler geçersizdir — net hata mesajı döner)
  *
  * Sıralama — iki format desteklenir:
  *   ?order=created_at.desc         (birleşik format)
  *   ?sort=created_at&order=desc    (ayrı format — Supabase/PostgREST uyumlu)
- *   İkisi birlikte verilirse "sort+order" önceliklidir.
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";
@@ -53,7 +52,6 @@ const OPERATORS: Record<string, string> = {
   is: "IS",
 };
 
-/** PostgREST-compatible FTS operator → PostgreSQL tsquery constructor. */
 const FTS_FUNCS: Record<string, string> = {
   fts: "to_tsquery",
   plfts: "plainto_tsquery",
@@ -61,7 +59,6 @@ const FTS_FUNCS: Record<string, string> = {
   wfts: "websearch_to_tsquery",
 };
 
-/** text-regconfig names only — passed as $n::regconfig, never concatenated. */
 const FTS_LANG_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
 const IS_VALUES: Record<string, string> = {
@@ -69,12 +66,98 @@ const IS_VALUES: Record<string, string> = {
   not_null: "NOT NULL",
 };
 
+/**
+ * E-14: Safe SQL expression for a column or JSON/JSONB path.
+ *
+ * Allowed: name | settings->>'theme' | attrs->'specs'->>'weight' | data->0->>'name'
+ * Keys: [a-zA-Z_][a-zA-Z0-9_]* only. Indexes: non-negative integers.
+ */
+export function toColumnSql(columnExpr: string): string {
+  if (isValidIdentifier(columnExpr)) {
+    return `"${columnExpr}"`;
+  }
+
+  const rootMatch = columnExpr.match(
+    /^([a-zA-Z_][a-zA-Z0-9_]{0,62})((?:->|->>).+)$/
+  );
+  if (!rootMatch) {
+    throw new Error(`Invalid column name: ${columnExpr}`);
+  }
+
+  const root = rootMatch[1];
+  if (!isValidIdentifier(root)) {
+    throw new Error(`Invalid column name: ${root}`);
+  }
+
+  let rest = rootMatch[2];
+  let sql = `"${root}"`;
+
+  while (rest.length > 0) {
+    const seg = rest.match(
+      /^(->>|->)(?:'([a-zA-Z_][a-zA-Z0-9_]{0,62})'|(\d+))(.*)$/
+    );
+    if (!seg) {
+      throw new Error(`Invalid JSON path segment in: ${columnExpr}`);
+    }
+    const arrow = seg[1];
+    const key = seg[2];
+    const index = seg[3];
+    rest = seg[4];
+    if (key !== undefined) {
+      sql += `${arrow}'${key}'`;
+    } else {
+      sql += `${arrow}${index}`;
+    }
+  }
+
+  return sql;
+}
+
+/**
+ * Split field.op.value where field may be a JSON path (no bare dots in keys).
+ * Finds the `.op.` that starts a known operator (or FTS op with optional lang).
+ */
+function splitFieldAndRest(condition: string): { field: string; rest: string } {
+  const opStart =
+    /(?:^|\.)((?:fts|plfts|phfts|wfts)(?:\([a-zA-Z_][a-zA-Z0-9_]{0,62}\))?|eq|neq|gt|gte|lt|lte|like|ilike|in|is)\./g;
+
+  let match: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((match = opStart.exec(condition)) !== null) {
+    last = match;
+  }
+
+  if (!last) {
+    const dotIndex = condition.indexOf(".");
+    if (dotIndex === -1) {
+      throw new Error(
+        `Invalid condition format (expected field.op.value): ${condition}`
+      );
+    }
+    return {
+      field: condition.slice(0, dotIndex),
+      rest: condition.slice(dotIndex + 1),
+    };
+  }
+
+  const at = last.index;
+  if (condition[at] === ".") {
+    return {
+      field: condition.slice(0, at),
+      rest: condition.slice(at + 1),
+    };
+  }
+  return {
+    field: condition.slice(0, at),
+    rest: condition.slice(at),
+  };
+}
+
 function parseFtsCondition(
-  column: string,
+  columnSql: string,
   rest: string,
   offset: number
 ): { sql: string; values: unknown[] } | null {
-  // body.plfts(turkish).yapay+zeka  OR  body.wfts.laptop+gaming
   const match = rest.match(
     /^(fts|plfts|phfts|wfts)(?:\(([a-zA-Z_][a-zA-Z0-9_]{0,62})\))?\.(.*)$/
   );
@@ -95,13 +178,13 @@ function parseFtsCondition(
       throw new Error(`Invalid FTS language config: ${lang}`);
     }
     return {
-      sql: `"${column}" @@ ${fn}($${offset + 1}::regconfig, $${offset + 2})`,
+      sql: `${columnSql} @@ ${fn}($${offset + 1}::regconfig, $${offset + 2})`,
       values: [lang, rawQuery],
     };
   }
 
   return {
-    sql: `"${column}" @@ ${fn}($${offset + 1})`,
+    sql: `${columnSql} @@ ${fn}($${offset + 1})`,
     values: [rawQuery],
   };
 }
@@ -110,24 +193,17 @@ function parseCondition(
   condition: string,
   offset: number
 ): { sql: string; values: unknown[] } {
-  const dotIndex = condition.indexOf(".");
-  if (dotIndex === -1) {
-    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
-  }
+  const { field: columnExpr, rest } = splitFieldAndRest(condition);
+  const columnSql = toColumnSql(columnExpr);
 
-  const column = condition.slice(0, dotIndex);
-  const rest = condition.slice(dotIndex + 1);
-
-  if (!isValidIdentifier(column)) {
-    throw new Error(`Invalid column name: ${column}`);
-  }
-
-  const fts = parseFtsCondition(column, rest, offset);
+  const fts = parseFtsCondition(columnSql, rest, offset);
   if (fts) return fts;
 
   const opDotIndex = rest.indexOf(".");
   if (opDotIndex === -1) {
-    throw new Error(`Invalid condition format (expected field.op.value): ${condition}`);
+    throw new Error(
+      `Invalid condition format (expected field.op.value): ${condition}`
+    );
   }
 
   const op = rest.slice(0, opDotIndex);
@@ -145,7 +221,7 @@ function parseCondition(
     const inValues = value.split(",");
     const placeholders = inValues.map((_, i) => `$${offset + i + 1}`);
     return {
-      sql: `"${column}" IN (${placeholders.join(", ")})`,
+      sql: `${columnSql} IN (${placeholders.join(", ")})`,
       values: inValues,
     };
   }
@@ -157,11 +233,11 @@ function parseCondition(
         `Invalid value for "is" operator: "${value}". Valid values: null, not_null`
       );
     }
-    return { sql: `"${column}" IS ${isTarget}`, values: [] };
+    return { sql: `${columnSql} IS ${isTarget}`, values: [] };
   }
 
   return {
-    sql: `"${column}" ${pgOp} $${offset + 1}`,
+    sql: `${columnSql} ${pgOp} $${offset + 1}`,
     values: [value],
   };
 }
@@ -207,10 +283,6 @@ export function parseSelectColumns(select?: string): string {
   return columns.map((c) => `"${c}"`).join(", ");
 }
 
-/**
- * Sıralama. C-01: PostgREST `order=col.asc.nullsfirst,col2.desc` multi desteklenir.
- * Legacy: sort=col&order=asc
- */
 export function parseOrderBy(order?: string, sort?: string): string {
   if (!order && !sort) return "";
 
