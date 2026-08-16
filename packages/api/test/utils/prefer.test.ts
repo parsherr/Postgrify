@@ -12,7 +12,12 @@ describe("parsePrefer", () => {
       count: null,
       resolution: null,
       missing: null,
+      params: null,
     });
+  });
+
+  it("parses Prefer: params=single-object (E-10)", () => {
+    expect(parsePrefer("params=single-object").params).toBe("single-object");
   });
 
   it("parses Prefer: count=exact", () => {
