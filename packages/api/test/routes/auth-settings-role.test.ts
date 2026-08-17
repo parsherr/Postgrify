@@ -1,13 +1,13 @@
 /**
- * Test: SORUN #7 Düzeltmesi — default_user_role auth ayarı.
+ * Test: Issue #7 Fix — default_user_role auth setting.
  *
- * 1. provision.ts'de 'default_user_role' = 'viewer' varsayılan olarak eklendi.
- * 2. settings.ts'de AUTH_SETTING_KEYS listesine eklendi (PUT ile değiştirilebilir).
- * 3. signup.ts'de bu ayar okunup yeni kullanıcıya uygulanıyor.
+ * 1. Added 'default_user_role' = 'viewer' as a default in provision.ts.
+ * 2. Added to the AUTH_SETTING_KEYS list in settings.ts (can be changed via PUT).
+ * 3. This setting is read in signup.ts and applied to new users.
  *
- * Bu test:
- * - PUT /auth/settings ile default_user_role=editor yapılabildiğini doğrular.
- * - Geçersiz rol değerinin reddedildiğini doğrular.
+ * This test:
+ * - Verifies that default_user_role=editor can be set via PUT /auth/settings.
+ * - Verifies that an invalid role value is rejected.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -125,8 +125,8 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
-describe("SORUN #7 — default_user_role ayarı", () => {
-  it("GET /auth/settings default_user_role döndürmeli", async () => {
+describe("Issue #7 — default_user_role setting", () => {
+  it("GET /auth/settings should return default_user_role", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/settings",
@@ -135,12 +135,12 @@ describe("SORUN #7 — default_user_role ayarı", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    // default_user_role ayarı mevcut olmalı (provision.ts'de eklendi)
+    // default_user_role setting must be present (added in provision.ts)
     expect(body).toHaveProperty("default_user_role");
     expect(["viewer", "editor", "admin"]).toContain(body.default_user_role);
   });
 
-  it("PUT /auth/settings ile default_user_role=editor yapılabilmeli", async () => {
+  it("should be able to set default_user_role=editor via PUT /auth/settings", async () => {
     const res = await server.inject({
       method: "PUT",
       url: "/testdb/auth/settings",
@@ -148,10 +148,10 @@ describe("SORUN #7 — default_user_role ayarı", () => {
       payload: { default_user_role: "editor" },
     });
 
-    expect(res.statusCode, `PUT settings hatası: ${res.body}`).toBe(200);
+    expect(res.statusCode, `PUT settings error: ${res.body}`).toBe(200);
   });
 
-  it("geçersiz default_user_role değeri reddedilmeli", async () => {
+  it("invalid default_user_role value should be rejected", async () => {
     const res = await server.inject({
       method: "PUT",
       url: "/testdb/auth/settings",
@@ -159,11 +159,11 @@ describe("SORUN #7 — default_user_role ayarı", () => {
       payload: { default_user_role: "superuser" },
     });
 
-    // JSON schema validation enum kontrolü yapacak — 400 bekliyoruz
+    // JSON schema validation will check the enum — expecting 400
     expect(res.statusCode).toBe(400);
   });
 
-  it("schema scope olmadan GET settings public GoTrue shape döner (C-20)", async () => {
+  it("GET settings without schema scope returns public GoTrue shape (C-20)", async () => {
     const readOnlyToken = await jwtSvc.signDbToken("testdb", ["read"]);
     const res = await server.inject({
       method: "GET",
@@ -178,7 +178,7 @@ describe("SORUN #7 — default_user_role ayarı", () => {
     expect(body).not.toHaveProperty("default_user_role");
   });
 
-  it("auth olmadan GET settings public (C-20)", async () => {
+  it("GET settings without auth is public (C-20)", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/settings",

@@ -1,8 +1,8 @@
 /**
- * HIGH-A: Şifre kompleksitesi politikası testleri.
+ * HIGH-A: Password complexity policy tests.
  *
- * validatePassword() ve parsePolicyFromSettings() fonksiyonlarını test eder.
- * Signup ve passwordReset endpoint'lerinde bu util kullanılır.
+ * Tests validatePassword() and parsePolicyFromSettings() functions.
+ * These utilities are used in the signup and passwordReset endpoints.
  */
 
 import { describe, it, expect } from "vitest";
@@ -13,93 +13,93 @@ import {
   type PasswordPolicy,
 } from "../../src/utils/passwordPolicy.js";
 
-describe("validatePassword — varsayılan politika", () => {
-  it("8+ karakter geçer", () => {
+describe("validatePassword — default policy", () => {
+  it("8+ characters passes", () => {
     expect(validatePassword("securePass1").valid).toBe(true);
   });
 
-  it("7 karakter başarısız olur", () => {
+  it("7 characters fails", () => {
     const r = validatePassword("short12");
     expect(r.valid).toBe(false);
     expect(r.message).toMatch(/at least 8/);
   });
 
-  it("boş string başarısız olur", () => {
+  it("empty string fails", () => {
     expect(validatePassword("").valid).toBe(false);
   });
 
-  it("sadece boşluklardan oluşan şifre başarısız olur", () => {
+  it("whitespace-only password fails", () => {
     const r = validatePassword("        ");
     expect(r.valid).toBe(false);
     expect(r.message).toMatch(/whitespace/);
   });
 
-  it("tüm aynı karakterler (varsayılan politika) geçer — komplekslik zorunlu değil", () => {
+  it("all same characters (default policy) passes — complexity not required", () => {
     expect(validatePassword("aaaaaaaa").valid).toBe(true);
   });
 });
 
-describe("validatePassword — büyük harf zorunlu", () => {
+describe("validatePassword — uppercase required", () => {
   const policy: Partial<PasswordPolicy> = { requireUppercase: true };
 
-  it("büyük harf içeren şifre geçer", () => {
+  it("password with uppercase passes", () => {
     expect(validatePassword("Password1", policy).valid).toBe(true);
   });
 
-  it("büyük harf içermeyen şifre başarısız olur", () => {
+  it("password without uppercase fails", () => {
     const r = validatePassword("password1", policy);
     expect(r.valid).toBe(false);
     expect(r.message).toMatch(/uppercase/);
   });
 });
 
-describe("validatePassword — sayı zorunlu", () => {
+describe("validatePassword — number required", () => {
   const policy: Partial<PasswordPolicy> = { requireNumber: true };
 
-  it("sayı içeren şifre geçer", () => {
+  it("password with number passes", () => {
     expect(validatePassword("Password1", policy).valid).toBe(true);
   });
 
-  it("sayı içermeyen şifre başarısız olur", () => {
+  it("password without number fails", () => {
     const r = validatePassword("PasswordX", policy);
     expect(r.valid).toBe(false);
     expect(r.message).toMatch(/number/);
   });
 });
 
-describe("validatePassword — özel karakter zorunlu", () => {
+describe("validatePassword — special character required", () => {
   const policy: Partial<PasswordPolicy> = { requireSpecial: true };
 
-  it("özel karakter içeren şifre geçer", () => {
+  it("password with special character passes", () => {
     expect(validatePassword("Pass@word1", policy).valid).toBe(true);
     expect(validatePassword("Pass!word", policy).valid).toBe(true);
     expect(validatePassword("Pass#123", policy).valid).toBe(true);
   });
 
-  it("özel karakter içermeyen şifre başarısız olur", () => {
+  it("password without special character fails", () => {
     const r = validatePassword("Password1", policy);
     expect(r.valid).toBe(false);
     expect(r.message).toMatch(/special/);
   });
 });
 
-describe("validatePassword — özel minLength", () => {
+describe("validatePassword — custom minLength", () => {
   const policy: Partial<PasswordPolicy> = { minLength: 12 };
 
-  it("12+ karakter geçer", () => {
+  it("12+ characters passes", () => {
     expect(validatePassword("longpassword", policy).valid).toBe(true);
   });
 
-  it("11 karakter başarısız olur", () => {
+  it("11 characters fails", () => {
     const r = validatePassword("shortpasswrd", policy);
-    // 12 karakter değil 12 → wait "shortpasswrd" is 12 chars; test with 11
+    // 12 characters not 12 → wait "shortpasswrd" is 12 chars; test with 11
     const r2 = validatePassword("shortpass1x", policy);
     expect(r2.valid).toBe(false);
     expect(r2.message).toMatch(/at least 12/);
   });
 });
 
-describe("validatePassword — kombine politika", () => {
+describe("validatePassword — combined policy", () => {
   const policy: Partial<PasswordPolicy> = {
     minLength: 10,
     requireUppercase: true,
@@ -107,32 +107,32 @@ describe("validatePassword — kombine politika", () => {
     requireSpecial: true,
   };
 
-  it("tüm kuralları karşılayan şifre geçer", () => {
+  it("password meeting all rules passes", () => {
     expect(validatePassword("Secure@123!", policy).valid).toBe(true);
   });
 
-  it("kuralları karşılamayan şifre başarısız olur", () => {
+  it("password not meeting rules fails", () => {
     expect(validatePassword("password", policy).valid).toBe(false);
   });
 });
 
 describe("parsePolicyFromSettings", () => {
-  it("boş settings → varsayılan politika döner", () => {
+  it("empty settings → returns default policy", () => {
     const p = parsePolicyFromSettings({});
     expect(p).toEqual({});
   });
 
-  it("min_password_length integer parse eder", () => {
+  it("min_password_length parses integer", () => {
     const p = parsePolicyFromSettings({ min_password_length: "12" });
     expect(p.minLength).toBe(12);
   });
 
-  it("geçersiz integer → atlanır", () => {
+  it("invalid integer → skipped", () => {
     const p = parsePolicyFromSettings({ min_password_length: "abc" });
     expect(p.minLength).toBeUndefined();
   });
 
-  it("require flags true olarak parse eder", () => {
+  it("require flags parse as true", () => {
     const p = parsePolicyFromSettings({
       password_require_uppercase: "true",
       password_require_number:    "true",
@@ -143,7 +143,7 @@ describe("parsePolicyFromSettings", () => {
     expect(p.requireSpecial).toBe(true);
   });
 
-  it("false string → flag eklenmez", () => {
+  it("false string → flag is not set", () => {
     const p = parsePolicyFromSettings({
       password_require_uppercase: "false",
     });
@@ -152,7 +152,7 @@ describe("parsePolicyFromSettings", () => {
 });
 
 describe("DEFAULT_PASSWORD_POLICY", () => {
-  it("min 8 karakter, komplekslik yok", () => {
+  it("min 8 characters, no complexity requirements", () => {
     expect(DEFAULT_PASSWORD_POLICY.minLength).toBe(8);
     expect(DEFAULT_PASSWORD_POLICY.requireUppercase).toBe(false);
     expect(DEFAULT_PASSWORD_POLICY.requireNumber).toBe(false);

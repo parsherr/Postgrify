@@ -1,10 +1,10 @@
 /**
- * useIpAllowlist — Per-database IP erişim listesi yönetimi için React Query hooks.
+ * useIpAllowlist — React Query hooks for per-database IP allowlist management.
  *
  * Hooks:
- *   useIpAllowlist(db)     — mevcut konfigürasyonu okur
- *   useSetIpAllowlist(db)  — konfigürasyonu günceller
- *   useResetIpAllowlist(db)— everyone'a sıfırlar
+ *   useIpAllowlist(db)     — reads the current configuration
+ *   useSetIpAllowlist(db)  — updates the configuration
+ *   useResetIpAllowlist(db)— resets to allow everyone
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +19,7 @@ const ipAllowlistKeys = {
 
 // ── Read hook ─────────────────────────────────────────────────────────────────
 
-/** Belirtilen DB'nin IP allowlist konfigürasyonunu döner. */
+/** Returns the IP allowlist configuration for the given database. */
 export function useIpAllowlist(db: string) {
   return useQuery({
     queryKey: ipAllowlistKeys.config(db),
@@ -31,7 +31,7 @@ export function useIpAllowlist(db: string) {
 
 // ── Write hooks ───────────────────────────────────────────────────────────────
 
-/** IP allowlist konfigürasyonunu günceller. */
+/** Updates the IP allowlist configuration. */
 export function useSetIpAllowlist(db: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -42,7 +42,7 @@ export function useSetIpAllowlist(db: string) {
   });
 }
 
-/** IP allowlist'i everyone'a sıfırlar. */
+/** Resets the IP allowlist to allow everyone. */
 export function useResetIpAllowlist(db: string) {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1,5 +1,5 @@
 /**
- * DatabasePage — Proxmox tarzı DB detay sayfası.
+ * DatabasePage — Proxmox-style DB detail page.
  *
  * Sol: dikey sekme nav (Summary, Tables & Schema, Data, SQL Editor, Options)
  * Sag: secilen sekmenin icerigi
@@ -426,17 +426,17 @@ function DataTab({
   const [page, setPage] = React.useState(0);
   const [pageSize, setPageSize] = React.useState(25);
 
-  // URL'den seçili tablo gelmiyorsa ilk public tabloyu otomatik seç
+  // Auto-select the first public table if none is specified in the URL
   React.useEffect(() => {
     if (!activeTable && tables && tables.length > 0) {
       setTable(tables[0].name);
     }
   }, [activeTable, tables, setTable]);
 
-  // Tablo değişince sayfa sıfırla
+  // Reset page when the table changes
   React.useEffect(() => { setPage(0); }, [activeTable]);
 
-  // "schema.table" parse — auth tabloları için
+  // "schema.table" parse — for auth tables
   const isAuthTable =
     activeTable.startsWith(AUTH_SCHEMA + ".") ||
     AUTH_TABLES.includes(activeTable.replace(AUTH_SCHEMA + ".", "") as typeof AUTH_TABLES[number]);
@@ -448,18 +448,18 @@ function DataTab({
   // Public table rows
   const { data: rowsResult, isLoading: rowsLoading, refetch } = useRows(
     db,
-    isAuthTable ? "" : resolvedTable,       // auth tablosu seçiliyse public hook devre dışı
+    isAuthTable ? "" : resolvedTable,       // disable public hook when an auth table is selected
     { limit: pageSize, offset: page * pageSize }
   );
 
-  // Auth users (sadece _postgrify_auth.users için)
+  // Auth users (only for _postgrify_auth.users)
   const {
     data: authUsersResult,
     isLoading: authUsersLoading,
     refetch: refetchAuthUsers,
   } = useDbAuthUsers(isAuthTable && resolvedTable === "users" ? db : "");
 
-  // Auth rows → DataGrid formatına normalize et
+  // Auth rows → normalize to DataGrid format
   const authRows: Record<string, unknown>[] = React.useMemo(
     () => (authUsersResult?.users ?? []) as unknown as Record<string, unknown>[],
     [authUsersResult]
@@ -587,9 +587,9 @@ function DataTab({
         </div>
       </div>
 
-      {/* ── Sağ panel: veri grid ── */}
+      {/* ── Right panel: data grid ── */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Tablo başlığı */}
+        {/* Table header */}
         {activeTable && (
           <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
             {isAuthTable
@@ -613,7 +613,7 @@ function DataTab({
         <div className="min-h-0 flex-1 overflow-hidden">
           {!activeTable ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {tablesLoading ? "Tablolar yükleniyor…" : "Bir tablo seçin"}
+              {tablesLoading ? "Loading tables…" : "Select a table"}
             </div>
           ) : (
             <DataGrid
@@ -962,7 +962,7 @@ function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) 
       <div className="mx-auto max-w-lg space-y-6">
         <h2 className="text-sm font-semibold">Veritabani Secenekleri</h2>
 
-        {/* Info kartı */}
+        {/* Info card */}
         <div className="rounded border border-border bg-card p-4">
           <p className="mb-1 font-mono text-xs text-foreground">{db}</p>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
@@ -983,9 +983,9 @@ function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) 
 
         {/* Delete Zone */}
         <div className="rounded border border-red-900/40 bg-card p-4">
-          <p className="mb-1 text-xs font-medium text-red-400">Tehlikeli Bölge</p>
+          <p className="mb-1 text-xs font-medium text-red-400">Danger Zone</p>
           <p className="mb-3 text-xs text-muted-foreground">
-            Bu işlem geri alınamaz. Veritabanı ve tüm verileri kalıcı olarak silinir.
+            This action cannot be undone. The database and all its data will be permanently deleted.
           </p>
           {!deleteConfirm ? (
             <Button
@@ -994,12 +994,12 @@ function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) 
               onClick={() => setDeleteConfirm(true)}
               className="gap-1.5"
             >
-              Veritabanını Sil
+              Delete Database
             </Button>
           ) : (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                Onaylamak için veritabanı adını yazın:{" "}
+                Type the database name to confirm:{" "}
                 <span className="font-mono text-foreground">{db}</span>
               </p>
               <input
@@ -1018,14 +1018,14 @@ function OptionsTab({ db, dbInfo }: { db: string; dbInfo: DbType | undefined }) 
                   className="gap-1.5"
                 >
                   {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  Kalıcı Olarak Sil
+                  Delete Permanently
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => { setDeleteConfirm(false); setDeleteInput(""); }}
                 >
-                  İptal
+                  Cancel
                 </Button>
               </div>
             </div>

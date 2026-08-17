@@ -1,2 +1,2 @@
-// Terminal özelliği kaldırıldı.
+// Terminal feature removed.
 export {};

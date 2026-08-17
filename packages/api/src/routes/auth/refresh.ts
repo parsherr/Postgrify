@@ -1,10 +1,10 @@
 /**
- * POST /auth/admin/refresh — Refresh token ile yeni access + refresh token çifti üret.
+ * POST /auth/admin/refresh — Exchange a refresh token for a new access + refresh token pair.
  *
- * Token rotation: eski refresh token revoke edilir, yeni çift döner.
- * Redis yoksa 503 döner.
+ * Token rotation: the old refresh token is revoked and a new pair is returned.
+ * Returns 503 if Redis is unavailable.
  *
- * Rate limit: IP başına 30 req/dk.
+ * Rate limit: 30 req/min per IP.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -48,13 +48,13 @@ export async function adminRefreshRoute(server: FastifyInstance) {
         });
       }
 
-      // Önce geçerliliğini kontrol et
+      // Validate the refresh token first
       const session = await server.sessionService.get(refreshToken);
       if (!session) {
         return reply.status(401).send({ error: "Invalid or expired refresh token" });
       }
 
-      // Token rotation: eski sil, yeni üret
+      // Token rotation: delete the old token, issue a new one
       const newRefreshToken = await server.sessionService.rotate(refreshToken, session.email);
       if (!newRefreshToken) {
         return reply.status(503).send({

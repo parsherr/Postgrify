@@ -1,5 +1,5 @@
 /**
- * Per-database auth hook'ları.
+ * Per-database auth hooks.
  *
  * API: /db/:database/auth/*
  */

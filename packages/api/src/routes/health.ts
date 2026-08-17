@@ -1,13 +1,13 @@
 /**
- * Health check endpoint — auth gerektirmez.
- * Docker / load balancer liveness probe için kullanılır.
+ * Health check endpoint — no auth required.
+ * Used as a Docker / load balancer liveness probe.
  *
- * Güvenlik: Public endpoint olduğundan minimal bilgi döner.
- * Uptime, pool sayısı, versiyon gibi servis detayları burada açıklanmaz —
- * saldırgana hedefli exploit bilgisi vermemek için.
+ * Security: returns minimal information because this is a public endpoint.
+ * Service details such as uptime, pool count, and version are omitted
+ * to avoid giving an attacker targeted exploit information.
  *
- * Detaylı durum için: GET /admin/health (admin token gerektirir)
- * Readiness: GET /ready ve GET /health/ready (E-25) — Postgres ping
+ * For detailed status: GET /admin/health (requires admin token)
+ * Readiness: GET /ready and GET /health/ready (E-25) — Postgres ping
  */
 
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -19,7 +19,7 @@ async function readinessHandler(server: FastifyInstance, reply: FastifyReply) {
     const sql = server.poolManager.getPool(READY_PROBE_DB);
     await sql`SELECT 1 AS ok`;
 
-    // Aktif (lazy) pool'lar varsa onları da doğrula — stale bağlantı yakala.
+    // Also verify active (lazy) pools if any — catch stale connections.
     for (const dbName of server.poolManager.activePoolNames) {
       if (dbName === READY_PROBE_DB) continue;
       const pool = server.poolManager.getPool(dbName);
@@ -81,9 +81,9 @@ export async function healthRoute(server: FastifyInstance) {
     readinessHandler(server, reply)
   );
 
-  // ── Admin health check — detaylı durum ────────────────────────────────────
-  // authenticateAdmin decorator'ı auth plugin tarafından eklenir; yoksa bu
-  // endpoint kayıt edilmez (test ortamında minimal server'da güvenli skip).
+  // ── Admin health check — detailed status ────────────────────────────────────
+  // The authenticateAdmin decorator is added by the auth plugin; if absent this
+  // endpoint is not registered (safe skip on a minimal test server).
   if (typeof server.authenticateAdmin === "function") {
     server.get(
       "/admin/health",

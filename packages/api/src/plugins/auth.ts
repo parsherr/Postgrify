@@ -1,7 +1,7 @@
 /**
- * Auth Plugin — JWT doğrulama ve request'e kullanıcı bilgisi ekleme.
- * `server.authenticate` ve `server.authenticateAdmin` decorator'larını sağlar.
- * Her route, bu decorator'ları preHandler olarak kullanabilir.
+ * Auth Plugin — JWT validation and attaching user info to requests.
+ * Provides the `server.authenticate` and `server.authenticateAdmin` decorators.
+ * Any route can use these decorators as preHandlers.
  */
 
 import fp from "fastify-plugin";
@@ -19,16 +19,16 @@ declare module "fastify" {
       reply: FastifyReply
     ) => Promise<void>;
     /**
-     * Admin, scoped-DB veya per-DB-user token kabul eden authenticator.
-     * CRUD endpoint'lerinde DB-user token'ların da erişebilmesi için kullanılır.
-     * DB-user token kabul edildiğinde req.dbUserPayload set edilir.
+     * Authenticator that accepts admin, scoped-DB, or per-DB-user tokens.
+     * Used so that DB-user tokens can also access CRUD endpoints.
+     * When a DB-user token is accepted, req.dbUserPayload is set.
      */
     authenticateAny: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
   interface FastifyRequest {
     user: JwtPayload | null;
     dbName: string | null;
-    /** Per-DB kullanıcı token payload'ı — yalnızca DB-user token ile doldurilur. */
+    /** Per-DB user token payload — populated only when a DB-user token is used. */
     dbUser: DbUserJwtPayload | null;
   }
 }
@@ -36,11 +36,11 @@ declare module "fastify" {
 export const authPlugin = fp(async (server: FastifyInstance) => {
   const jwtService = new JwtService(() => config.JWT_SECRET);
 
-  // JwtService'i tüm route'lardan erişilebilir kıl (DRY: inline new JwtService() gerekmez)
+  // Make JwtService accessible from all routes (DRY: no need for inline new JwtService())
   server.decorate("jwtService", jwtService);
 
-  // JTI blacklist'e Redis client bağla (Redis varsa distributed revocation).
-  // Redis yoksa in-memory fallback — process restart'ta sıfırlanır.
+  // Connect Redis client to the JTI blacklist (enables distributed revocation when Redis is available).
+  // Falls back to in-memory when Redis is absent — resets on process restart.
   server.addHook("onReady", async () => {
     const redisClient = server.cache?.redisClient;
     if (redisClient) {
@@ -51,12 +51,12 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
     }
   });
 
-  // request.user, request.dbName ve request.dbUser'ı her request'te null ile başlat
+  // Initialise request.user, request.dbName, and request.dbUser to null on every request
   server.decorateRequest("user", null);
   server.decorateRequest("dbName", null);
   server.decorateRequest("dbUser", null);
 
-  // DB token veya admin token ile erişilebilen route'lar için
+  // For routes accessible with either a DB token or an admin token
   server.decorate(
     "authenticate",
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -74,7 +74,7 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
     }
   );
 
-  // Yalnızca admin token ile erişilebilen route'lar için
+  // For routes accessible with admin tokens only
   server.decorate(
     "authenticateAdmin",
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -91,11 +91,11 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
       req.user = payload;
     }
   );
-// Admin, scoped-DB veya per-DB-user token kabul eden authenticator.
-  // DB-user token'lar "postgrify/db-auth" issuer'ı ile gelir.
-  // Kabul edildiğinde req.dbUser doldurulur; req.user null kalır.
-  // Bu sayede scopeGuard, DB-user token'ları admin bypass'ı olmadan kabul eder —
-  // ama scopeGuard'ın DB-user farkındalığı gerekir (scopeGuard.ts'e bakın).
+// Authenticator that accepts admin, scoped-DB, or per-DB-user tokens.
+  // DB-user tokens arrive with issuer "postgrify/db-auth".
+  // When accepted, req.dbUser is populated; req.user remains null.
+  // This allows scopeGuard to accept DB-user tokens without an admin bypass —
+  // but scopeGuard must be DB-user-aware (see scopeGuard.ts).
   server.decorate(
     "authenticateAny",
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -104,14 +104,14 @@ export const authPlugin = fp(async (server: FastifyInstance) => {
         return reply.status(401).send({ error: "Missing authorization token" });
       }
 
-      // Önce admin/DB token dene
+      // Try admin/DB token first
       const adminOrDb = await jwtService.verifyAdminOrDb(token);
       if (adminOrDb) {
         req.user = adminOrDb;
         return;
       }
 
-      // DB-user token dene
+      // Try DB-user token
       const dbUser = await jwtService.verifyDbUser(token);
       if (dbUser) {
         req.dbUser = dbUser;

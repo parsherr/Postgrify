@@ -1,21 +1,21 @@
 /**
- * CHANGELOG.md parse yardımcısı.
+ * CHANGELOG.md parse helper.
  *
- * Vite'ın `?raw` import'u ile CHANGELOG.md build anında bundle'a gömülür.
- * Runtime'da API isteği gerekmez.
+ * CHANGELOG.md is bundled at build time via Vite's `?raw` import.
+ * No API request is needed at runtime.
  *
- * Format varsayımı: Keep a Changelog
+ * Format assumption: Keep a Changelog
  *   ## [version] — YYYY-MM-DD
  *   ### Section
- *   - madde
+ *   - item
  */
 
 export interface ChangelogEntry {
   version: string;
   date: string;
-  /** Her section: başlık + maddeler */
+  /** Each section: title + items */
   sections: ChangelogSection[];
-  /** Ham markdown (fallback render için) */
+  /** Raw markdown (for fallback render) */
   raw: string;
 }
 
@@ -25,15 +25,15 @@ export interface ChangelogSection {
 }
 
 /**
- * CHANGELOG.md raw string'ini parse eder.
- * Her `## [x.y.z]` bloğu bir entry olur.
+ * Parses a CHANGELOG.md raw string.
+ * Each `## [x.y.z]` block becomes one entry.
  */
 export function parseChangelog(raw: string): ChangelogEntry[] {
   const entries: ChangelogEntry[] = [];
 
-  // ## [version] — date  ya da  ## [version] - date
+  // ## [version] — date  or  ## [version] - date
   const versionRegex = /^## \[([^\]]+)\]\s*[—\-]\s*(.+)$/m;
-  // Blokları ## ile böl
+  // Split blocks by ##
   const blocks = raw.split(/^(?=## \[)/m).filter((b) => b.trim());
 
   for (const block of blocks) {
@@ -54,7 +54,7 @@ export function parseChangelog(raw: string): ChangelogEntry[] {
 
 function parseSections(body: string): ChangelogSection[] {
   const sections: ChangelogSection[] = [];
-  // ### başlıklarla böl
+  // Split by ### headings
   const parts = body.split(/^(?=### )/m).filter((p) => p.trim());
 
   for (const part of parts) {
@@ -70,10 +70,10 @@ function parseSections(body: string): ChangelogSection[] {
   return sections;
 }
 
-/** En son sürüm entry'sini döner (ilk entry). */
+/** Returns the latest version entry (first entry). */
 export function latestEntry(entries: ChangelogEntry[]): ChangelogEntry | null {
   return entries[0] ?? null;
 }
 
-/** localStorage key — hangi versiyonun modal'ı görüldü */
+/** localStorage key — which version's modal has been seen */
 export const SEEN_VERSION_KEY = "postgrify_seen_version";

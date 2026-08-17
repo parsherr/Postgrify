@@ -1,10 +1,10 @@
 /**
- * HIGH-C: Upload magic bytes (MIME sniffing bypass koruması) testleri.
+ * HIGH-C: Upload magic bytes (MIME sniffing bypass protection) tests.
  *
- * upload.ts'deki isValidMagicBytes() fonksiyonu — dosyanın gerçek içeriğini
- * Content-Type header'ı ile karşılaştırır.
+ * The isValidMagicBytes() function in upload.ts — compares the file's
+ * actual content against the Content-Type header.
  *
- * Saldırı vektörü: image/jpeg Content-Type + PHP/shell dosyası içeriği
+ * Attack vector: image/jpeg Content-Type + PHP/shell file content
  */
 
 import { describe, it, expect } from "vitest";
@@ -14,35 +14,35 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ── Upload kaynak kodunu oku, fonksiyonu parse et ─────────────────────────────
+// ── Read upload source, parse function ───────────────────────────────────────
 
 const uploadSrc = readFileSync(
   join(__dirname, "../../src/routes/db/upload.ts"),
   "utf-8"
 );
 
-// ── Kaynak kod kontrolleri ────────────────────────────────────────────────────
+// ── Source code checks ────────────────────────────────────────────────────────
 
-describe("Upload: magic bytes kaynak kod kontrolü", () => {
-  it("MAGIC_BYTES sabiti mevcut", () => {
+describe("Upload: magic bytes source code check", () => {
+  it("MAGIC_BYTES constant is present", () => {
     expect(uploadSrc).toContain("MAGIC_BYTES");
   });
 
-  it("isValidMagicBytes fonksiyonu mevcut", () => {
+  it("isValidMagicBytes function is present", () => {
     expect(uploadSrc).toContain("isValidMagicBytes");
   });
 
-  it("JPEG magic bytes (0xFF, 0xD8, 0xFF) tanımlı", () => {
+  it("JPEG magic bytes (0xFF, 0xD8, 0xFF) are defined", () => {
     expect(uploadSrc).toContain("0xFF, 0xD8, 0xFF");
   });
 
-  it("PNG magic bytes (0x89, 0x50, 0x4E, 0x47) tanımlı", () => {
+  it("PNG magic bytes (0x89, 0x50, 0x4E, 0x47) are defined", () => {
     expect(uploadSrc).toContain("0x89, 0x50, 0x4E, 0x47");
   });
 
-  it("WebP özel kontrolü (RIFF + WEBP) tanımlı", () => {
-    // WebP magic: RIFF header (0x52,0x49,0x46,0x46) + offset 8'de WEBP (0x57,0x45,0x42,0x50)
-    // Kaynak kodda === karşılaştırmaları olarak yazılı — ayrı satırlardan kontrol et
+  it("WebP special check (RIFF + WEBP) is defined", () => {
+    // WebP magic: RIFF header (0x52,0x49,0x46,0x46) + WEBP at offset 8 (0x57,0x45,0x42,0x50)
+    // Written as === comparisons in source — check from separate lines
     expect(uploadSrc).toContain("0x57");
     expect(uploadSrc).toContain("0x45");
     expect(uploadSrc).toContain("0x42");
@@ -50,18 +50,18 @@ describe("Upload: magic bytes kaynak kod kontrolü", () => {
     expect(uploadSrc).toContain("image/webp");
   });
 
-  it("GIF magic bytes (GIF87a / GIF89a) tanımlı", () => {
+  it("GIF magic bytes (GIF87a / GIF89a) are defined", () => {
     expect(uploadSrc).toContain("0x47, 0x49, 0x46");
   });
 
-  it("magic bytes kontrolü buffer'dan SONRA çalışır (route handler içinde)", () => {
-    // isValidMagicBytes fonksiyon tanımı dosyanın başında olabilir (helper)
-    // ama ÇAĞRISI dosyada ikinci kez geçmeli (route handler içinde) — buffer alımından sonra
+  it("magic bytes check runs AFTER buffer is read (inside route handler)", () => {
+    // isValidMagicBytes function definition may be at the top of the file (helper)
+    // but its CALL must appear a second time (inside route handler) — after buffer read
     const allMagicCalls = [...uploadSrc.matchAll(/isValidMagicBytes\(/g)];
-    // En az 2 kez geçmeli: 1 tanım + 1 çağrı
+    // Must appear at least 2 times: 1 definition + 1 call
     expect(allMagicCalls.length).toBeGreaterThanOrEqual(2);
 
-    // Route handler içindeki çağrının buffer'dan sonra gelmesi
+    // Call inside route handler must come after buffer read
     const bufIdx   = uploadSrc.lastIndexOf("await fileData.toBuffer()");
     const callIdx  = uploadSrc.lastIndexOf("isValidMagicBytes(buffer");
     expect(bufIdx).toBeGreaterThan(-1);
@@ -69,15 +69,15 @@ describe("Upload: magic bytes kaynak kod kontrolü", () => {
     expect(callIdx).toBeGreaterThan(bufIdx);
   });
 
-  it("magic bytes hatası 415 döner", () => {
+  it("magic bytes error returns 415", () => {
     expect(uploadSrc).toContain("does not match declared MIME type");
   });
 });
 
-// ── İnline magic bytes logic testi ───────────────────────────────────────────
+// ── Inline magic bytes logic tests ───────────────────────────────────────────
 
-// Upload.ts'deki isValidMagicBytes logic'ini inline olarak test et
-// (modül import'u @fastify/multipart gerektirdiğinden inline test kullanıyoruz)
+// Testing isValidMagicBytes logic inline
+// (module import requires @fastify/multipart, so we use inline tests)
 
 type MagicEntry = Uint8Array[];
 const MAGIC_BYTES_TEST: Record<string, MagicEntry> = {
@@ -113,80 +113,80 @@ function testMagicCheck(buffer: Buffer, mime: string): boolean {
   });
 }
 
-describe("Upload: magic bytes logic — geçerli dosyalar", () => {
-  it("JPEG dosyası geçer", () => {
+describe("Upload: magic bytes logic — valid files", () => {
+  it("JPEG file passes", () => {
     const buf = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
     expect(testMagicCheck(buf, "image/jpeg")).toBe(true);
   });
 
-  it("PNG dosyası geçer", () => {
+  it("PNG file passes", () => {
     const buf = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00]);
     expect(testMagicCheck(buf, "image/png")).toBe(true);
   });
 
-  it("GIF87a dosyası geçer", () => {
+  it("GIF87a file passes", () => {
     const buf = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x00]);
     expect(testMagicCheck(buf, "image/gif")).toBe(true);
   });
 
-  it("GIF89a dosyası geçer", () => {
+  it("GIF89a file passes", () => {
     const buf = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00]);
     expect(testMagicCheck(buf, "image/gif")).toBe(true);
   });
 
-  it("BMP dosyası geçer", () => {
+  it("BMP file passes", () => {
     const buf = Buffer.from([0x42, 0x4D, 0x36, 0x00]);
     expect(testMagicCheck(buf, "image/bmp")).toBe(true);
   });
 
-  it("SVG (metin tabanlı) magic bytes kontrolü atlanır → geçer", () => {
+  it("SVG (text-based) skips magic bytes check → passes", () => {
     const buf = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>");
     expect(testMagicCheck(buf, "image/svg+xml")).toBe(true);
   });
 });
 
-describe("Upload: magic bytes logic — sahte/kötü dosyalar", () => {
-  it("PHP içeriği image/jpeg MIME ile geçemez", () => {
+describe("Upload: magic bytes logic — fake/malicious files", () => {
+  it("PHP content cannot pass with image/jpeg MIME", () => {
     const buf = Buffer.from("<?php system($_GET['cmd']); ?>");
     expect(testMagicCheck(buf, "image/jpeg")).toBe(false);
   });
 
-  it("shell script image/png MIME ile geçemez", () => {
+  it("shell script cannot pass with image/png MIME", () => {
     const buf = Buffer.from("#!/bin/bash\nrm -rf /");
     expect(testMagicCheck(buf, "image/png")).toBe(false);
   });
 
-  it("boş buffer geçemez", () => {
+  it("empty buffer fails", () => {
     const buf = Buffer.from([]);
     expect(testMagicCheck(buf, "image/jpeg")).toBe(false);
     expect(testMagicCheck(buf, "image/png")).toBe(false);
   });
 
-  it("sadece 1 byte buffer geçemez (yetersiz)", () => {
+  it("1-byte buffer fails (insufficient)", () => {
     const buf = Buffer.from([0xFF]);
-    expect(testMagicCheck(buf, "image/jpeg")).toBe(false); // 3 byte gerekiyor
-    expect(testMagicCheck(buf, "image/png")).toBe(false);  // 8 byte gerekiyor
+    expect(testMagicCheck(buf, "image/jpeg")).toBe(false); // requires 3 bytes
+    expect(testMagicCheck(buf, "image/png")).toBe(false);  // requires 8 bytes
   });
 
-  it("bilinmeyen MIME tipi geçemez", () => {
+  it("unknown MIME type fails", () => {
     const buf = Buffer.from([0xFF, 0xD8, 0xFF]);
     expect(testMagicCheck(buf, "application/octet-stream")).toBe(false);
   });
 
-  it("yanlış magic bytes (JPEG gibi görünen PNG) geçemez", () => {
-    // PNG magic ile JPEG iddia et
+  it("wrong magic bytes (PNG bytes claiming to be JPEG) fail", () => {
+    // PNG magic with JPEG claim
     const buf = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
     expect(testMagicCheck(buf, "image/jpeg")).toBe(false);
   });
 });
 
-describe("Upload: timing safe API key comparison — kaynak kod kontrolü", () => {
+describe("Upload: timing safe API key comparison — source code check", () => {
   const apiKeyGuardSrc = readFileSync(
     join(__dirname, "../../src/middleware/apiKeyGuard.ts"),
     "utf-8"
   );
 
-  it("timingSafeEqual kullanılıyor", () => {
+  it("timingSafeEqual is used", () => {
     expect(apiKeyGuardSrc).toContain("timingSafeEqual");
   });
 
@@ -194,12 +194,12 @@ describe("Upload: timing safe API key comparison — kaynak kod kontrolü", () =
     expect(apiKeyGuardSrc).toContain('from "node:crypto"');
   });
 
-  it("providedKey !== storedKey doğrudan karşılaştırma yok", () => {
-    // Doğrudan string karşılaştırması olmamalı
+  it("providedKey !== storedKey direct comparison is not used", () => {
+    // Direct string comparison must not be present
     expect(apiKeyGuardSrc).not.toMatch(/providedKey\s*!==\s*storedKey/);
   });
 
-  it("Buffer.from ile karşılaştırma yapılıyor", () => {
+  it("comparison uses Buffer.from", () => {
     expect(apiKeyGuardSrc).toContain("Buffer.from(providedKey");
     expect(apiKeyGuardSrc).toContain("Buffer.from(storedKey");
   });

@@ -1,5 +1,5 @@
 /**
- * RegisterPage — yeni hesap oluşturma
+ * RegisterPage — create a new account
  */
 
 import { useState } from "react";
@@ -19,7 +19,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  // Step 2 — userId signup sonrası doldurulur
+  // Step 2 — userId is set after signup
   const [userId, setUserId] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -30,19 +30,19 @@ export function RegisterPage() {
 
   async function handleAccount(e: React.FormEvent) {
     e.preventDefault();
-    if (password !== confirm) { setError("Şifreler eşleşmiyor"); return; }
-    if (password.length < 8)  { setError("Şifre en az 8 karakter olmalı"); return; }
+    if (password !== confirm) { setError("Passwords do not match"); return; }
+    if (password.length < 8)  { setError("Password must be at least 8 characters"); return; }
     setLoading(true);
     setError("");
     try {
       await signUp(email, password);
-      // signUp içinde signIn yapılır — user state güncellenir ama React batching nedeniyle
-      // henüz render edilmemiş olabilir; auth.getUser ile doğrudan al
+      // signUp calls signIn internally — user state updates, but due to React batching
+      // it may not have rendered yet; get it directly via auth.getUser
       const { data: u } = await auth.getUser();
       setUserId(u?.id ?? "");
       setStep("profile");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kayıt başarısız");
+      setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -51,18 +51,18 @@ export function RegisterPage() {
   async function handleProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!username.match(/^[a-z0-9_]{3,20}$/)) {
-      setError("Kullanıcı adı: 3-20 karakter, a-z0-9_ içerebilir");
+      setError("Username: 3-20 characters, letters/numbers/underscores only");
       return;
     }
     setLoading(true);
     setError("");
     try {
-      // Username benzersizlik kontrolü
+      // Check username uniqueness
       const existing = await fetchProfileByUsername(username).catch(() => null);
-      if (existing) { setError("Bu kullanıcı adı alınmış"); setLoading(false); return; }
+      if (existing) { setError("That username is already taken"); setLoading(false); return; }
 
       const authId = userId || user?.id || "";
-      if (!authId) { setError("Kullanıcı kimliği alınamadı, lütfen tekrar giriş yapın"); setLoading(false); return; }
+      if (!authId) { setError("Could not retrieve user ID, please sign in again"); setLoading(false); return; }
 
       const profile = await createProfile({
         auth_id:      authId,
@@ -74,7 +74,7 @@ export function RegisterPage() {
       setProfile(profile);
       navigate("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Profil oluşturulamadı");
+      setError(err instanceof Error ? err.message : "Failed to create profile");
     } finally {
       setLoading(false);
     }
@@ -89,15 +89,15 @@ export function RegisterPage() {
 
         {step === "account" ? (
           <>
-            <h1 className="text-3xl font-bold text-white text-center mb-2">Hesap Oluştur</h1>
-            <p className="text-gray-500 text-center mb-8">1 / 2 — Hesap bilgileri</p>
+            <h1 className="text-3xl font-bold text-white text-center mb-2">Create Account</h1>
+            <p className="text-gray-500 text-center mb-8">1 / 2 — Account details</p>
 
             <form onSubmit={handleAccount} className="space-y-4">
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="E-posta adresi"
+                placeholder="Email address"
                 required
                 className="input"
               />
@@ -105,7 +105,7 @@ export function RegisterPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Şifre (min. 8 karakter)"
+                placeholder="Password (min. 8 characters)"
                 required
                 className="input"
               />
@@ -113,7 +113,7 @@ export function RegisterPage() {
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                placeholder="Şifre tekrar"
+                placeholder="Confirm password"
                 required
                 className="input"
               />
@@ -123,14 +123,14 @@ export function RegisterPage() {
                 disabled={loading || !email || !password || !confirm}
                 className="btn-primary w-full py-3 disabled:opacity-50"
               >
-                {loading ? "Kayıt olunuyor..." : "Devam Et"}
+                {loading ? "Creating account..." : "Continue"}
               </button>
             </form>
           </>
         ) : (
           <>
-            <h1 className="text-3xl font-bold text-white text-center mb-2">Profilini Oluştur</h1>
-            <p className="text-gray-500 text-center mb-8">2 / 2 — Profil bilgileri</p>
+            <h1 className="text-3xl font-bold text-white text-center mb-2">Create Your Profile</h1>
+            <p className="text-gray-500 text-center mb-8">2 / 2 — Profile details</p>
 
             <form onSubmit={handleProfile} className="space-y-4">
               <div>
@@ -138,23 +138,23 @@ export function RegisterPage() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                  placeholder="Kullanıcı adı (örn: ali_yilmaz)"
+                  placeholder="Username (e.g. john_doe)"
                   required
                   className="input"
                 />
-                <p className="text-gray-600 text-xs mt-1 ml-1">3-20 karakter, harf/rakam/alt çizgi</p>
+                <p className="text-gray-600 text-xs mt-1 ml-1">3-20 characters, letters/numbers/underscores</p>
               </div>
               <input
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Görünen isim"
+                placeholder="Display name"
                 className="input"
               />
               <textarea
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                placeholder="Biyografi (opsiyonel)"
+                placeholder="Bio (optional)"
                 rows={3}
                 className="input resize-none"
               />
@@ -164,16 +164,16 @@ export function RegisterPage() {
                 disabled={loading || !username}
                 className="btn-primary w-full py-3 disabled:opacity-50"
               >
-                {loading ? "Kaydediliyor..." : "Tweeter'a Katıl"}
+                {loading ? "Saving..." : "Join Tweeter"}
               </button>
             </form>
           </>
         )}
 
         <p className="text-center text-gray-500 mt-6">
-          Zaten hesabın var mı?{" "}
+          Already have an account?{" "}
           <Link to="/login" className="text-sky-400 hover:underline font-medium">
-            Giriş Yap
+            Sign In
           </Link>
         </p>
       </div>

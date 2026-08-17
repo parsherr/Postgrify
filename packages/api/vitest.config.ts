@@ -9,7 +9,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["src/**/*.ts"],
-      exclude: ["src/index.ts"], // entry point — unit test dışı
+      exclude: ["src/index.ts"], // entry point — excluded from unit tests
     },
   },
 });

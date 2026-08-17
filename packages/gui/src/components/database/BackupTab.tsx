@@ -1,8 +1,8 @@
 /**
- * BackupTab — Veritabanı yedekleme ve geri yükleme arayüzü.
+ * BackupTab — Database backup and restore interface.
  *
- * Tek sayfa: Backup listesi + Schedule konfigürasyonu + Restore bölümleri
- * Tüm backend bağlantıları useBackup.ts üzerinden yönetilir.
+ * Single page: Backup list + Schedule configuration + Restore sections.
+ * All backend connections are managed through useBackup.ts.
  */
 
 import { useState, useRef } from "react";
@@ -29,7 +29,7 @@ import { downloadBackupUrl } from "../../lib/api.js";
 import type { BackupScheduleConfig } from "../../lib/api.js";
 import { cn } from "@/lib/utils";
 
-// ── Yardımcı fonksiyonlar ──────────────────────────────────────────────────────
+// ── Helper functions ────────────────────────────────────────────────────────────
 
 function fmtBytes(bytes: number | null): string {
   if (bytes == null) return "—";
@@ -45,14 +45,14 @@ function fmtDate(iso: string): string {
   }).format(new Date(iso));
 }
 
-// ── Durum badge'i ──────────────────────────────────────────────────────────────
+// ── Status badge ────────────────────────────────────────────────────────────────
 
 type BackupStatus = "completed" | "failed" | "in_progress";
 
 const STATUS_META: Record<BackupStatus, { label: string; className: string }> = {
-  completed:   { label: "Tamamlandı",   className: "text-emerald-600 bg-emerald-500/10" },
+  completed:   { label: "Completed",   className: "text-emerald-600 bg-emerald-500/10" },
   failed:      { label: "Hata",          className: "text-red-500 bg-red-500/10" },
-  in_progress: { label: "Devam ediyor", className: "text-amber-500 bg-amber-500/10" },
+  in_progress: { label: "In progress", className: "text-amber-500 bg-amber-500/10" },
 };
 
 function StatusBadge({ status }: { status: BackupStatus }) {
@@ -64,7 +64,7 @@ function StatusBadge({ status }: { status: BackupStatus }) {
   );
 }
 
-// ── Etkin/Pasif seçim düğmesi ─────────────────────────────────────────────────
+// ── Active/Inactive toggle button ──────────────────────────────────────────────
 
 function EnabledSelector({
   value,
@@ -86,7 +86,7 @@ function EnabledSelector({
         )}
       >
         <Check className="h-3 w-3" />
-        Etkin
+        Active
       </button>
       <div className="w-px bg-border" />
       <button
@@ -100,13 +100,13 @@ function EnabledSelector({
         )}
       >
         <X className="h-3 w-3" />
-        Pasif
+        Inactive
       </button>
     </div>
   );
 }
 
-// ── Bölüm 1: Backup Listesi ───────────────────────────────────────────────────
+// ── Section 1: Backup List ──────────────────────────────────────────────────────
 
 function BackupListSection({ db }: { db: string }) {
   const { data: backups, isLoading, error, refetch, isFetching } = useBackups(db);
@@ -117,25 +117,25 @@ function BackupListSection({ db }: { db: string }) {
 
   function handleCreate() {
     createMutation.mutate(undefined, {
-      onSuccess: () => toast.success("Yedekleme tamamlandı."),
-      onError:   (err) => toast.error(`Yedekleme hatası: ${(err as Error).message}`),
+      onSuccess: () => toast.success("Backup created."),
+      onError:   (err) => toast.error(`Backup failed: ${(err as Error).message}`),
     });
   }
 
   function handleDelete(id: string) {
     deleteMutation.mutate(id, {
-      onSuccess: () => { setDeleteTarget(null); toast.success("Yedek silindi."); },
-      onError:   (err) => { setDeleteTarget(null); toast.error(`Silme hatası: ${(err as Error).message}`); },
+      onSuccess: () => { setDeleteTarget(null); toast.success("Backup deleted."); },
+      onError:   (err) => { setDeleteTarget(null); toast.error(`Delete failed: ${(err as Error).message}`); },
     });
   }
 
   return (
     <section>
-      {/* Başlık satırı */}
+      {/* Header row */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <Archive className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Backup Listesi</span>
+          <span className="text-sm font-medium">Backups</span>
           {backups && backups.length > 0 && (
             <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
               {backups.length}
@@ -179,7 +179,7 @@ function BackupListSection({ db }: { db: string }) {
       ) : !backups || backups.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
           <Archive className="h-7 w-7 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">Henüz kayıtlı yedek yok.</p>
+          <p className="text-sm text-muted-foreground">No backups yet.</p>
           <Button
             variant="outline"
             size="sm"
@@ -190,17 +190,17 @@ function BackupListSection({ db }: { db: string }) {
             {createMutation.isPending
               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
               : <Plus className="h-3.5 w-3.5" />}
-            Backup Oluştur
+            Create Backup
           </Button>
         </div>
       ) : (
         <table className="w-full text-xs">
           <thead className="bg-muted/30 text-muted-foreground">
             <tr>
-              <th className="px-4 py-2.5 text-left font-medium">Tarih</th>
-              <th className="px-4 py-2.5 text-left font-medium">Boyut</th>
-              <th className="px-4 py-2.5 text-left font-medium">Durum</th>
-              <th className="px-4 py-2.5 text-right font-medium">İşlemler</th>
+              <th className="px-4 py-2.5 text-left font-medium">Date</th>
+              <th className="px-4 py-2.5 text-left font-medium">Size</th>
+              <th className="px-4 py-2.5 text-left font-medium">Status</th>
+              <th className="px-4 py-2.5 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -223,7 +223,7 @@ function BackupListSection({ db }: { db: string }) {
                         )}
                       >
                         <Download className="h-3.5 w-3.5" />
-                        İndir
+                        Download
                       </a>
                     )}
                     <Button
@@ -244,8 +244,8 @@ function BackupListSection({ db }: { db: string }) {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Yedeği Sil"
-        description="Bu yedek kalıcı olarak silinecek. Bu işlem geri alınamaz."
+        title="Delete Backup"
+        description="This backup will be permanently deleted. This action cannot be undone."
         confirmLabel="Sil"
         danger
         onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
@@ -255,7 +255,7 @@ function BackupListSection({ db }: { db: string }) {
   );
 }
 
-// ── Bölüm 2: Schedule ────────────────────────────────────────────────────────
+// ── Section 2: Schedule ─────────────────────────────────────────────────────────
 
 const DEFAULT_SCHEDULE: BackupScheduleConfig = {
   cron: "0 2 * * *",
@@ -281,7 +281,7 @@ function ScheduleSection({ db }: { db: string }) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMutation.mutate(form, {
-      onSuccess: () => toast.success("Program kaydedildi."),
+      onSuccess: () => toast.success("Schedule saved."),
       onError:   (err) => toast.error(`Hata: ${(err as Error).message}`),
     });
   }
@@ -292,7 +292,7 @@ function ScheduleSection({ db }: { db: string }) {
         setDeleteOpen(false);
         setForm(DEFAULT_SCHEDULE);
         setInitialized(false);
-        toast.success("Program iptal edildi.");
+        toast.success("Schedule deleted.");
       },
       onError: (err) => { setDeleteOpen(false); toast.error(`Hata: ${(err as Error).message}`); },
     });
@@ -300,10 +300,10 @@ function ScheduleSection({ db }: { db: string }) {
 
   return (
     <section className="border-t border-border">
-      {/* Başlık */}
+      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <CalendarClock className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Otomatik Yedekleme Programı</span>
+        <span className="text-sm font-medium">Automatic Backup Schedule</span>
       </div>
 
       {isLoading ? (
@@ -312,11 +312,11 @@ function ScheduleSection({ db }: { db: string }) {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4">
-          {/* 3 alan yan yana — max 480px genişlikte tutuyoruz */}
+          {/* 3 fields side by side — max 480px wide */}
           <div className="grid grid-cols-[1fr_auto_auto] gap-4 items-end max-w-xl">
             {/* Cron */}
             <div className="space-y-1.5">
-              <Label htmlFor="cron" className="text-xs">Cron İfadesi</Label>
+              <Label htmlFor="cron" className="text-xs">Cron Expression</Label>
               <Input
                 id="cron"
                 value={form.cron}
@@ -325,7 +325,7 @@ function ScheduleSection({ db }: { db: string }) {
                 className="h-8 text-xs font-mono"
               />
               <p className="text-[11px] text-muted-foreground">
-                dak saat gün ay hf &nbsp;·&nbsp; örn: <code className="font-mono">0 2 * * *</code>
+                min hour day month weekday &nbsp;·&nbsp; e.g.: <code className="font-mono">0 2 * * *</code>
               </p>
             </div>
 
@@ -341,12 +341,12 @@ function ScheduleSection({ db }: { db: string }) {
                 onChange={(e) => setForm((f) => ({ ...f, retain: Number(e.target.value) }))}
                 className="h-8 text-xs"
               />
-              <p className="text-[11px] text-muted-foreground">yedek sayısı</p>
+              <p className="text-[11px] text-muted-foreground">backup count</p>
             </div>
 
-            {/* Durum */}
+            {/* Status */}
             <div className="space-y-1.5">
-              <Label className="text-xs">Durum</Label>
+              <Label className="text-xs">Status</Label>
               <EnabledSelector
                 value={form.enabled}
                 onChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
@@ -359,7 +359,7 @@ function ScheduleSection({ db }: { db: string }) {
               {setMutation.isPending
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 : <Check className="h-3.5 w-3.5" />}
-              Kaydet
+              Save
             </Button>
             {schedule && (
               <Button
@@ -371,7 +371,7 @@ function ScheduleSection({ db }: { db: string }) {
                 className="h-7 gap-1.5 text-muted-foreground hover:text-red-500"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Programı Sil
+                Delete Schedule
               </Button>
             )}
           </div>
@@ -380,9 +380,9 @@ function ScheduleSection({ db }: { db: string }) {
 
       <ConfirmDialog
         open={deleteOpen}
-        title="Programı İptal Et"
-        description="Otomatik yedekleme programı silinecek. Mevcut yedekler korunur."
-        confirmLabel="İptal Et"
+        title="Delete Schedule"
+        description="The automatic backup schedule will be deleted. Existing backups are kept."
+        confirmLabel="Delete"
         danger
         onConfirm={handleDelete}
         onCancel={() => setDeleteOpen(false)}
@@ -391,7 +391,7 @@ function ScheduleSection({ db }: { db: string }) {
   );
 }
 
-// ── Bölüm 3: Geri Yükle ──────────────────────────────────────────────────────
+// ── Section 3: Restore ──────────────────────────────────────────────────────────
 
 function RestoreSection({ db }: { db: string }) {
   const restoreMutation = useRestoreBackup(db);
@@ -416,33 +416,33 @@ function RestoreSection({ db }: { db: string }) {
       onSuccess: () => {
         clearFile();
         setConfirmOpen(false);
-        toast.success(`"${db}" veritabanı başarıyla geri yüklendi.`);
+        toast.success(`"${db}" database restored successfully.`);
       },
       onError: (err) => {
         setConfirmOpen(false);
-        toast.error(`Geri yükleme hatası: ${(err as Error).message}`);
+        toast.error(`Restore failed: ${(err as Error).message}`);
       },
     });
   }
 
   return (
     <section className="border-t border-border">
-      {/* Başlık */}
+      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <UploadCloud className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Geri Yükle</span>
+        <span className="text-sm font-medium">Restore</span>
       </div>
 
       <div className="px-4 py-4 space-y-3 max-w-xl">
-        {/* Uyarı */}
+        {/* Warning */}
         <div className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50/50 dark:bg-amber-500/10 px-3 py-2.5">
           <AlertTriangle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-700 dark:text-amber-400">
-            Geri yükleme <strong>{db}</strong> üzerindeki mevcut verilerin üzerine yazar. İşlem geri alınamaz.
+            Restoring will overwrite all existing data in <strong>{db}</strong>. This action cannot be undone.
           </p>
         </div>
 
-        {/* Dosya seçimi + Buton — tek satırda */}
+        {/* File picker + Button — single row */}
         <div className="flex items-center gap-2">
           <label
             htmlFor="restore-file"
@@ -458,7 +458,7 @@ function RestoreSection({ db }: { db: string }) {
                 <span className="text-muted-foreground shrink-0">{fmtBytes(file.size)}</span>
               </>
             ) : (
-              <span className="text-muted-foreground">.sql.gz dosyası seç</span>
+              <span className="text-muted-foreground">Select .sql.gz file</span>
             )}
             <input
               id="restore-file"
@@ -490,16 +490,16 @@ function RestoreSection({ db }: { db: string }) {
             {restoreMutation.isPending
               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
               : <UploadCloud className="h-3.5 w-3.5" />}
-            Geri Yükle
+            Restore
           </Button>
         </div>
       </div>
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Geri Yüklemeyi Onayla"
-        description={`"${db}" veritabanı "${file?.name}" dosyasından geri yüklenecek. Mevcut veriler silinecek. Devam etmek istiyor musunuz?`}
-        confirmLabel="Geri Yükle"
+        title="Confirm Restore"
+        description={`The database "${db}" will be restored from "${file?.name}". All current data will be deleted. Continue?`}
+        confirmLabel="Restore"
         danger
         onConfirm={handleRestore}
         onCancel={() => setConfirmOpen(false)}
@@ -508,7 +508,7 @@ function RestoreSection({ db }: { db: string }) {
   );
 }
 
-// ── Ana bileşen ────────────────────────────────────────────────────────────────
+// ── Main component ──────────────────────────────────────────────────────────────
 
 interface BackupTabProps {
   db: string;

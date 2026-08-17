@@ -1,12 +1,12 @@
 /**
- * Tablo yönetim route'ları:
- *   GET    /db/:database/tables                        — Tabloları listele
- *   POST   /db/:database/tables                        — Tablo oluştur
- *   DELETE /db/:database/tables/:table                 — Tablo sil
- *   GET    /db/:database/tables/:table/schema          — Şemayı getir
- *   POST   /db/:database/tables/:table/columns         — Kolon ekle
- *   DELETE /db/:database/tables/:table/columns/:col    — Kolon sil
- *   PATCH  /db/:database/tables/:table/columns/:col    — Kolon güncelle (nullable/default)
+ * Table management routes:
+ *   GET    /db/:database/tables                        — List tables
+ *   POST   /db/:database/tables                        — Create a table
+ *   DELETE /db/:database/tables/:table                 — Delete a table
+ *   GET    /db/:database/tables/:table/schema          — Get schema
+ *   POST   /db/:database/tables/:table/columns         — Add a column
+ *   DELETE /db/:database/tables/:table/columns/:col    — Delete a column
+ *   PATCH  /db/:database/tables/:table/columns/:col    — Update a column (nullable/default)
  */
 
 import type { FastifyInstance } from "fastify";
@@ -80,7 +80,7 @@ export async function tablesRoute(server: FastifyInstance) {
                   primaryKey: { type: "boolean", default: false },
                   unique:     { type: "boolean", default: false },
                   default:    { type: "string" },
-                  // Foreign key desteği (SORUN #1 düzeltmesi)
+                  // Foreign key support (Issue #1 fix)
                   references: {
                     type: "object",
                     description: "Foreign key constraint definition",
@@ -131,9 +131,9 @@ export async function tablesRoute(server: FastifyInstance) {
 
       assertIdentifier(name, "table");
 
-      // FK constraint'lerini inline kolon tanımlarından ayırıyoruz.
-      // PostgreSQL'de inline REFERENCES sözdizimi geçerli ama tablo seviyesi
-      // FOREIGN KEY kısıtları daha okunabilir ve constraint ismi verilebilir.
+      // Separating FK constraints from inline column definitions.
+      // Inline REFERENCES syntax is valid in PostgreSQL, but table-level
+      // FOREIGN KEY constraints are more readable and can be given a constraint name.
       const fkConstraints: string[] = [];
 
       const colDefs = columns.map((col) => {
@@ -148,15 +148,15 @@ export async function tablesRoute(server: FastifyInstance) {
           parts.push(`DEFAULT ${safeDefault}`);
         }
 
-        // Foreign key desteği (SORUN #1 düzeltmesi)
+        // Foreign key support (Issue #1 fix)
         if (col.references) {
           const refTable = col.references.table;
           const refCol = col.references.column ?? "id";
-          // Güvenlik: tablo ve kolon adlarını validate et
+          // Security: validate table and column names
           assertIdentifier(refTable, "referenced table");
           assertIdentifier(refCol, "referenced column");
 
-          // ON DELETE / ON UPDATE için whitelist — SQL injection'a kapalı
+          // Whitelist for ON DELETE / ON UPDATE — closed to SQL injection
           const ALLOWED_ACTIONS = new Set([
             "CASCADE", "SET NULL", "RESTRICT", "NO ACTION", "SET DEFAULT",
           ]);
@@ -169,7 +169,7 @@ export async function tablesRoute(server: FastifyInstance) {
             throw new Error(`Invalid ON UPDATE action: ${col.references.onUpdate}`);
           }
 
-          // Constraint adı deterministik — tablo+kolon kombinasyonundan türetilir
+          // Constraint name is deterministic — derived from the table+column combination
           const constraintName = `fk_${name}_${col.name}`;
           fkConstraints.push(
             `CONSTRAINT "${constraintName}" FOREIGN KEY ("${col.name}") ` +
@@ -186,7 +186,7 @@ export async function tablesRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(dbName);
       await sql.unsafe(ddl);
 
-      // Tablo listesi cache'ini geçersiz kıl
+      // Invalidate the table list cache
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "tables*")
       );
@@ -268,7 +268,7 @@ export async function tablesRoute(server: FastifyInstance) {
     })
   );
 
-  // ─── Kolon yönetimi ────────────────────────────────────────────────────────
+  // ─── Column management ────────────────────────────────────────────────────
 
   // POST /db/:database/tables/:table/columns — yeni kolon ekle
   server.post(
@@ -311,10 +311,10 @@ export async function tablesRoute(server: FastifyInstance) {
         parts[0] += ` DEFAULT ${safeDefault}`;
       }
 
-      // nullable: false → NOT NULL (ama sadece default varsa veya nullable açıkça false verilmişse)
+      // nullable: false → NOT NULL (only when a default is provided or nullable is explicitly false)
       if (body.nullable === false) {
         if (body.default === undefined) {
-          // NOT NULL kolona default olmadan eklemek mevcut satırları kırar — net hata
+          // Adding a NOT NULL column without a default breaks existing rows — clear error
           return reply.status(400).send({
             error:
               "Cannot add a NOT NULL column without a DEFAULT value to a table that may have existing rows. " +
@@ -327,7 +327,7 @@ export async function tablesRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(dbName);
       await sql.unsafe(parts[0]);
 
-      // Schema cache'ini geçersiz kıl
+      // Invalidate the schema cache
       await server.cache.invalidatePattern(
         server.cache.buildKey(dbName, "schema", table, "*")
       );
@@ -370,7 +370,7 @@ export async function tablesRoute(server: FastifyInstance) {
     })
   );
 
-  // PATCH /db/:database/tables/:table/columns/:col — kolon güncelle
+  // PATCH /db/:database/tables/:table/columns/:col — update column
   server.patch(
     "/:database/tables/:table/columns/:col",
     {

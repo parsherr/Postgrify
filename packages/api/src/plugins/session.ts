@@ -1,6 +1,6 @@
 /**
- * Session Plugin — SessionService'i Fastify'a decorator olarak bağlar.
- * Redis varsa refresh token desteği aktif olur, yoksa graceful degrade.
+ * Session Plugin — binds SessionService to Fastify as a decorator.
+ * Refresh token support is active when Redis is available; degrades gracefully otherwise.
  */
 
 import fp from "fastify-plugin";

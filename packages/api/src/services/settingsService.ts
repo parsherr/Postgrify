@@ -1,15 +1,15 @@
 /**
- * Settings Service — Postgrify meta-verilerini PostgreSQL'de kalıcı olarak saklar.
+ * Settings Service — persists Postgrify metadata in PostgreSQL.
  *
- * `_postgrify_settings` tablosu key-value deposu olarak kullanılır.
- * Tablo yoksa ilk çağrıda otomatik oluşturulur (provision).
+ * The `_postgrify_settings` table is used as a key-value store.
+ * The table is automatically provisioned on first call if it does not exist.
  *
  * Saklanan key'ler:
  *   admin_setup_completed    → "true"
  *   admin_email              → admin e-posta adresi
  *   admin_password_hash      → argon2id hash
- *   autoStartDatabases       → JSON string[] (otomatik başlatılacak DB'ler)
- *   backup_schedules         → JSON (BackupScheduleConfig haritası)
+ *   autoStartDatabases       → JSON string[] (databases to auto-start)
+ *   backup_schedules         → JSON (BackupScheduleConfig map)
  *   ip_allowlist:<dbName>    → JSON (IpAllowlistConfig)
  */
 
@@ -20,15 +20,15 @@ export type { IpAllowlistConfig };
 
 // ─── Tipler ──────────────────────────────────────────────────────────────────
 
-/** Backup schedule konfigürasyonu — bir DB'nin otomatik yedekleme ayarları. */
+/** Backup schedule configuration — automatic backup settings for a single DB. */
 export interface BackupScheduleConfig {
-  /** Cron expression — örn: "0 2 * * *" */
+  /** Cron expression — e.g. "0 2 * * *" */
   cron: string;
   enabled: boolean;
   retain: number;
 }
 
-/** Admin giriş bilgileri — DB'den yüklenir. */
+/** Admin credentials — loaded from the DB. */
 export interface AdminCredentials {
   email: string;
   passwordHash: string;
@@ -37,7 +37,7 @@ export interface AdminCredentials {
 // ─── Servis ───────────────────────────────────────────────────────────────────
 
 export class SettingsService {
-  /** Provision tamamlandıktan sonra resolve eden promise. */
+  /** Promise that resolves when provisioning completes. */
   private ready: Promise<void> | null = null;
 
   constructor(private readonly sql: Sql) {}
@@ -47,7 +47,7 @@ export class SettingsService {
   private ensureReady(): Promise<void> {
     if (!this.ready) {
       this.ready = this.provision().catch((err) => {
-        // Provision başarısız olursa bir sonraki çağrıda retry
+        // If provisioning fails, retry on the next call
         this.ready = null;
         throw err;
       });
@@ -66,7 +66,7 @@ export class SettingsService {
 
   // ── Auto-start databases ───────────────────────────────────────────────────
 
-  /** Sunucu başlangıcında otomatik açılacak DB listesini döner. */
+  /** Returns the list of DBs to be auto-opened at server startup. */
   async getAutoStartDatabases(): Promise<string[]> {
     await this.ensureReady();
     const rows = await this.sql<{ value: string }[]>`
@@ -82,7 +82,7 @@ export class SettingsService {
     }
   }
 
-  /** Otomatik başlatılacak DB listesini günceller. */
+  /** Updates the list of DBs to be auto-started. */
   async setAutoStartDatabases(databases: string[]): Promise<void> {
     await this.ensureReady();
     const value = JSON.stringify(databases);
@@ -95,7 +95,7 @@ export class SettingsService {
 
   // ── Backup schedules ───────────────────────────────────────────────────────
 
-  /** Tüm backup schedule konfigürasyonlarını döner: { dbName → config } */
+  /** Returns all backup schedule configurations: { dbName → config } */
   async getAllBackupSchedules(): Promise<Record<string, BackupScheduleConfig>> {
     await this.ensureReady();
     const rows = await this.sql<{ value: string }[]>`
@@ -111,13 +111,13 @@ export class SettingsService {
     }
   }
 
-  /** Belirli bir DB'nin backup schedule'ını döner. Yoksa null. */
+  /** Returns the backup schedule for a specific DB. Returns null if not found. */
   async getBackupSchedule(dbName: string): Promise<BackupScheduleConfig | null> {
     const schedules = await this.getAllBackupSchedules();
     return schedules[dbName] ?? null;
   }
 
-  /** Bir DB'nin backup schedule'ını kaydeder veya günceller. */
+  /** Saves or updates the backup schedule for a DB. */
   async setBackupSchedule(dbName: string, config: BackupScheduleConfig): Promise<void> {
     const schedules = await this.getAllBackupSchedules();
     schedules[dbName] = config;
@@ -129,7 +129,7 @@ export class SettingsService {
     `;
   }
 
-  /** Bir DB'nin backup schedule'ını siler. */
+  /** Deletes the backup schedule for a DB. */
   async deleteBackupSchedule(dbName: string): Promise<void> {
     const schedules = await this.getAllBackupSchedules();
     if (!(dbName in schedules)) return;
@@ -145,8 +145,8 @@ export class SettingsService {
   // ── IP allowlist ───────────────────────────────────────────────────────────
 
   /**
-   * Bir DB'nin IP erişim listesini okur.
-   * Ayar yoksa varsayılan (everyone, boş liste) döner.
+   * Reads the IP allowlist for a DB.
+   * Returns the default (everyone, empty list) if the setting is not found.
    */
   async getIpAllowlist(dbName: string): Promise<IpAllowlistConfig> {
     await this.ensureReady();
@@ -162,7 +162,7 @@ export class SettingsService {
     }
   }
 
-  /** Bir DB'nin IP erişim listesini kaydeder. */
+  /** Saves the IP allowlist for a DB. */
   async setIpAllowlist(dbName: string, config: IpAllowlistConfig): Promise<void> {
     await this.ensureReady();
     const key = `ip_allowlist:${dbName}`;
@@ -174,7 +174,7 @@ export class SettingsService {
     `;
   }
 
-  /** Bir DB'nin IP erişim listesini siler (everyone moduna döner). */
+  /** Deletes the IP allowlist for a DB (reverts to everyone mode). */
   async deleteIpAllowlist(dbName: string): Promise<void> {
     await this.ensureReady();
     await this.sql`
@@ -185,8 +185,8 @@ export class SettingsService {
   // ── Admin setup flag ───────────────────────────────────────────────────────
 
   /**
-   * DB'de admin kurulumunun tamamlandığı kaydını kontrol eder.
-   * Tablo yoksa veya bağlantı hatası varsa false döner (hata fırlatmaz).
+   * Checks whether the admin setup completion record exists in the DB.
+   * Returns false if the table does not exist or a connection error occurs (does not throw).
    */
   async getAdminSetupCompleted(): Promise<boolean> {
     await this.ensureReady();
@@ -199,8 +199,8 @@ export class SettingsService {
   }
 
   /**
-   * DB'ye admin kurulumunun tamamlandığını yazar.
-   * POST /setup başarısında çağrılır.
+   * Writes the admin setup completion record to the DB.
+   * Called on successful POST /setup.
    */
   async setAdminSetupCompleted(): Promise<void> {
     await this.ensureReady();
@@ -214,13 +214,13 @@ export class SettingsService {
   // ── Admin credentials ──────────────────────────────────────────────────────
 
   /**
-   * Admin kimlik bilgilerini DB'ye kalıcı olarak yazar.
+   * Persists admin credentials to the DB.
    *
-   * Docker container'da `.env`'ye yazma başarısız olduğunda bu method devreye
-   * girer. Bilgiler PostgreSQL volume'unda kalıcı olarak saklanır; container
-   * restart'larında kaybolmaz.
+   * This method is used when writing to `.env` fails inside a Docker container.
+   * Credentials are stored persistently in the PostgreSQL volume and survive
+   * container restarts.
    *
-   * Key'ler parametrik geçirilir — mock'larda args[1]=key, args[2]=value
+   * Keys are passed as parameters — in mocks args[1]=key, args[2]=value
    * olarak kolayca okunabilir.
    */
   async setAdminCredentials(email: string, passwordHash: string): Promise<void> {
@@ -241,8 +241,8 @@ export class SettingsService {
   }
 
   /**
-   * Admin kimlik bilgilerini DB'den yükler.
-   * Email veya hash eksikse null döner.
+   * Loads admin credentials from the DB.
+   * Returns null if email or hash is missing.
    */
   async getAdminCredentials(): Promise<AdminCredentials | null> {
     await this.ensureReady();
@@ -257,10 +257,10 @@ export class SettingsService {
     return { email, passwordHash };
   }
 
-  // ── Database silme yardımcısı ──────────────────────────────────────────────
+  // ── Database deletion helper ──────────────────────────────────────────────
 
   /**
-   * Bir DB silindiğinde ilgili tüm ayarları temizler.
+   * Clears all settings related to a DB when it is deleted.
    * (backup_schedule + ip_allowlist)
    */
   async deleteDatabase(dbName: string): Promise<void> {

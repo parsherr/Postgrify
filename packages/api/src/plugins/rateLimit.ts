@@ -1,12 +1,13 @@
 /**
- * Rate Limit Plugin — @fastify/rate-limit tabanlı.
+ * Rate Limit Plugin — based on @fastify/rate-limit.
  *
- * Redis varsa (REDIS_URL) ioredis backend kullanılır — distributed deployment'ta
- * doğru çalışması için zorunludur; aksi takdirde her container bağımsız sayar.
- * Redis yoksa in-memory sayaç kullanılır (tek container geliştirme ortamı).
+ * When Redis is available (REDIS_URL), the ioredis backend is used — required for
+ * correct behaviour in distributed deployments; without it each container counts
+ * independently. When Redis is absent, an in-memory counter is used (single-container
+ * development environments).
  *
- * Global IP limiti burada uygulanır.
- * Route bazlı limitler (DB token, admin login) ilgili route'larda override edilir.
+ * The global IP limit is applied here.
+ * Per-route limits (DB token, admin login) are overridden in their respective routes.
  */
 
 import fp from "fastify-plugin";
@@ -22,7 +23,7 @@ export const rateLimitPlugin = fp(async (server: FastifyInstance) => {
     try {
       const { Redis } = await import("ioredis");
       redisClient = new Redis(config.REDIS_URL, {
-        // Bağlantı koparsa agresif retry yapma — rate-limit için non-critical
+        // Do not retry aggressively on connection loss — rate-limiting is non-critical
         maxRetriesPerRequest: 1,
         enableReadyCheck: false,
         lazyConnect: false,
@@ -49,7 +50,7 @@ export const rateLimitPlugin = fp(async (server: FastifyInstance) => {
   await server.register(rateLimit, {
     max: config.RATE_LIMIT_GLOBAL,
     timeWindow: "1 minute",
-    // ioredis client varsa Redis store kullan
+    // Use Redis store if an ioredis client is available
     ...(redisClient ? { redis: redisClient } : {}),
     errorResponseBuilder: (_req, context) => {
       const retryAfter = Math.ceil(context.ttl / 1000);

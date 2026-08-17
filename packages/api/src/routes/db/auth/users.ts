@@ -1,14 +1,14 @@
 /**
  * DB Auth User CRUD routes.
  *
- * Tüm endpoint'ler admin token veya uygun scope'a sahip DB token gerektirir.
- * password_hash hiçbir zaman response'a dahil edilmez.
+ * All endpoints require an admin token or a DB token with the appropriate scope.
+ * password_hash is never included in responses.
  *
- *   GET    /:database/auth/users              — kullanıcı listesi
- *   POST   /:database/auth/users              — kullanıcı oluştur
- *   PATCH  /:database/auth/users/:id          — email / role / is_active güncelle
- *   DELETE /:database/auth/users/:id          — kullanıcı sil
- *   POST   /:database/auth/users/:id/reset-password — şifre sıfırla
+ *   GET    /:database/auth/users              — list users
+ *   POST   /:database/auth/users              — create user
+ *   PATCH  /:database/auth/users/:id          — update email / role / is_active
+ *   DELETE /:database/auth/users/:id          — delete user
+ *   POST   /:database/auth/users/:id/reset-password — reset password
  */
 
 import type { FastifyInstance } from "fastify";
@@ -60,8 +60,8 @@ import { JwtService } from "../../../services/jwtService.js";
 import { config } from "../../../config/env.js";
 import { ensureAuthSchema } from "./provision.js";
 
-// users route'larında authenticate + scopeGuard birlikte kullanılır
-// Bu helper her endpoint'te preHandler dizisini kısaltır
+// authenticate + scopeGuard are used together on users routes
+// This helper shortens the preHandler array on each endpoint
 function authGuard(server: FastifyInstance, scope: Parameters<typeof scopeGuard>[0]) {
   return [server.authenticate, scopeGuard(scope)] as const;
 }
@@ -417,7 +417,7 @@ export async function authUsersRoute(server: FastifyInstance) {
         return reply.status(404).send({ error: "User not found" });
       }
 
-      // Mevcut tüm session'ları revoke et (güvenlik: şifre değişince eski token'lar geçersiz)
+      // Revoke all existing sessions (security: old tokens must be invalidated after a password change)
       await sql`
         UPDATE _postgrify_auth.sessions
         SET revoked = true
@@ -457,7 +457,7 @@ export async function authUsersRoute(server: FastifyInstance) {
       },
     },
     asyncHandler(async (req, reply) => {
-      // Bu endpoint yalnızca per-DB user token'ı ile çağrılabilir
+    // Editors can change their own password — no schema scope required
       const authHeader = req.headers.authorization;
       const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
       if (!rawToken) {
@@ -475,7 +475,7 @@ export async function authUsersRoute(server: FastifyInstance) {
       const userId = dbUserPayload.sub;
       const database = req.dbName!;
 
-      // Token'ın bu DB için geçerli olduğunu kontrol et
+    // Must be admin or the user themselves
       if (dbUserPayload.db !== database) {
         return reply.status(403).send({ error: "Token database mismatch" });
       }
@@ -488,7 +488,7 @@ export async function authUsersRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Mevcut şifreyi doğrula
+      // Verify the current password
       const [user] = await sql`
         SELECT password_hash FROM _postgrify_auth.users
         WHERE id = ${userId} AND is_active = true
@@ -511,7 +511,7 @@ export async function authUsersRoute(server: FastifyInstance) {
         WHERE id = ${userId}
       `;
 
-      // Diğer tüm aktif session'ları revoke et (kendi token'ı hariç — o zaten kısa ömürlü)
+        // Revoke all of the user's sessions
       await sql`
         UPDATE _postgrify_auth.sessions
         SET revoked = true
@@ -523,9 +523,9 @@ export async function authUsersRoute(server: FastifyInstance) {
   );
 
   // ── DELETE /:database/auth/me ──────────────────────────────────────────────
-  // Kullanıcının kendi hesabını silmesi (SORUN #8 düzeltmesi).
-  // Bu endpoint DB-user token ile erişilebilir; admin scope gerekmez.
-  // Sadece token sahibinin kendi hesabını siler — başka kullanıcıları silemez.
+        // Swallow session revocation errors — the main delete is the priority
+    // A user cannot delete themselves (admin should not delete their own account either)
+        // Revoke all sessions for the target user
   server.delete(
     "/:database/auth/me",
     {
@@ -537,7 +537,7 @@ export async function authUsersRoute(server: FastifyInstance) {
         tags: ["db-auth"],
         security: [{ bearerAuth: [] }],
         // body schema yok — DELETE /auth/me body gerektirmez.
-        // Handler kendi başına token'ı parse eder; body varsa optional olarak okur.
+        // Revoke all sessions for the target user
         response: {
           200: {
             type: "object",
@@ -556,8 +556,8 @@ export async function authUsersRoute(server: FastifyInstance) {
         return reply.status(401).send({ error: "Missing authorization token" });
       }
 
-      // Sadece per-DB user token kabul et — admin token'ı reddediyoruz
-      // çünkü admin token bir "kullanıcıya" ait değil; hangi user silinmeli belli değil.
+    // Perform the delete
+      // because an admin token does not belong to a "user"; it is unclear which user should be deleted.
       const dbUserPayload = await jwtService.verifyDbUser(rawToken);
       if (!dbUserPayload) {
         return reply.status(403).send({
@@ -578,7 +578,7 @@ export async function authUsersRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Şifre doğrulama (opsiyonel — gönderilmişse kontrol et)
+      // Password verification (optional — check only if provided)
       const { password: confirmPassword } = (req.body ?? {}) as { password?: string };
       if (confirmPassword) {
         const [user] = await sql`
@@ -595,7 +595,7 @@ export async function authUsersRoute(server: FastifyInstance) {
         }
       }
 
-      // Tüm session'ları revoke et, sonra kullanıcıyı sil (CASCADE session'ları da siler)
+      // Revoke all sessions, then delete the user (CASCADE also deletes sessions)
       await sql`
         UPDATE _postgrify_auth.sessions SET revoked = true WHERE user_id = ${userId}
       `;

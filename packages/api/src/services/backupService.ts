@@ -1,16 +1,16 @@
 /**
- * Backup Service — PostgreSQL veritabanı yedekleme ve geri yükleme.
+ * Backup Service — PostgreSQL database backup and restore.
  *
- * Özellikler:
- *   - Sunucu dosya sistemine .sql.gz olarak sıkıştırılmış yedek yazar
- *   - Her backup'ın metadata'sı _postgrify_backups tablosuna kaydedilir
- *   - DDL kapsamı: tablolar + view'lar + sequence'lar + index'ler + FK'lar + trigger'lar
- *   - Satırlar cursor ile 500'erli batch'lerde okunur (OOM riski azaltılmış)
- *   - Restore: gzip decompress → satır satır parse → transaction içinde çalıştır
+ * Features:
+ *   - Writes compressed .sql.gz backups to the server filesystem
+ *   - Backup metadata is saved to the _postgrify_backups table
+ *   - DDL scope: tables + views + sequences + indexes + FKs + triggers
+ *   - Rows are read via cursor in batches of 500 (reduced OOM risk)
+ *   - Restore: gzip decompress → parse line by line → execute inside a transaction
  *
  * Storage:
  *   BACKUP_DIR env var (default: /data/backups)
- *   Dosya adı: <dbName>_<YYYYMMDDTHHMMSS>_<uuid8>.sql.gz
+ *   Filename: <dbName>_<YYYYMMDDTHHMMSS>_<uuid8>.sql.gz
  */
 
 import { createWriteStream, createReadStream, statSync, mkdirSync, existsSync, unlinkSync } from "fs";
@@ -39,9 +39,9 @@ export interface BackupMeta {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * postgres.js, BIGINT kolonlarını BigInt olarak döndürür.
- * JSON serialize edilebilmesi ve schema uyumu için Number'a çevir.
- * 2^53'ü aşan dosya boyutları pratikte imkânsız olduğundan güvenli.
+ * postgres.js returns BIGINT columns as BigInt.
+ * Convert to Number for JSON serialization and schema compatibility.
+ * Safe because file sizes exceeding 2^53 are not practically possible.
  */
 function normalizeMeta(row: BackupMeta): BackupMeta {
   return {
@@ -74,11 +74,11 @@ function quoteIdent(name: string): string {
 
 export class BackupService {
   private readonly backupDir: string;
-  // Lazy: ilk ensureMetaReady() çağrısında provision başlar; constructor'da DB bağlantısı açılmaz.
+  // Lazy: provisioning starts on the first ensureMetaReady() call; no DB connection opened in the constructor.
   private metaReady: Promise<void> | null = null;
 
   constructor(
-    /** postgres DB pool — sadece metadata için kullanılır */
+    /** postgres DB pool — used only for metadata */
     private readonly metaSql: postgres.Sql,
     backupDir: string,
   ) {
@@ -100,7 +100,7 @@ export class BackupService {
           error_msg   TEXT
         )
       `;
-      // Hızlı lookup için index
+      // Index for fast lookups
       await this.metaSql`
         CREATE INDEX IF NOT EXISTS idx_pg_backups_db_created
           ON _postgrify_backups (db_name, created_at DESC)
@@ -207,17 +207,17 @@ export class BackupService {
     const meta = await this.getBackup(id);
     if (!meta) return;
 
-    // Dosyayı sil (yoksa sessizce geç)
+    // Delete the file (silently skip if not found)
     try {
       if (existsSync(meta.file_path)) unlinkSync(meta.file_path);
     } catch {
-      // dosya zaten yoksa önemli değil
+      // not important if the file is already gone
     }
 
     await this.metaSql`DELETE FROM _postgrify_backups WHERE id = ${id}`;
   }
 
-  /** Belirli bir DB'nin en eski yedeklerini siler; `keep` kadar yeni olanı bırakır. */
+  /** Deletes the oldest backups for a specific DB, keeping the newest `keep` backups. */
   async enforceRetention(dbName: string, keep: number): Promise<void> {
     await this.ensureMetaReady();
     if (keep <= 0) return;
@@ -354,7 +354,7 @@ export class BackupService {
       lines.push(``);
     }
 
-    // ── 3. Tablolara satır INSERT'leri ────────────────────────────────────────
+    // ── 3. Row INSERT statements for tables ──────────────────────────────────
     for (const tbl of tableNames) {
       const cols = schemaMap[tbl] ?? [];
       if (cols.length === 0) continue;
@@ -394,7 +394,7 @@ export class BackupService {
       }
     }
 
-    // ── 5. Indexes (PK index'leri hariç) ─────────────────────────────────────
+    // ── 5. Indexes (excluding PK indexes) ────────────────────────────────────
     type IndexRow = { indexname: string; tablename: string; indexdef: string };
     const indexes = await sql<IndexRow[]>`
       SELECT indexname, tablename, indexdef
@@ -492,7 +492,7 @@ export class BackupService {
   // ── Public API ────────────────────────────────────────────────────────────
 
   /**
-   * Tam DB backup'ı oluşturur, .sql.gz olarak diske yazar, metadata kaydeder.
+   * Creates a full DB backup, writes it to disk as .sql.gz, and records metadata.
    * Returns: BackupMeta (completed veya failed)
    */
   async createBackup(dbName: string, sql: postgres.Sql): Promise<BackupMeta> {
@@ -526,18 +526,18 @@ export class BackupService {
   }
 
   /**
-   * Mevcut bir backup dosyasını hedef DB'ye geri yükler.
-   * Tüm işlem bir transaction içinde yapılır — hata durumunda ROLLBACK.
+   * Restores an existing backup file to the target DB.
+   * The entire operation runs inside a transaction — ROLLBACK on error.
    */
   async restoreBackup(sql: postgres.Sql, filePath: string): Promise<void> {
     if (!existsSync(filePath)) {
       throw new Error(`Backup file not found: ${filePath}`);
     }
 
-    // gzip → satırlara ayır → toplu statement'lara birleştir
+    // gzip → split into lines → combine into bulk statements
     const statements = await this.parseGzipSql(filePath);
 
-    // Transaction içinde toplu çalıştır
+    // Execute in bulk inside a transaction
     await sql.begin(async (tx) => {
       for (const stmt of statements) {
         const trimmed = stmt.trim();
@@ -549,7 +549,7 @@ export class BackupService {
   }
 
   /**
-   * Backup dosyasını decompress edip bireysel SQL statement'larına ayırır.
+   * Decompresses a backup file and splits it into individual SQL statements.
    */
   private async parseGzipSql(filePath: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
@@ -562,10 +562,10 @@ export class BackupService {
 
       rl.on("line", (line) => {
         const trimmed = line.trim();
-        // -- yorumlarını ve boş satırları biriktirmeye gerek yok (BEGIN/COMMIT dahil)
+        // No need to accumulate -- comments and blank lines (including BEGIN/COMMIT)
         if (!trimmed || trimmed.startsWith("--")) return;
 
-        // BEGIN / COMMIT satırlarını atla — kendi transaction'ımız var
+        // Skip BEGIN / COMMIT lines — we have our own transaction
         if (trimmed === "BEGIN;" || trimmed === "COMMIT;") return;
 
         current += line + "\n";
@@ -586,8 +586,8 @@ export class BackupService {
   }
 
   /**
-   * Backup dosyasını bir writable stream'e pipe eder (HTTP response için).
-   * Caller stream header'larını (Content-Type, Content-Disposition) kendisi set eder.
+   * Pipes a backup file to a writable stream (for HTTP responses).
+   * The caller is responsible for setting stream headers (Content-Type, Content-Disposition).
    */
   async streamBackupToResponse(filePath: string, responseStream: NodeJS.WritableStream): Promise<void> {
     if (!existsSync(filePath)) {
@@ -597,7 +597,7 @@ export class BackupService {
     await pipeline(readStream, responseStream as NodeJS.WritableStream & { writable: boolean });
   }
 
-  /** Dosya sistemi üzerindeki backup dosyasının boyutunu döner. Dosya yoksa null. */
+  /** Returns the size of the backup file on the filesystem. Returns null if the file does not exist. */
   getFileSize(filePath: string): number | null {
     try {
       return statSync(filePath).size;
@@ -606,7 +606,7 @@ export class BackupService {
     }
   }
 
-  /** DB silindiğinde o DB'ye ait tüm backup metadata'sını temizler (dosyalar silinmez). */
+  /** Cleans up all backup metadata for a DB when it is deleted (files are not deleted). */
   async cleanMetaForDatabase(dbName: string): Promise<void> {
     await this.ensureMetaReady();
     await this.metaSql`

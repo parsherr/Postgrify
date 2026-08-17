@@ -1,6 +1,6 @@
 /**
- * TopBar — breadcrumb, aktif DB badge'i, kullanıcı menüsü.
- * Header.tsx'in yeni versiyonu.
+ * TopBar — breadcrumb, active DB badge, user menu.
+ * New version of Header.tsx.
  */
 
 import { useLocation, useParams, Link, useNavigate } from "react-router-dom";
@@ -81,15 +81,15 @@ export function TopBar() {
         ))}
       </nav>
 
-      {/* Sağ taraf */}
+      {/* Right side */}
       <div className="flex items-center gap-2">
-        {/* Aktif DB switcher */}
+        {/* Active DB switcher */}
         {databases && databases.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white">
                 <Database className="h-3 w-3" />
-                {activeDb ?? "DB seç"}
+                {activeDb ?? "Select DB"}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
@@ -116,7 +116,7 @@ export function TopBar() {
                 className="text-xs"
               >
                 <Code2 className="mr-2 h-3 w-3" />
-                SQL Editörü
+                SQL Editor
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -126,7 +126,7 @@ export function TopBar() {
         <button
           onClick={handleLogout}
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
-          title="Çıkış"
+          title="Logout"
         >
           <LogOut className="h-3.5 w-3.5" />
         </button>

@@ -1,11 +1,11 @@
 /**
- * GET    /:database/auth/me — Geçerli DB kullanıcısının bilgilerini döner.
- * PATCH  /:database/auth/me — Profil alanlarını günceller (full_name, avatar_url, metadata).
+ * GET    /:database/auth/me — Returns the current DB user's profile.
+ * PATCH  /:database/auth/me — Updates profile fields (full_name, avatar_url, metadata).
  *
- * Her iki endpoint de Authorization: Bearer <db-user-access-token> gerektirir.
- * password_hash hiçbir zaman döndürülmez.
- * Şifre değişikliği için PATCH /:database/auth/me/password kullanılır.
- * Hesap silme için DELETE /:database/auth/me (users.ts içinde tanımlı).
+ * Both endpoints require Authorization: Bearer <db-user-access-token>.
+ * password_hash is never returned.
+ * Use PATCH /:database/auth/me/password for password changes.
+ * Account deletion: DELETE /:database/auth/me (defined in users.ts).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -39,7 +39,7 @@ export async function authMeRoute(server: FastifyInstance) {
               provider:       { type: "string" },
               created_at:     { type: "string" },
               last_login:     { type: ["string", "null"] },
-              // metadata dinamik key'ler içerebilir — serializasyon sırasında kırpılmasın
+              // metadata may contain dynamic keys — must not be stripped during serialization
               metadata:       { type: "object", additionalProperties: true },
             },
           },
@@ -71,7 +71,7 @@ export async function authMeRoute(server: FastifyInstance) {
           id, email, role, full_name, avatar_url,
           email_verified, is_active, provider,
           created_at, last_login,
-          -- Metadata array veya scalar olabilir (bozuk veri durumu) — önce object'e normalize et.
+          -- Metadata may be an array or scalar (corrupted data) — normalize to object first.
           (CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
             - 'verification_token' - 'verification_exp'
             - 'reset_token' - 'reset_token_exp'
@@ -88,7 +88,7 @@ export async function authMeRoute(server: FastifyInstance) {
     })
   );
 
-  // PATCH /:database/auth/me — profil güncelle
+  // PATCH /:database/auth/me — update profile
   server.patch(
     "/:database/auth/me",
     {
@@ -106,7 +106,7 @@ export async function authMeRoute(server: FastifyInstance) {
           properties: {
             full_name:  { type: ["string", "null"], maxLength: 255 },
             avatar_url: { type: ["string", "null"], maxLength: 2048 },
-            // Metadata gönderilirse mevcut JSONB ile merge edilir (üstüne yazılmaz)
+            // If metadata is provided, it is merged with the existing JSONB (not overwritten)
             metadata:   { type: "object" },
           },
         },
@@ -124,7 +124,7 @@ export async function authMeRoute(server: FastifyInstance) {
               provider:       { type: "string" },
               created_at:     { type: "string" },
               last_login:     { type: ["string", "null"] },
-              // metadata dinamik key'ler içerebilir — serializasyon sırasında kırpılmasın
+              // metadata may contain dynamic keys — must not be stripped during serialization
               metadata:       { type: "object", additionalProperties: true },
             },
           },
@@ -161,23 +161,23 @@ export async function authMeRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // "full_name" veya "avatar_url" body'de varsa (undefined değil) güncelle,
-      // yoksa mevcut değeri koru. null göndermek alanı temizler.
-      // Metadata varsa mevcut JSONB ile merge et — ama hassas alanlar korunur.
+      // Update "full_name" or "avatar_url" only if present in the body (not undefined);
+      // otherwise keep the existing value. Sending null clears the field.
+      // If metadata is present, merge with existing JSONB — but sensitive fields are protected.
       const hasFullName  = "full_name"  in body;
       const hasAvatarUrl = "avatar_url" in body;
       const hasMetadata  = "metadata"   in body;
 
-      // Güvenlik: kullanıcı metadata merge ile token/auth alanlarını overwrite edemez.
-      // Saldırı örneği: {"reset_token":"evil_hash"} → DB'deki gerçek reset token override.
-      // Çözüm: merge SONRASI hassas alanları DB JSONB - operatörüyle sil.
+      // Security: users cannot overwrite token/auth fields via metadata merge.
+      // Attack example: {"reset_token":"evil_hash"} → would override the real reset token in the DB.
+      // Fix: after merge, delete sensitive fields using the DB JSONB - operator.
       const PROTECTED_METADATA_KEYS = [
         "reset_token", "reset_token_exp",
         "magic_token", "magic_token_exp",
         "verification_token", "verification_exp",
       ];
 
-      // Sanitize: body.metadata'dan korunan alanları kaldır
+      // Sanitize: remove protected fields from body.metadata
       let safeMetadata: Record<string, unknown> = {};
       if (hasMetadata && body.metadata) {
         safeMetadata = { ...body.metadata };

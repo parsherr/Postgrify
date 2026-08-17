@@ -1,8 +1,8 @@
 /**
- * Postgrify SDK istemcisi — tweeter-clone-v2
+ * Postgrify SDK client — tweeter-clone-v2
  *
  * createClient: per-DB auth (signup/login/me/logout)
- * Veri erişimi: lib/api.ts içindeki apiFetch ile doğrudan REST
+ * Data access: direct REST via apiFetch in lib/api.ts
  */
 
 import { createClient } from "@postgrify/auth-js";

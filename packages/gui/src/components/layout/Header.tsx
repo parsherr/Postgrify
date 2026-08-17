@@ -1,5 +1,5 @@
 /**
- * Üst başlık çubuğu — sayfa başlığı ve breadcrumb.
+ * Top header bar — page title and breadcrumb.
  */
 
 import { useLocation, useParams, Link } from "react-router-dom";
@@ -15,18 +15,18 @@ function useBreadcrumbs() {
   ];
 
   if (parts[0] === "databases") {
-    crumbs.push({ label: "Veritabanları", to: "/databases" });
+    crumbs.push({ label: "Databases", to: "/databases" });
     if (db) {
       crumbs.push({ label: db, to: `/databases/${db}` });
       if (table) {
         crumbs.push({ label: table, to: `/databases/${db}/tables/${table}` });
       }
       if (parts.includes("new-table")) {
-        crumbs.push({ label: "Yeni Tablo", to: `/databases/${db}/new-table` });
+        crumbs.push({ label: "New Table", to: `/databases/${db}/new-table` });
       }
     }
   } else if (parts[0] === "query") {
-    crumbs.push({ label: "SQL Editörü", to: "/query" });
+    crumbs.push({ label: "SQL Editor", to: "/query" });
   } else if (parts[0] === "api-keys") {
     crumbs.push({ label: "API Keys", to: "/api-keys" });
   }

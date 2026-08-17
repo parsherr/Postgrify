@@ -1,5 +1,5 @@
 /**
- * Onay diyalog bileşeni — tehlikeli işlemler öncesi kullanılır.
+ * Confirmation dialog component — used before destructive actions.
  */
 
 interface ConfirmDialogProps {
@@ -17,8 +17,8 @@ export function ConfirmDialog({
   open,
   title,
   description,
-  confirmLabel = "Onayla",
-  cancelLabel = "İptal",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
   onConfirm,
   onCancel,
   danger = false,

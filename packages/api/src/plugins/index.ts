@@ -1,6 +1,6 @@
 /**
- * Tüm Fastify plugin'lerini tek noktadan kayıt eder.
- * Sıra önemlidir: cors → rateLimit → auth → cache
+ * Registers all Fastify plugins from a single entry point.
+ * Order matters: cors → rateLimit → auth → cache
  */
 
 import type { FastifyInstance } from "fastify";
@@ -15,7 +15,7 @@ import { openApiPlugin } from "./openApi.js";
 import { websocketPlugin } from "./websocket.js";
 
 export async function registerPlugins(server: FastifyInstance) {
-  // Error handler en önce kaydedilmeli — diğer plugin'lerin hatalarını da yakalar
+  // Error handler must be registered first — it also catches errors from other plugins
   await server.register(errorHandlerPlugin);
   await server.register(corsPlugin);
   await server.register(rateLimitPlugin);

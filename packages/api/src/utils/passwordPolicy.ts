@@ -1,15 +1,15 @@
 /**
- * passwordPolicy — Şifre kompleksitesi kuralları.
+ * passwordPolicy — Password complexity rules.
  *
- * Kurallar auth_settings'den dinamik okunur; yoksa güvenli varsayılan kullanılır.
+ * Rules are read dynamically from auth_settings; falls back to secure defaults.
  *
- * Varsayılan politika:
+ * Default policy:
  *   - min_password_length: 8
- *   - password_require_uppercase: false  (geriye dönük uyumluluk)
+ *   - password_require_uppercase: false  (backward compatibility)
  *   - password_require_number: false
  *   - password_require_special: false
  *
- * Production'da auth_settings tablosundan güçlü kurallar etkinleştirilebilir.
+ * Strong rules can be enabled from the auth_settings table in production.
  */
 
 export interface PasswordPolicy {
@@ -28,14 +28,14 @@ export const DEFAULT_PASSWORD_POLICY: PasswordPolicy = {
 
 export interface PasswordValidationResult {
   valid: boolean;
-  /** Geçersizse kullanıcıya gösterilecek hata mesajı. */
+  /** Error message to show the user if validation fails. */
   message?: string;
 }
 
 /**
- * Şifreyi politikaya göre doğrular.
+ * Validates a password against the policy.
  *
- * @param password - Düz metin şifre (hash'lenmemiş)
+ * @param password - Plain text password (unhashed)
  * @param policy   - Uygulanacak politika; eksik alanlar DEFAULT_PASSWORD_POLICY ile doldurulur
  */
 export function validatePassword(
@@ -48,7 +48,7 @@ export function validatePassword(
     return { valid: false, message: "Password must be a non-empty string" };
   }
 
-  // Tümü boşluk kontrolü — "        " gibi şifreleri engelle
+  // All-whitespace check — block passwords like "        "
   if (password.trim().length === 0) {
     return { valid: false, message: "Password must not consist only of whitespace" };
   }
@@ -79,8 +79,8 @@ export function validatePassword(
 }
 
 /**
- * auth_settings satırlarından PasswordPolicy nesnesi üretir.
- * `getAuthSetting()` sonuçlarıyla kullanılır.
+ * Builds a PasswordPolicy object from auth_settings rows.
+ * Used with the results of `getAuthSetting()`.
  */
 export function parsePolicyFromSettings(
   settings: Record<string, string>

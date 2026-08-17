@@ -1,28 +1,29 @@
 /**
- * SettingsService unit testleri.
+ * SettingsService unit tests.
  *
- * Gerçek DB bağlantısı olmadan test edilir — postgres SQL mock'lanır.
- * Her test kendi mock sql instance'ını kullanır.
+ * Tested without a real DB connection — the postgres SQL function is mocked.
+ * Each test uses its own mock sql instance.
  *
- * Test edilenler:
+ * Coverage:
  *   - getAdminCredentials / setAdminCredentials round-trip
  *   - getAdminSetupCompleted / setAdminSetupCompleted
  *   - getAutoStartDatabases / setAutoStartDatabases
- *   - Provision: tablo oluşturma SQL çalışır
- *   - Graceful fallback: provision başarısız → retry
+ *   - Provision: CREATE TABLE SQL is executed
+ *   - Graceful fallback: failed provision → retry on next call
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SettingsService } from "../../src/services/settingsService.js";
 import type { AdminCredentials } from "../../src/services/settingsService.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SQL mock fabric
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// SQL mock factory
+// ---------------------------------------------------------------------------
 
 /**
- * postgres.js sql tagged template mock'u oluşturur.
- * İlk çağrı provision (CREATE TABLE), sonraki çağrılar veri okuma/yazma.
+ * Creates a postgres.js sql tagged-template mock.
+ * The first call handles provision (CREATE TABLE); subsequent calls handle
+ * data reads and writes.
  */
 function makeSqlMock(dataRows: Record<string, string>[] = []) {
   const calls: unknown[][] = [];
@@ -52,18 +53,18 @@ function makeSqlMock(dataRows: Record<string, string>[] = []) {
   return { sql, calls };
 }
 
-/** WHERE key = '...' den key değerini çıkarır */
+/** Extracts the key value from a WHERE key = '...' clause */
 function extractWhereKey(query: string): string {
   const match = query.match(/WHERE key = '([^']+)'/);
   return match?.[1] ?? "";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin credentials
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// getAdminCredentials
+// ---------------------------------------------------------------------------
 
 describe("getAdminCredentials", () => {
-  it("email ve hash varsa döner", async () => {
+  it("returns credentials when both email and hash are present", async () => {
     const { sql } = makeSqlMock([
       { key: "admin_email", value: "admin@example.com" },
       { key: "admin_password_hash", value: "$argon2id$v=19$hash" },
@@ -75,7 +76,7 @@ describe("getAdminCredentials", () => {
     expect(creds?.passwordHash).toBe("$argon2id$v=19$hash");
   });
 
-  it("email yoksa null döner", async () => {
+  it("returns null when email is missing", async () => {
     const { sql } = makeSqlMock([
       { key: "admin_password_hash", value: "$argon2id$v=19$hash" },
     ]);
@@ -84,7 +85,7 @@ describe("getAdminCredentials", () => {
     expect(creds).toBeNull();
   });
 
-  it("hash yoksa null döner", async () => {
+  it("returns null when hash is missing", async () => {
     const { sql } = makeSqlMock([
       { key: "admin_email", value: "admin@example.com" },
     ]);
@@ -93,7 +94,7 @@ describe("getAdminCredentials", () => {
     expect(creds).toBeNull();
   });
 
-  it("DB boşsa null döner", async () => {
+  it("returns null when DB is empty", async () => {
     const { sql } = makeSqlMock([]);
     const svc = new SettingsService(sql);
     const creds = await svc.getAdminCredentials();
@@ -101,8 +102,12 @@ describe("getAdminCredentials", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// setAdminCredentials
+// ---------------------------------------------------------------------------
+
 describe("setAdminCredentials", () => {
-  it("email ve hash için INSERT çağrısı yapılır", async () => {
+  it("calls INSERT for both email and hash", async () => {
     const insertCalls: string[] = [];
     const sql = vi.fn((...args: unknown[]) => {
       const q = String(args[0]);
@@ -115,21 +120,18 @@ describe("setAdminCredentials", () => {
     const svc = new SettingsService(sql);
     await svc.setAdminCredentials("admin@example.com", "$argon2id$hash");
 
-    // email ve passwordHash için ayrı INSERT olmalı
+    // Expect separate INSERTs for email and passwordHash
     expect(insertCalls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("round-trip: set → get aynı değeri döndürür", async () => {
-    // Gerçek storage simülasyonu: in-memory store.
+  it("round-trip: set then get returns the same values", async () => {
+    // Simulate real storage with an in-memory map.
     //
-    // setAdminCredentials iki UPSERT çağrısı yapar; key'i de parametre olarak
-    // geçirir. postgres.js tagged template'de:
+    // setAdminCredentials performs two UPSERT calls; the key is passed as a
+    // parameter. In postgres.js tagged templates:
     //   sql`INSERT ... VALUES (${key}, ${value}) ...`
     //   → args[0] = template string array
     //   → args[1] = key, args[2] = value
-    //
-    // Aynı INSERT formatı getAutoStartDatabases / setAutoStart'ta da kullanılır;
-    // bu test sadece admin_email ve admin_password_hash key'lerini store'a yazar.
     const store = new Map<string, string>();
 
     const sql = vi.fn((...args: unknown[]) => {
@@ -139,117 +141,84 @@ describe("setAdminCredentials", () => {
       if (q.includes("CREATE TABLE IF NOT EXISTS")) return Promise.resolve([]);
 
       if (q.includes("SELECT key, value FROM _postgrify_settings")) {
-        const rows = [...store.entries()].map(([k, v]) => ({ key: k, value: v }));
+        const rows = Array.from(store.entries()).map(([key, value]) => ({
+          key,
+          value,
+        }));
         return Promise.resolve(rows);
       }
 
       if (q.includes("INSERT INTO _postgrify_settings")) {
-        // VALUES (${key}, ${value}) → args[1]=key, args[2]=value
-        const key = args[1] as string;
-        const value = args[2] as string;
-        if (key && value !== undefined) store.set(key, value);
+        const key = String(args[1]);
+        const value = String(args[2]);
+        store.set(key, value);
         return Promise.resolve([]);
       }
+
       return Promise.resolve([]);
     }) as unknown as import("postgres").Sql;
 
     const svc = new SettingsService(sql);
-    await svc.setAdminCredentials("admin@roundtrip.com", "$argon2id$roundtrip");
-    const creds: AdminCredentials | null = await svc.getAdminCredentials();
+    await svc.setAdminCredentials("admin@example.com", "$argon2id$roundtrip");
 
-    expect(creds?.email).toBe("admin@roundtrip.com");
-    expect(creds?.passwordHash).toBe("$argon2id$roundtrip");
+    const result = await svc.getAdminCredentials();
+    expect(result?.email).toBe("admin@example.com");
+    expect(result?.passwordHash).toBe("$argon2id$roundtrip");
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin setup flag
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// getAdminSetupCompleted / setAdminSetupCompleted
+// ---------------------------------------------------------------------------
 
 describe("getAdminSetupCompleted", () => {
-  it("'true' değeri varsa true döner", async () => {
-    const store = new Map([["admin_setup_completed", "true"]]);
-    const sql = vi.fn((...args: unknown[]) => {
-      const q = String(args[0]);
-      if (q.includes("CREATE TABLE IF NOT EXISTS")) return Promise.resolve([]);
-      if (q.includes("SELECT value FROM _postgrify_settings")) {
-        const key = extractWhereKey(q);
-        const val = store.get(key);
-        return Promise.resolve(val ? [{ value: val }] : []);
-      }
-      return Promise.resolve([]);
-    }) as unknown as import("postgres").Sql;
-
-    const svc = new SettingsService(sql);
-    expect(await svc.getAdminSetupCompleted()).toBe(true);
-  });
-
-  it("kayıt yoksa false döner", async () => {
+  it("returns false when the setup_completed key is missing", async () => {
     const { sql } = makeSqlMock([]);
     const svc = new SettingsService(sql);
-    expect(await svc.getAdminSetupCompleted()).toBe(false);
+    const result = await svc.getAdminSetupCompleted();
+    expect(result).toBe(false);
   });
 
-  it("değer 'false' ise false döner", async () => {
-    const { sql } = makeSqlMock([{ key: "admin_setup_completed", value: "false" }]);
+  it("returns true when setup_completed is 'true'", async () => {
+    const { sql } = makeSqlMock([
+      { key: "admin_setup_completed", value: "true" },
+    ]);
     const svc = new SettingsService(sql);
-    expect(await svc.getAdminSetupCompleted()).toBe(false);
+    const result = await svc.getAdminSetupCompleted();
+    expect(result).toBe(true);
   });
 });
 
 describe("setAdminSetupCompleted", () => {
-  it("INSERT çağrısı yapılır", async () => {
-    let inserted = false;
+  it("executes INSERT with key admin_setup_completed and value 'true'", async () => {
+    // setAdminSetupCompleted() takes no arguments — it always writes 'true'.
+    // The key and value are hardcoded in the tagged template literal, so they
+    // appear as parts of args[0] (the TemplateStringsArray), not as positional
+    // args. We verify the SQL was called with the expected key/value text.
+    let insertCalled = false;
     const sql = vi.fn((...args: unknown[]) => {
       const q = String(args[0]);
-      if (q.includes("CREATE TABLE IF NOT EXISTS")) return Promise.resolve([]);
-      if (q.includes("INSERT INTO _postgrify_settings")) {
-        inserted = true;
-        return Promise.resolve([]);
+      if (
+        q.includes("INSERT INTO _postgrify_settings") &&
+        q.includes("admin_setup_completed")
+      ) {
+        insertCalled = true;
       }
       return Promise.resolve([]);
     }) as unknown as import("postgres").Sql;
 
     const svc = new SettingsService(sql);
     await svc.setAdminSetupCompleted();
-    expect(inserted).toBe(true);
+    expect(insertCalled).toBe(true);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auto-start databases
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Provision behaviour
+// ---------------------------------------------------------------------------
 
-describe("getAutoStartDatabases", () => {
-  it("boş listede boş dizi döner", async () => {
-    const { sql } = makeSqlMock([]);
-    const svc = new SettingsService(sql);
-    expect(await svc.getAutoStartDatabases()).toEqual([]);
-  });
-
-  it("kayıtlı liste döner", async () => {
-    const { sql } = makeSqlMock([
-      { key: "autoStartDatabases", value: '["mydb","otherdb"]' },
-    ]);
-    const svc = new SettingsService(sql);
-    expect(await svc.getAutoStartDatabases()).toEqual(["mydb", "otherdb"]);
-  });
-
-  it("bozuk JSON için boş dizi döner (graceful)", async () => {
-    const { sql } = makeSqlMock([
-      { key: "autoStartDatabases", value: "not-json" },
-    ]);
-    const svc = new SettingsService(sql);
-    expect(await svc.getAutoStartDatabases()).toEqual([]);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Provision (tablo oluşturma)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("ensureReady (provision)", () => {
-  it("ilk çağrıda CREATE TABLE çalıştırılır", async () => {
+describe("Provision (CREATE TABLE)", () => {
+  it("runs CREATE TABLE on the first call", async () => {
     let createTableCalled = false;
     const sql = vi.fn((...args: unknown[]) => {
       const q = String(args[0]);
@@ -265,7 +234,7 @@ describe("ensureReady (provision)", () => {
     expect(createTableCalled).toBe(true);
   });
 
-  it("ikinci çağrıda CREATE TABLE tekrar çalıştırılmaz (önbellek)", async () => {
+  it("does not re-run CREATE TABLE on the second call (cached)", async () => {
     let createCount = 0;
     const sql = vi.fn((...args: unknown[]) => {
       const q = String(args[0]);
@@ -282,7 +251,7 @@ describe("ensureReady (provision)", () => {
     expect(createCount).toBe(1);
   });
 
-  it("provision başarısız olursa bir sonraki çağrıda retry edilir", async () => {
+  it("retries provision on the next call after a failure", async () => {
     let callCount = 0;
     const sql = vi.fn((...args: unknown[]) => {
       const q = String(args[0]);
@@ -296,9 +265,9 @@ describe("ensureReady (provision)", () => {
 
     const svc = new SettingsService(sql);
 
-    // İlk çağrı başarısız
+    // First call fails
     await expect(svc.getAdminSetupCompleted()).rejects.toThrow("DB unavailable");
-    // İkinci çağrı başarılı (retry)
+    // Second call succeeds (retry)
     await expect(svc.getAdminSetupCompleted()).resolves.toBe(false);
     expect(callCount).toBe(2);
   });

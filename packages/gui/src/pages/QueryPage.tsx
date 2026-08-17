@@ -1,5 +1,5 @@
 /**
- * QueryPage — SQL editörü, 3-panel layout.
+ * QueryPage — SQL editor, 3-panel layout.
  *
  * Layout (react-resizable-panels nested yerine CSS flex + manuel drag):
  *
@@ -13,9 +13,9 @@
  *  │  Results Panel (resultsPct %)           │
  *  └─────────────────────────────────────────┘
  *
- * Yatay (editor/schema) ve dikey (üst/results) bölme:
- * - Yatay: schemaPct state (px cinsinden schema genişliği, minimum 160px)
- * - Dikey: resultsPct state (toplam yüksekliğin yüzdesi)
+ * Horizontal (editor/schema) and vertical (top/results) split:
+ * - Horizontal: schemaPct state (schema width in px, minimum 160px)
+ * - Vertical: resultsPct state (percentage of total height)
  * - localStorage'a kaydedilir
  */
 
@@ -62,7 +62,7 @@ export default function QueryPage() {
   const [duration, setDuration] = React.useState<number | undefined>();
   const [isRunning, setIsRunning] = React.useState(false);
 
-  // Panel boyutları
+  // Panel dimensions
   const [schemaWidth, setSchemaWidth] = React.useState(() =>
     getSaved(SCHEMA_WIDTH_KEY, DEFAULT_SCHEMA_WIDTH)
   );
@@ -105,7 +105,7 @@ export default function QueryPage() {
     }
   }
 
-  // ── Yatay drag (Editor | Schema ayraç) ──────────────────────────────────────
+  // ── Horizontal drag (Editor | Schema divider) ──────────────────────────────────────
   const isDraggingH = React.useRef(false);
   const dragStartX = React.useRef(0);
   const dragStartWidth = React.useRef(0);
@@ -118,7 +118,7 @@ export default function QueryPage() {
 
     const onMove = (ev: MouseEvent) => {
       if (!isDraggingH.current) return;
-      const delta = dragStartX.current - ev.clientX; // sola sürükleyince schema büyür
+      const delta = dragStartX.current - ev.clientX; // schema grows when dragging left
       const newW = Math.max(120, Math.min(500, dragStartWidth.current + delta));
       setSchemaWidth(newW);
       localStorage.setItem(SCHEMA_WIDTH_KEY, String(newW));
@@ -132,7 +132,7 @@ export default function QueryPage() {
     window.addEventListener("mouseup", onUp);
   }
 
-  // ── Dikey drag (Üst | Results ayraç) ────────────────────────────────────────
+  // ── Vertical drag (Top | Results divider) ────────────────────────────────────────
   const isDraggingV = React.useRef(false);
   const dragStartY = React.useRef(0);
   const dragStartPct = React.useRef(0);
@@ -170,7 +170,7 @@ export default function QueryPage() {
         <Select value={selectedDb} onValueChange={setSelectedDb}>
           <SelectTrigger className="h-7 w-36 text-xs">
             <DatabaseIcon className="mr-1 h-3 w-3 shrink-0" />
-            <SelectValue placeholder="Veritabanı…" />
+            <SelectValue placeholder="Database…" />
           </SelectTrigger>
           <SelectContent>
             {databases?.map((db) => (
@@ -187,7 +187,7 @@ export default function QueryPage() {
             <SelectValue placeholder="Tablo…" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="" className="text-xs text-muted-foreground">(tümü)</SelectItem>
+            <SelectItem value="" className="text-xs text-muted-foreground">(all)</SelectItem>
             {tables?.map((t) => (
               <SelectItem key={t.name} value={t.name} className="font-mono text-xs">
                 {t.name}
@@ -201,12 +201,12 @@ export default function QueryPage() {
         {isRunning ? (
           <Button size="sm" variant="destructive" onClick={() => setIsRunning(false)} className="gap-1.5">
             <Square className="h-3 w-3" />
-            İptal
+            Cancel
           </Button>
         ) : (
           <Button size="sm" onClick={runQuery} disabled={!sql.trim() || !selectedDb} className="gap-1.5">
             <Play className="h-3 w-3" />
-            Çalıştır
+            Run
             <span className="ml-0.5 font-mono text-2xs opacity-50">⌘↵</span>
           </Button>
         )}
@@ -219,15 +219,15 @@ export default function QueryPage() {
         <QueryHistory onSelect={setSql} />
       </div>
 
-      {/* ── Ana gövde: Üst (Editor+Schema) + Dikey Drag + Results ──────────── */}
+      {/* ── Main body: Top (Editor+Schema) + Vertical Drag + Results ──────────── */}
       <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
 
-        {/* Üst kısım: Editor + Yatay Drag + Schema */}
+        {/* Top section: Editor + Horizontal Drag + Schema */}
         <div
           className="flex min-h-0 overflow-hidden"
           style={{ height: `${100 - resultsPct}%` }}
         >
-          {/* SQL Editor — flex-1, kalan tüm genişliği kaplar */}
+          {/* SQL Editor — flex-1, takes all remaining width */}
           <div className="min-w-0 flex-1 overflow-hidden">
             <QueryEditor
               value={sql}
@@ -243,17 +243,17 @@ export default function QueryPage() {
           <div
             onMouseDown={onMouseDownH}
             className="group relative flex w-1 shrink-0 cursor-col-resize flex-col items-center justify-center bg-border transition-colors hover:bg-zinc-500 active:bg-zinc-400"
-            title="Sürükle"
+            title="Drag"
           >
             <div className="h-8 w-0.5 rounded-full bg-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
           </div>
 
-          {/* Schema paneli — sabit genişlik (px) */}
+          {/* Schema panel — fixed width (px) */}
           <div
             className="flex shrink-0 flex-col overflow-hidden border-l border-border"
             style={{ width: schemaWidth }}
           >
-            {/* Schema başlık */}
+            {/* Schema header */}
             <div className="flex h-7 shrink-0 items-center border-b border-border px-3">
               <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                 Schema
@@ -288,18 +288,18 @@ export default function QueryPage() {
                 ))
               ) : (
                 <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                  {selectedDb ? "Tablo yok" : "Veritabanı seçin"}
+                  {selectedDb ? "No tables" : "Select a database"}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Dikey drag handle (üst/results ayraç) */}
+        {/* Vertical drag handle (top/results divider) */}
         <div
           onMouseDown={onMouseDownV}
           className="group relative flex h-1 shrink-0 cursor-row-resize items-center justify-center bg-border transition-colors hover:bg-zinc-500 active:bg-zinc-400"
-          title="Sürükle"
+          title="Drag"
         >
           <div className="h-0.5 w-8 rounded-full bg-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
@@ -315,7 +315,7 @@ export default function QueryPage() {
             </span>
             {result && (
               <span className="font-mono text-2xs text-muted-foreground">
-                {result.count ?? result.rows.length} satır
+                {result.count ?? result.rows.length} rows
               </span>
             )}
           </div>
@@ -371,7 +371,7 @@ function SchemaTableRow({
             e.stopPropagation();
             onInsertName(name);
           }}
-          title={`"${name}" editöre ekle`}
+          title={`Add "${name}" to editor`}
         >
           {name}
         </span>
@@ -384,7 +384,7 @@ function SchemaTableRow({
               key={col.name}
               onClick={() => onInsertName(col.name)}
               className="flex w-full items-center gap-2 px-2 py-0.5 text-left transition-colors hover:bg-accent/20"
-              title={`"${col.name}" editöre ekle`}
+              title={`Add "${col.name}" to editor`}
             >
               <span className="flex-1 truncate font-mono text-2xs text-foreground/70">
                 {col.name}

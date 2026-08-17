@@ -1,5 +1,5 @@
 /**
- * Tablo yönetim endpoint testleri.
+ * Table management endpoint tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -27,9 +27,9 @@ const MOCK_SCHEMA = {
 
 vi.mock("postgres", () => {
   const sqlFn = vi.fn((strings: TemplateStringsArray) => {
-    // tablo listesi sorgusu
+    // table list query
     if (strings?.[0]?.includes("information_schema.tables")) return Promise.resolve(MOCK_TABLES);
-    // şema sorgusu
+    // schema query
     if (strings?.[0]?.includes("information_schema.columns")) return Promise.resolve(MOCK_SCHEMA.columns);
     return Promise.resolve([]);
   }) as unknown as Record<string, unknown>;
@@ -96,7 +96,7 @@ afterAll(async () => {
 });
 
 describe("GET /db/:database/tables", () => {
-  it("tablo listesini döner", async () => {
+  it("returns table list", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/tables",
@@ -107,7 +107,7 @@ describe("GET /db/:database/tables", () => {
 });
 
 describe("POST /db/:database/tables", () => {
-  it("schema scope ile tablo oluşturur", async () => {
+  it("creates a table with schema scope", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -124,7 +124,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.json().name).toBe("products");
   });
 
-  it("schema scope olmadan 403 döner", async () => {
+  it("returns 403 without schema scope", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -134,7 +134,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("geçersiz tablo adı 400 döner", async () => {
+  it("returns 400 for an invalid table name", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -144,7 +144,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçersiz col.type injection reddedilir — 400", async () => {
+  it("rejects invalid col.type injection — 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -157,7 +157,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçersiz col.type 'VOID' reddedilir — 400", async () => {
+  it("rejects invalid col.type 'VOID' — 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -170,7 +170,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("'VARCHAR(255)' parantezli tip geçer — 201", async () => {
+  it("'VARCHAR(255)' with parentheses passes — 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -186,7 +186,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("col.default injection 'now()); DROP TABLE users; --' reddedilir — 400", async () => {
+  it("rejects col.default injection 'now()); DROP TABLE users; --' — 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -201,7 +201,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("col.default 'now()' geçer — 201", async () => {
+  it("col.default 'now()' passes — 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -217,7 +217,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("col.default \"'active'\" quoted string geçer — 201", async () => {
+  it("col.default \"'active'\" quoted string passes — 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",
@@ -233,7 +233,7 @@ describe("POST /db/:database/tables", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("col.default tırnak injection reddedilir — 400", async () => {
+  it("rejects col.default quote injection — 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables",

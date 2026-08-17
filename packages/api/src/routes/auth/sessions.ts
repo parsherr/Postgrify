@@ -1,12 +1,12 @@
 /**
- * Admin session yönetimi.
+ * Admin session management.
  *
- *   GET    /auth/admin/sessions           — tüm aktif refresh session'larını listele
- *   DELETE /auth/admin/sessions/:token    — belirli bir session'ı revoke et
- *   DELETE /auth/admin/sessions           — tüm session'ları revoke et (force logout)
+ *   GET    /auth/admin/sessions           — list all active refresh sessions
+ *   DELETE /auth/admin/sessions/:token    — revoke a specific session
+ *   DELETE /auth/admin/sessions           — revoke all sessions (force logout)
  *
- * Tüm endpoint'ler admin token gerektirir.
- * Redis yoksa 503 döner.
+ * All endpoints require an admin token.
+ * Returns 503 if Redis is unavailable.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -43,10 +43,10 @@ export async function adminSessionsRoute(server: FastifyInstance) {
                 items: {
                   type: "object",
                   properties: {
-                    token:     { type: "string", description: "İlk 8 karakter + *** (kısaltılmış)" },
+                    token:     { type: "string", description: "First 8 characters + *** (truncated)" },
                     email:     { type: "string" },
                     createdAt: { type: "number" },
-                    ttl:       { type: "number", description: "Saniye cinsinden kalan süre" },
+                    ttl:       { type: "number", description: "Remaining time in seconds" },
                   },
                 },
               },
@@ -68,7 +68,7 @@ export async function adminSessionsRoute(server: FastifyInstance) {
 
       const all = await server.sessionService.listAll();
 
-      // Token'ın tamamını döndürme — kısalt (güvenlik)
+      // Do not return the full token — truncate for security
       const sessions = all
         .map((s) => ({
           token:     `${s.token.slice(0, 8)}***`,

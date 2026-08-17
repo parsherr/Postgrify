@@ -1,16 +1,16 @@
 /**
- * Postgrify REST API yardımcı fonksiyonları.
+ * Postgrify REST API helper functions.
  *
- * DataClient tüm CRUD işlemlerini karşılamıyor olabilir — o durumda
- * doğrudan fetch ile API'ye istek atılır.
+ * DataClient may not cover all CRUD operations — in those cases
+ * requests are made directly to the API via fetch.
  */
 
 import { API_URL, DB_NAME } from "./postgrify";
 
-// DB token fallback — login olmadan okuma için (setup.mjs tarafından .env.local'a yazılır)
+// DB token fallback — for unauthenticated reads (written to .env.local by setup.mjs)
 const VITE_DB_TOKEN = import.meta.env.VITE_DB_TOKEN ?? "";
 
-// Aktif DB user access token — auth state değişiminde güncellenir
+// Active DB user access token — updated on auth state change
 let _accessToken: string | null = null;
 
 export function setAccessToken(token: string | null) {
@@ -21,7 +21,7 @@ export function getAccessToken() {
   return _accessToken || VITE_DB_TOKEN || null;
 }
 
-/** Geçerli token: önce user token, yoksa DB read token */
+/** Effective token: user token first, then DB read token */
 function getEffectiveToken(): string | null {
   return _accessToken || VITE_DB_TOKEN || null;
 }
@@ -65,7 +65,7 @@ export interface Tweet {
   like_count: number;
   retweet_count: number;
   created_at: string;
-  // join ile gelen alanlar
+  // fields from join
   username?: string;
   display_name?: string;
   avatar_url?: string | null;
@@ -73,7 +73,7 @@ export interface Tweet {
 }
 
 export async function fetchTimeline(limit = 20, offset = 0): Promise<{ rows: Tweet[]; total: number }> {
-  // API order formatı: "column.direction" (tek parametre, nokta ile)
+  // API order format: "column.direction" (single param, dot-separated)
   const res = await apiFetch(
     "GET",
     `/db/${DB_NAME}/tweets?limit=${limit}&offset=${offset}&order=created_at.desc`
@@ -99,12 +99,12 @@ export async function likeTweet(userId: string, tweetId: string): Promise<void> 
   await apiFetch("POST", `/db/${DB_NAME}/likes`, { user_id: userId, tweet_id: tweetId });
   // like_count increment
   await apiFetch("PATCH", `/db/${DB_NAME}/tweets/${tweetId}`, {
-    like_count: undefined, // query ile yapılacak
+    like_count: undefined, // to be done via query
   }).catch(() => {});
 }
 
 export async function unlikeTweet(userId: string, tweetId: string): Promise<void> {
-  // likes tablosunda where ile sil
+  // delete from likes table using where clause
   const res = await apiFetch(
     "GET",
     `/db/${DB_NAME}/likes?where=user_id.eq.${userId}&where=tweet_id.eq.${tweetId}`

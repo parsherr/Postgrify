@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [0.3.21] - 2026-08-17
+
+### Changed
+- Translated all Turkish text to English across the entire codebase
+- GUI: all UI labels, button text, tab names, placeholders, error messages, toast notifications, aria-labels
+- API src: all JSDoc comments and inline comments in config, middleware, plugins, routes, services, utils
+- API tests: all describe/it strings, inline comments across routes, middleware, plugins, security test suites
+- tweeter-clone demo app: all UI strings, placeholders, error messages, locale settings (tr-TR → en-US)
+- Relative time strings in lib/utils.ts (az önce → just now, etc.)
+
+---
+
 ## [0.3.2] — 2026-08-16
 
 ### Added — PostgREST / Supabase Compatibility

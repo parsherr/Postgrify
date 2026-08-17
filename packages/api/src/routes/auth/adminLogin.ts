@@ -1,16 +1,16 @@
 /**
- * POST /auth/admin/login — Email + şifre ile admin girişi.
+ * POST /auth/admin/login — Admin login with email + password.
  *
- * Başarılıysa access token (JWT) + refresh token (opaque) döner.
- * Refresh token Redis'te saklanır; Redis yoksa sadece access token döner.
+ * On success returns an access token (JWT) + refresh token (opaque).
+ * Refresh token is stored in Redis; if Redis is unavailable only the access token is returned.
  *
- * Credentials okuma önceliği:
- *   1. process.env  — pool plugin onReady'de DB'den yüklendi veya setup'ta inject edildi
- *   2. config       — startup'ta .env'den yüklendi
- *   3. server.settings (DB) — hem 1 hem 2 boşsa son çare; bu yol pool plugin çalışmadan
- *      setup/status endpoint'ine çok hızlı istek geldiğinde devreye girebilir
+ * Credentials read priority:
+ *   1. process.env  — loaded from DB by pool plugin onReady, or injected during setup
+ *   2. config       — loaded from .env at startup
+ *   3. server.settings (DB) — last resort when both 1 and 2 are empty; this path
+ *      can activate when a request arrives before the pool plugin has finished running
  *
- * Rate limit: IP başına 10 req/dk (brute-force koruması).
+ * Rate limit: 10 req/min per IP (brute-force protection).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -53,28 +53,28 @@ export async function adminLoginRoute(server: FastifyInstance) {
     async (req, reply) => {
       const { email, password } = req.body as { email: string; password: string };
 
-      // Credentials okuma: process.env → config → DB
-      // pool plugin onReady'de DB'den yüklenen değerler process.env'e yazılır.
-      // setup.ts da doğrudan process.env'e inject eder.
-      // config startup snapshot'ı; runtime değişiklikler için process.env güvenilir.
+      // Credentials read order: process.env → config → DB
+      // Values loaded from DB by pool plugin onReady are written to process.env.
+      // setup.ts also injects directly into process.env.
+      // config is a startup snapshot; process.env is authoritative for runtime changes.
       let adminEmail = process.env.ADMIN_EMAIL ?? config.ADMIN_EMAIL ?? "";
       let adminHash = process.env.ADMIN_PASSWORD_HASH ?? config.ADMIN_PASSWORD_HASH ?? "";
 
-      // Son çare: DB'den oku (onReady henüz çalışmadıysa veya race condition)
+      // Last resort: read from DB (onReady not yet run, or race condition)
       if ((!adminEmail || !adminHash) && server.hasDecorator("settings")) {
         try {
           const creds = await server.settings.getAdminCredentials();
           if (creds) {
             adminEmail = creds.email;
             adminHash = creds.passwordHash;
-            // Sonraki login'lerde DB'ye gitmemek için process.env'i güncelle
+            // Update process.env so subsequent logins skip the DB round-trip
             process.env.ADMIN_EMAIL = adminEmail;
             process.env.ADMIN_PASSWORD_HASH = adminHash;
             (config as Record<string, unknown>).ADMIN_EMAIL = adminEmail;
             (config as Record<string, unknown>).ADMIN_PASSWORD_HASH = adminHash;
           }
         } catch {
-          // DB hatası — boş credentials ile devam et, 503 döner
+          // DB error — continue with empty credentials, will return 503
         }
       }
 
@@ -85,13 +85,13 @@ export async function adminLoginRoute(server: FastifyInstance) {
         });
       }
 
-      // Timing-safe kontrol: email eşleşip eşleşmediğinden bağımsız olarak
-      // her zaman argon2id hash doğrulaması yapılır. Bu sayede response süresi
-      // sabit kalır ve saldırgan timing farkından admin email'i keşfedemez.
+      // Timing-safe check: argon2id hash verification is always performed
+      // regardless of whether the email matches. This keeps response time
+      // constant so an attacker cannot discover the admin email via timing differences.
       //
-      // Neden önemli: email eşleşmezse verifyPassword atlanırsa (~0ms),
-      // eşleşirse verifyPassword ~100-300ms sürer → timing saldırısı ile
-      // admin email'i düzinelerce deneyle tespit edilebilir.
+      // Why this matters: if verifyPassword were skipped on email mismatch (~0ms)
+      // but run on a match (~100-300ms), an attacker could identify the admin
+      // email with a few dozen probes via a timing attack.
       const emailMatch = email.toLowerCase() === adminEmail.toLowerCase();
       const valid = await verifyPassword(adminHash, password);
 
@@ -99,13 +99,13 @@ export async function adminLoginRoute(server: FastifyInstance) {
         return reply.status(401).send({ error: "Invalid credentials" });
       }
 
-      // Access token
+      // Issue access token
       const accessToken = await jwtService.signAdminToken(
         config.ACCESS_TOKEN_EXPIRY,
         email
       );
 
-      // Refresh token (Redis varsa)
+      // Refresh token (if Redis is available)
       const refreshToken = await server.sessionService.create(email);
 
       return reply.send({

@@ -1,15 +1,15 @@
 /**
- * Backup Scheduler — Zamanlanmış backup job'larını yönetir.
+ * Backup Scheduler — manages scheduled backup jobs.
  *
- * Her DB için bir node-cron job'u tutulur.
- * Schedule konfigürasyonu SettingsService üzerinden okunur/yazılır.
- * Job'lar sunucu kapanırken (`stop()`) durdurulur.
+ * One node-cron job is maintained per DB.
+ * Schedule configuration is read from and written to SettingsService.
+ * Jobs are stopped when the server shuts down (`stop()`).
  *
  * Lifecycle:
- *   1. `load()` — mevcut tüm schedule'ları DB'den okuyup job'ları başlatır.
- *      Pool plugin'in `onReady` hook'unda çağrılır.
- *   2. `scheduleBackup()` / `cancelSchedule()` — runtime'da güncellenir.
- *   3. `stop()` — onClose'da tüm job'ları durdurur.
+ *   1. `load()` — reads all current schedules from the DB and starts the jobs.
+ *      Called from the pool plugin's `onReady` hook.
+ *   2. `scheduleBackup()` / `cancelSchedule()` — updated at runtime.
+ *   3. `stop()` — stops all jobs in onClose.
  */
 
 import * as cron from "node-cron";
@@ -17,13 +17,13 @@ import type { SettingsService, BackupScheduleConfig } from "./settingsService.js
 import type { BackupService } from "./backupService.js";
 import type postgres from "postgres";
 
-// node-cron ScheduledTask tipini doğrudan al
+// Get the node-cron ScheduledTask type directly
 type ScheduledTask = ReturnType<typeof cron.schedule>;
 
 // Pool resolver: dbName → postgres.Sql
 type PoolResolver = (dbName: string) => postgres.Sql;
 
-// Pino-uyumlu minimal logger arayüzü
+// Minimal Pino-compatible logger interface
 interface Logger {
   info(obj: object | string, msg?: string): void;
   warn(obj: object | string, msg?: string): void;
@@ -41,8 +41,8 @@ export class BackupScheduler {
   ) {}
 
   /**
-   * Tüm aktif schedule'ları SettingsService'den okuyup job'ları başlatır.
-   * Sunucu ready olduğunda bir kez çağrılır.
+   * Reads all active schedules from SettingsService and starts the jobs.
+   * Called once when the server is ready.
    */
   async load(): Promise<void> {
     const schedules = await this.settings.getAllBackupSchedules();
@@ -58,11 +58,11 @@ export class BackupScheduler {
   }
 
   /**
-   * Belirli bir DB için schedule'ı etkinleştirir.
-   * Aynı DB için daha önce tanımlı job varsa durdurulup yenisiyle değiştirilir.
+   * Enables the schedule for a specific DB.
+   * If a job was already defined for this DB, it is stopped and replaced.
    */
   scheduleBackup(dbName: string, config: BackupScheduleConfig): void {
-    // Önceki job'u iptal et
+    // Cancel the previous job
     this.cancelSchedule(dbName);
 
     if (!config.enabled) return;
@@ -75,7 +75,7 @@ export class BackupScheduler {
     this.log.info({ dbName, cron: config.cron }, "Backup schedule registered");
   }
 
-  /** Belirli bir DB'nin schedule job'unu durdurur. */
+  /** Stops the schedule job for a specific DB. */
   cancelSchedule(dbName: string): void {
     const existing = this.jobs.get(dbName);
     if (existing) {
@@ -85,12 +85,12 @@ export class BackupScheduler {
     }
   }
 
-  /** Aktif schedule'ların dbName listesini döner. */
+  /** Returns the list of dbNames for active schedules. */
   activeSchedules(): string[] {
     return Array.from(this.jobs.keys());
   }
 
-  /** Tüm job'ları durdurur. Sunucu kapanırken çağrılır. */
+  /** Stops all jobs. Called when the server shuts down. */
   stop(): void {
     for (const [dbName, job] of this.jobs.entries()) {
       job.stop();
@@ -127,7 +127,7 @@ export class BackupScheduler {
 
       this.log.info({ dbName, id: result.id, sizeBytes: result.size_bytes }, "Scheduled backup completed");
 
-      // Retention policy uygula
+      // Apply retention policy
       if (retain > 0) {
         await this.backupService.enforceRetention(dbName, retain);
       }

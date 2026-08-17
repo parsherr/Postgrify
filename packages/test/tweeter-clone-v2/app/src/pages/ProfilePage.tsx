@@ -1,9 +1,9 @@
 /**
- * ProfilePage — kullanıcı profili
+ * ProfilePage — user profile
  *
  * URL: /profile/:username
- * Kendi profilinde: düzenleme butonu
- * Başka profillerde: follow/unfollow butonu
+ * Own profile: shows edit button
+ * Other profiles: shows follow/unfollow button
  */
 
 import { useState, useEffect } from "react";
@@ -52,7 +52,7 @@ export function ProfilePage() {
       if (!p) { setLoading(false); return; }
 
       const tweetData = await fetchUserTweets(p.auth_id, 30).catch(() => []);
-      // Tweet'lere profil bilgisi ekle
+      // Attach profile info to each tweet
       const enriched = tweetData.map((t) => ({
         ...t,
         username:     p.username,
@@ -61,13 +61,13 @@ export function ProfilePage() {
       }));
       setTweets(enriched);
 
-      // Follow durumu
+      // Follow status
       if (user && myProfile && !isOwnProfile) {
         const f = await isFollowing(myProfile.auth_id, p.auth_id).catch(() => false);
         setFollowing(f);
       }
 
-      // Beğeniler
+      // Likes
       if (user && myProfile) {
         const likes = await fetchUserLikes(myProfile.auth_id).catch(() => []);
         setLikedIds(new Set(likes));
@@ -75,7 +75,7 @@ export function ProfilePage() {
 
       setLoading(false);
     }).catch((err) => {
-      setError(err instanceof Error ? err.message : "Profil yüklenemedi");
+      setError(err instanceof Error ? err.message : "Failed to load profile");
       setLoading(false);
     });
   }, [username, user, myProfile, isOwnProfile]);
@@ -91,7 +91,7 @@ export function ProfilePage() {
         await followUser(myProfile.auth_id, profile.auth_id);
         setFollowing(true);
       }
-    } catch { /* sessizce geç */ }
+    } catch { /* silently ignore */ }
     setFollowLoading(false);
   }
 
@@ -105,18 +105,18 @@ export function ProfilePage() {
         await unlikeTweet(myProfile.auth_id, tweetId);
         setLikedIds((s) => { const n = new Set(s); n.delete(tweetId); return n; });
       }
-    } catch { /* sessizce geç */ }
+    } catch { /* silently ignore */ }
   }
 
   async function handleDelete(tweetId: string) {
     try {
       await deleteTweet(tweetId);
       setTweets((ts) => ts.filter((t) => t.id !== tweetId));
-    } catch { /* sessizce geç */ }
+    } catch { /* silently ignore */ }
   }
 
   const joinDate = profile
-    ? new Date(profile.created_at).toLocaleDateString("tr-TR", { month: "long", year: "numeric" })
+    ? new Date(profile.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "";
 
   return (
@@ -127,21 +127,21 @@ export function ProfilePage() {
         </div>
       ) : error || !profile ? (
         <div className="p-8 text-center text-gray-500">
-          <p className="text-lg font-medium">Profil bulunamadı</p>
-          <p className="text-sm mt-1">@{username} adlı kullanıcı mevcut değil.</p>
+          <p className="text-lg font-medium">Profile not found</p>
+          <p className="text-sm mt-1">@{username} does not exist.</p>
         </div>
       ) : (
         <>
           {/* Header */}
           <header className="sticky top-0 bg-black/80 backdrop-blur-md border-b border-gray-800 px-4 py-3 z-10">
             <h1 className="text-xl font-bold text-white">{profile.display_name}</h1>
-            <p className="text-sm text-gray-500">{tweets.length} Tweet</p>
+            <p className="text-sm text-gray-500">{tweets.length} Tweets</p>
           </header>
 
           {/* Banner */}
           <div className="h-48 bg-gradient-to-br from-sky-900 to-sky-700" />
 
-          {/* Profil bilgileri */}
+          {/* Profile info */}
           <div className="px-4 pb-4">
             <div className="flex justify-between items-start -mt-16 mb-4">
               {/* Avatar */}
@@ -155,19 +155,19 @@ export function ProfilePage() {
                 )}
               </div>
 
-              {/* Buton */}
+              {/* Button */}
               {user && !isOwnProfile && (
                 <button
                   onClick={handleFollow}
                   disabled={followLoading}
                   className={following ? "btn-outline mt-16" : "btn-primary mt-16"}
                 >
-                  {followLoading ? "..." : following ? "Takibi Bırak" : "Takip Et"}
+                  {followLoading ? "..." : following ? "Unfollow" : "Follow"}
                 </button>
               )}
               {isOwnProfile && (
                 <button className="btn-outline mt-16" disabled>
-                  Profili Düzenle
+                  Edit Profile
                 </button>
               )}
             </div>
@@ -182,7 +182,7 @@ export function ProfilePage() {
             <div className="flex items-center gap-4 mt-3 text-gray-500 text-sm">
               <span className="flex items-center gap-1">
                 <Calendar className="w-4 h-4" />
-                {joinDate} tarihinde katıldı
+                Joined {joinDate}
               </span>
               <span className="flex items-center gap-1">
                 <MapPin className="w-4 h-4" />
@@ -191,17 +191,17 @@ export function ProfilePage() {
             </div>
           </div>
 
-          {/* Sekme başlığı */}
+          {/* Tab header */}
           <div className="border-b border-gray-800 px-4 py-3">
             <span className="text-white font-bold border-b-2 border-sky-500 pb-3">
-              Tweetler
+              Tweets
             </span>
           </div>
 
-          {/* Tweet'ler */}
+          {/* Tweets */}
           {tweets.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              <p>Henüz tweet yok</p>
+              <p>No tweets yet</p>
             </div>
           ) : (
             tweets.map((tweet) => (

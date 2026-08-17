@@ -1,5 +1,5 @@
 /**
- * ExplorePage — tüm kullanıcıları keşfet
+ * ExplorePage — discover all users
  */
 
 import { useState, useEffect } from "react";
@@ -35,7 +35,7 @@ export function ExplorePage() {
   return (
     <Layout>
       <header className="sticky top-0 bg-black/80 backdrop-blur-md border-b border-gray-800 px-4 py-3 z-10">
-        <h1 className="text-xl font-bold text-white">Keşfet</h1>
+        <h1 className="text-xl font-bold text-white">Explore</h1>
       </header>
 
       {loading ? (
@@ -43,11 +43,11 @@ export function ExplorePage() {
           <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : profiles.length === 0 ? (
-        <div className="p-8 text-center text-gray-500">Henüz kullanıcı yok</div>
+        <div className="p-8 text-center text-gray-500">No users yet</div>
       ) : (
         <div>
           <div className="px-4 py-3 border-b border-gray-800">
-            <h2 className="text-lg font-bold text-white">Kullanıcılar ({profiles.length})</h2>
+            <h2 className="text-lg font-bold text-white">Users ({profiles.length})</h2>
           </div>
           {profiles.map((p) => (
             <Link

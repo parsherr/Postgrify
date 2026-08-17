@@ -1,6 +1,6 @@
 /**
- * DDL güvenlik yardımcıları — CREATE TABLE için col.type ve col.default değerlerini
- * doğrular. Doğrudan string interpolasyonunu önler.
+ * DDL security helpers — validates col.type and col.default values for CREATE TABLE.
+ * Prevents direct string interpolation.
  */
 
 // Desteklenen PostgreSQL kolon tipleri (allowlist)
@@ -51,8 +51,8 @@ function normalizeType(raw: string): string {
 }
 
 /**
- * Kolon tipini doğrular. Geçersizse hata fırlatır.
- * "VARCHAR(255)" → geçerli (base type VARCHAR allowlist'te).
+ * Validates a column type. Throws if invalid.
+ * "VARCHAR(255)" → valid (base type VARCHAR is in the allowlist).
  */
 export function assertColumnType(type: string, columnName: string): string {
   const normalized = normalizeType(type);
@@ -62,18 +62,18 @@ export function assertColumnType(type: string, columnName: string): string {
         `Allowed types: ${[...ALLOWED_TYPES].join(", ")}`
     );
   }
-  // Orijinal formu (büyük harf normalleştirilmiş) döndür
+  // Return the original form (uppercased normalized)
   return type.trim().toUpperCase();
 }
 
 /**
- * Güvenli DEFAULT değerleri:
+ * Safe DEFAULT values:
  *   - SQL fonksiyonu: now(), gen_random_uuid(), current_timestamp, vb.
- *   - Sayısal literal: 0, 42, -1, 3.14
+ *   - Numeric literal: 0, 42, -1, 3.14
  *   - Boolean literal: true, false
  *   - NULL
- *   - Tek tırnaklı string: 'active', 'pending'
- *     (içinde tek tırnak yoksa; varsa çift tırnak kaçışı: '' ile)
+ *   - Single-quoted string: 'active', 'pending'
+ *     (no unescaped single quotes inside; escaped with '')
  */
 const SAFE_FUNCTION_DEFAULTS = new Set([
   "NOW()",
@@ -88,14 +88,14 @@ const SAFE_FUNCTION_DEFAULTS = new Set([
 ]);
 
 const NUMERIC_LITERAL = /^-?\d+(\.\d+)?$/;
-// Tek tırnaklı string: başı ve sonu tek tırnak, içinde '' kaçışı dışında tek tırnak yok
-// Tek tırnaklı string literal — güvenli karakterler + escaped quote ('')
-// Noktalı virgül, parantez, tire tire (--) gibi SQL özel karakterleri reddedilir
+// Single-quoted string: starts and ends with a single quote, no unescaped single quotes inside
+// Single-quoted string literal — safe characters + escaped quote ('')
+// SQL special characters such as semicolons, parentheses, double dashes (--) are rejected
 const QUOTED_STRING_LITERAL = /^'([a-zA-Z0-9 ğüşıöçĞÜŞİÖÇ_\-.@+%]|'')*'$/;
 
 /**
- * DEFAULT değerini doğrular ve güvenli SQL fragmanı olarak döndürür.
- * Geçersizse hata fırlatır.
+ * Validates a DEFAULT value and returns it as a safe SQL fragment.
+ * Throws if invalid.
  */
 export function assertColumnDefault(
   defaultValue: string,

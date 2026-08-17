@@ -1,6 +1,6 @@
 /**
- * Rate limit plugin testleri.
- * Limit aşıldığında 429 döndüğünü ve hata mesaj formatını doğrular.
+ * Rate limit plugin tests.
+ * Verifies that 429 is returned when the limit is exceeded and checks the error message format.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -16,7 +16,7 @@ let server: FastifyInstance;
 beforeAll(async () => {
   server = Fastify({ logger: false });
 
-  // max=2 — 3. istekte 429 dönmeli
+  // max=2 — should return 429 on the 3rd request
   await server.register(rateLimit, {
     max: 2,
     timeWindow: "1 minute",
@@ -43,7 +43,7 @@ afterAll(async () => {
 });
 
 describe("Rate limit plugin", () => {
-  it("limit dahilindeki istek 200 döner", async () => {
+  it("returns 200 for requests within the limit", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/ping",
@@ -52,7 +52,7 @@ describe("Rate limit plugin", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("limit aşılınca 429 döner ve hata mesajı içerir", async () => {
+  it("returns 429 and includes an error message when the limit is exceeded", async () => {
     const headers = { "x-forwarded-for": "10.0.0.2" };
 
     const r1 = await server.inject({ method: "GET", url: "/ping", headers });
@@ -68,7 +68,7 @@ describe("Rate limit plugin", () => {
     expect(body).toHaveProperty("retryAfter");
   });
 
-  it("429 yanıtında retryAfter sayı tipinde gelir", async () => {
+  it("retryAfter in a 429 response is of type number", async () => {
     const headers = { "x-forwarded-for": "10.0.0.3" };
 
     await server.inject({ method: "GET", url: "/ping", headers });

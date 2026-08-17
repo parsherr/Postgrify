@@ -1,11 +1,11 @@
 /**
- * SORUN #5 Fix — POST /:database/query response shape
+ * Issue #5 Fix — POST /:database/query response shape
  *
  * query.ts response: { rows, total, limit, offset }
  * - rows: array of returned row objects
  * - total: number of rows returned (= rows.length for raw SQL)
- * - limit: always null (raw SQL'de pagination belirsiz)
- * - offset: always null (raw SQL'de pagination belirsiz)
+ * - limit: always null (pagination is indeterminate for raw SQL)
+ * - offset: always null (pagination is indeterminate for raw SQL)
  */
 
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
@@ -121,8 +121,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("SORUN #5 — POST /:database/query response shape", () => {
-  it("response { rows, total, limit: null, offset: null } döndürmeli", async () => {
+describe("Issue #5 — POST /:database/query response shape", () => {
+  it("response should return { rows, total, limit: null, offset: null }", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/project1/query",
@@ -138,17 +138,17 @@ describe("SORUN #5 — POST /:database/query response shape", () => {
     expect(body).toHaveProperty("limit");
     expect(body).toHaveProperty("offset");
 
-    // Raw SQL'de limit/offset belirsiz — açıkça null olmalı
+    // limit/offset are indeterminate for raw SQL — must be explicitly null
     expect(body.limit).toBeNull();
     expect(body.offset).toBeNull();
 
-    // total = rows.length (raw SQL COUNT yok)
+    // total = rows.length (no COUNT for raw SQL)
     expect(Array.isArray(body.rows)).toBe(true);
     expect(typeof body.total).toBe("number");
     expect(body.total).toBe(body.rows.length);
   });
 
-  it("token yoksa 401 dönmeli", async () => {
+  it("should return 401 when no token is provided", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/project1/query",
@@ -157,7 +157,7 @@ describe("SORUN #5 — POST /:database/query response shape", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("query scope olmayan token ile 403 dönmeli", async () => {
+  it("should return 403 with a token that lacks the query scope", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/project1/query",
@@ -167,7 +167,7 @@ describe("SORUN #5 — POST /:database/query response shape", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("sql alanı eksikse 400 dönmeli", async () => {
+  it("should return 400 when the sql field is missing", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/project1/query",

@@ -1,5 +1,5 @@
 /**
- * Audit log hook'ları.
+ * Audit log hooks.
  * GET /db/:database/auth/audit
  */
 

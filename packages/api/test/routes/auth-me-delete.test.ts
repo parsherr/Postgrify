@@ -1,9 +1,9 @@
 /**
- * Test: SORUN #8 Düzeltmesi — DELETE /db/:db/auth/me endpoint'i.
+ * Test: Issue #8 Fix — DELETE /db/:db/auth/me endpoint.
  *
- * users.ts'e kendi hesabını silen endpoint eklendi.
- * - Per-DB user token gerekiyor (admin token reddediliyor)
- * - Sadece token sahibinin hesabını siliyor
+ * An endpoint that deletes the user's own account was added to users.ts.
+ * - Requires a per-DB user token (admin token is rejected)
+ * - Deletes only the account of the token owner
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -24,7 +24,7 @@ vi.mock("postgres", () => {
       const query = strings.join(" ").toLowerCase();
 
       if (query.includes("select password_hash from _postgrify_auth.users")) {
-        // Şifre doğrulama için mock kullanıcı
+        // Mock user for password verification
         return [{ password_hash: "$argon2id$v=19$m=65536,t=3,p=4$fake$fake" }];
       }
       if (query.includes("delete from _postgrify_auth.users")) {
@@ -63,7 +63,7 @@ vi.mock("../../src/routes/db/auth/provision.js", () => ({
   getAuthSetting: vi.fn().mockResolvedValue("false"),
 }));
 
-// verifyPassword: test ortamında şifre doğrulamayı atla
+// verifyPassword: skip password verification in the test environment
 vi.mock("../../src/services/passwordService.js", () => ({
   hashPassword: vi.fn().mockResolvedValue("$argon2id$hashed"),
   verifyPassword: vi.fn().mockResolvedValue(true),
@@ -86,7 +86,7 @@ beforeAll(async () => {
 
   jwtSvc = new JwtService(JWT_SECRET);
 
-  // users.ts handler'ları server.jwtService'e doğrudan erişir
+  // users.ts handlers access server.jwtService directly
   server.decorate("jwtService", jwtSvc);
 
   server.decorate("authenticate", async (req: Parameters<typeof server.authenticate>[0], reply: Parameters<typeof server.authenticate>[1]) => {
@@ -119,8 +119,8 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
-describe("SORUN #8 — DELETE /auth/me", () => {
-  it("DB-user token ile kendi hesabını silebilmeli", async () => {
+describe("Issue #8 — DELETE /auth/me", () => {
+  it("should be able to delete own account with a DB-user token", async () => {
     deletedUsers.length = 0;
 
     const userToken = await jwtSvc.signDbUserToken("testdb", "user-to-delete", "user@test.com", "editor");
@@ -132,12 +132,12 @@ describe("SORUN #8 — DELETE /auth/me", () => {
       payload: {},
     });
 
-    expect(res.statusCode, `DELETE /auth/me hatası: ${res.body}`).toBe(200);
+    expect(res.statusCode, `DELETE /auth/me error: ${res.body}`).toBe(200);
     const body = res.json();
     expect(body.ok).toBe(true);
   });
 
-  it("admin token ile DELETE /auth/me reddedilmeli", async () => {
+  it("DELETE /auth/me should be rejected with an admin token", async () => {
     const adminToken = await jwtSvc.signAdminToken();
 
     const res = await server.inject({
@@ -146,11 +146,11 @@ describe("SORUN #8 — DELETE /auth/me", () => {
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
-    // Admin token per-DB user değil — 403 bekliyoruz
+    // Admin token is not a per-DB user — expecting 403
     expect(res.statusCode).toBe(403);
   });
 
-  it("token olmadan DELETE /auth/me 401 döndürmeli", async () => {
+  it("DELETE /auth/me should return 401 without a token", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/testdb/auth/me",
@@ -159,7 +159,7 @@ describe("SORUN #8 — DELETE /auth/me", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("yanlış DB için token reddedilmeli", async () => {
+  it("token for a different DB should be rejected", async () => {
     const wrongDbToken = await jwtSvc.signDbUserToken("other-db", "user-123", "user@test.com", "editor");
 
     const res = await server.inject({

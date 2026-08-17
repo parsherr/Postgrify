@@ -1,20 +1,20 @@
 /**
- * Backup route'ları — /db/:database/backup/*
+ * Backup routes — /db/:database/backup/*
  *
- * Endpoint'ler:
- *   GET    /:database/backup/download               — Anlık streaming SQL dump (gzip)
- *   GET    /:database/backup/list                   — Kayıtlı backup listesi
- *   POST   /:database/backup/create                 — Manuel backup tetikle
- *   GET    /:database/backup/:backupId/download     — Kayıtlı backup'ı indir
- *   DELETE /:database/backup/:backupId              — Kayıtlı backup'ı sil
- *   POST   /:database/backup/restore                — Backup dosyası yükle + restore
- *   GET    /:database/backup/schedule               — Mevcut schedule konfigürasyonu
- *   PUT    /:database/backup/schedule               — Schedule kaydet / güncelle
- *   DELETE /:database/backup/schedule               — Schedule iptal et
+ * Endpoints:
+ *   GET    /:database/backup/download               — Live streaming SQL dump (gzip)
+ *   GET    /:database/backup/list                   — List saved backups
+ *   POST   /:database/backup/create                 — Trigger a manual backup
+ *   GET    /:database/backup/:backupId/download     — Download a saved backup
+ *   DELETE /:database/backup/:backupId              — Delete a saved backup
+ *   POST   /:database/backup/restore                — Upload + restore a backup file
+ *   GET    /:database/backup/schedule               — Current schedule configuration
+ *   PUT    /:database/backup/schedule               — Save / update a schedule
+ *   DELETE /:database/backup/schedule               — Cancel a schedule
  *
- * Tüm endpoint'ler "schema" scope gerektirir.
- * Restore: gzip decompress → statement'lara ayır → transaction içinde çalıştır.
- * Streaming download: dosya okunduktan sonra pipe ile response'a aktarılır.
+ * All endpoints require "schema" scope.
+ * Restore: gzip decompress → split into statements → execute inside a transaction.
+ * Streaming download: file is read and piped to the response.
  */
 
 import { createGzip } from "zlib";
@@ -30,7 +30,7 @@ const MAX_UPLOAD_BYTES = config.BACKUP_MAX_SIZE_MB * 1024 * 1024;
 
 export async function backupRoute(server: FastifyInstance) {
   // ── GET /:database/backup/download ────────────────────────────────────────
-  // Anlık streaming gzip SQL dump — dosyaya kaydedilmez, direkt response'a yazılır.
+  // Live streaming gzip SQL dump — not saved to disk, written directly to the response.
   server.get(
     "/:database/backup/download",
     {
@@ -57,21 +57,20 @@ export async function backupRoute(server: FastifyInstance) {
         .header("Content-Disposition", `attachment; filename="${filename}"`)
         .header("Transfer-Encoding", "chunked");
 
-      // BackupService.buildDump'u iç metod olarak kullanmak yerine
-      // createBackup ile geçici dosya yaratıp pipe ederiz —
-      // ancak streaming için doğrudan response'a yazıyoruz.
-      // Bunun için backupService'in private buildDump metodunu değil,
-      // public bir stream helper'ı çağırıyoruz.
+      // Instead of using BackupService.buildDump as an internal method,
+      // we create a temporary file via createBackup and pipe it —
+      // but for streaming we write directly to the response.
+      // For this we call a public stream helper rather than the private buildDump method.
       //
-      // Burada sadelik adına: dump string'ini üret, gzip ile pipe et.
-      // Büyük DB'lerde backupService.createBackup tercih edilmeli.
+      // For simplicity: generate the dump string and pipe through gzip.
+      // For large DBs, backupService.createBackup is preferred.
       const result = await server.backupService.createBackup(dbName, sql);
 
       if (result.status === "failed") {
         return reply.status(500).send({ error: result.error_msg ?? "Backup failed" });
       }
 
-      // Oluşan dosyayı response'a pipe et
+      // Pipe the resulting file to the response
       reply.raw.setHeader("Content-Type", "application/gzip");
       reply.raw.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
@@ -160,7 +159,7 @@ export async function backupRoute(server: FastifyInstance) {
         return reply.status(500).send({ error: result.error_msg ?? "Backup failed" });
       }
 
-      // Retention policy varsa uygula
+      // Apply retention policy if configured
       const schedule = await server.settings.getBackupSchedule(dbName);
       if (schedule && schedule.retain > 0) {
         await server.backupService.enforceRetention(dbName, schedule.retain);
@@ -251,7 +250,7 @@ export async function backupRoute(server: FastifyInstance) {
   );
 
   // ── POST /:database/backup/restore ────────────────────────────────────────
-  // Multipart ile .sql.gz dosyası yüklenir, parse edilip restore edilir.
+  // A .sql.gz file is uploaded via multipart, parsed, and restored.
   server.post(
     "/:database/backup/restore",
     {
@@ -269,7 +268,7 @@ export async function backupRoute(server: FastifyInstance) {
     asyncHandler(async (req: FastifyRequest, reply: FastifyReply) => {
       const dbName = req.dbName!;
 
-      // @fastify/multipart ile dosyayı oku
+      // Read the file via @fastify/multipart
       let fileData: Buffer | null = null;
 
       try {
@@ -297,7 +296,7 @@ export async function backupRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Uploaded file is empty" });
       }
 
-      // Geçici dosyaya yaz — backupService.restoreBackup dosya yolu bekler
+      // Write to a temporary file — backupService.restoreBackup expects a file path
       const { writeFileSync, unlinkSync, mkdtempSync } = await import("fs");
       const { join } = await import("path");
       const { tmpdir } = await import("os");
@@ -310,8 +309,8 @@ export async function backupRoute(server: FastifyInstance) {
         const sql = server.poolManager.getPool(dbName);
         await server.backupService.restoreBackup(sql, tmpFile);
       } finally {
-        try { unlinkSync(tmpFile); } catch { /* geçici dosya temizleme */ }
-        try { (await import("fs")).rmdirSync(tmpDir); } catch { /* geçici klasör temizleme */ }
+        try { unlinkSync(tmpFile); } catch { /* clean up temporary file */ }
+        try { (await import("fs")).rmdirSync(tmpDir); } catch { /* clean up temporary directory */ }
       }
 
       return reply.send({ restored: true, database: dbName });
@@ -398,7 +397,7 @@ export async function backupRoute(server: FastifyInstance) {
       const dbName = req.dbName!;
       const body = req.body as { cron: string; enabled: boolean; retain: number };
 
-      // Cron expression doğrula
+      // Validate the cron expression
       const cron = await import("node-cron");
       if (!cron.validate(body.cron)) {
         return reply.status(400).send({ error: `Invalid cron expression: "${body.cron}"` });
@@ -406,10 +405,10 @@ export async function backupRoute(server: FastifyInstance) {
 
       const scheduleConfig = { cron: body.cron, enabled: body.enabled, retain: body.retain };
 
-      // DB'ye kaydet
+      // Save to DB
       await server.settings.setBackupSchedule(dbName, scheduleConfig);
 
-      // Scheduler'ı güncelle (runtime'da anında aktif/pasif)
+      // Update the scheduler (activates/deactivates immediately at runtime)
       if (body.enabled) {
         server.backupScheduler.scheduleBackup(dbName, scheduleConfig);
       } else {

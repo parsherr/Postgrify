@@ -1,11 +1,11 @@
 /**
  * DB Auth route group — prefix: /db/:database/auth
  *
- * Auth endpoint'leri iki katmana ayrılır:
+ * Auth endpoints are split into two layers:
  *   - signup / login / logout / refresh / verify / magic-link / oauth → public, rate-limited
  *   - user CRUD / audit / settings → authenticate + scopeGuard
  *
- * dbResolver: req.dbName'i URL param'dan çözer — her route için gerekli.
+ * dbResolver: resolves req.dbName from the URL param — required for every route.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -28,15 +28,15 @@ import { authGenerateLinkRoute } from "./generateLink.js";
 import { authBanRoute } from "./ban.js";
 
 export async function authDbRoutes(server: FastifyInstance) {
-  // Sıra önemli: önce DB adını çöz, sonra API key'i doğrula.
-  // apiKeyGuard; Bearer token varsa atlanır — admin/GUI erişimlerine dokunmaz.
+  // Order matters: resolve DB name first, then validate the API key.
+  // apiKeyGuard is skipped when a Bearer token is present — does not affect admin/GUI access.
   server.addHook("preHandler", dbResolverHook);
-  // IP kontrol dbResolver'dan sonra — req.dbName gerekli.
-  // login/signup dahil tüm auth endpoint'leri DB'nin IP kısıtlamasına tabi.
+  // IP check runs after dbResolver — req.dbName is required.
+  // All auth endpoints, including login/signup, are subject to the DB's IP restriction.
   server.addHook("preHandler", createIpAllowlistGuard(server));
   server.addHook("preHandler", apiKeyGuard);
 
-  // Public auth endpoint'leri (rate-limited)
+  // Public auth endpoints (rate-limited)
   await server.register(authTokensRoute);        // login / logout / refresh
   await server.register(authSignupRoute);        // signup
   await server.register(authVerifyRoute);        // email verify
@@ -45,7 +45,7 @@ export async function authDbRoutes(server: FastifyInstance) {
   await server.register(authMagicLinkRoute);     // magic link
   await server.register(authOAuthRoute);         // OAuth flow
 
-  // Admin-gated endpoint'leri
+  // Admin-gated endpoints
   await server.register(authUsersRoute);         // user CRUD + me/password
   await server.register(authSettingsRoute);      // per-DB auth settings
   await server.register(authAuditRoute);         // audit log

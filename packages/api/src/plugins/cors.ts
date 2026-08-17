@@ -1,6 +1,6 @@
 /**
- * CORS Plugin — izin verilen origin'leri env'den okur.
- * Üretimde CORS_ORIGINS'i mutlaka kısıtla.
+ * CORS Plugin — reads allowed origins from the environment.
+ * Always restrict CORS_ORIGINS in production.
  */
 
 import fp from "fastify-plugin";

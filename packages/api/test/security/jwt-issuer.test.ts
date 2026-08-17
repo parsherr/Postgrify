@@ -1,10 +1,10 @@
 /**
- * JWT issuer ayrımı ve auth settings normalizasyon testleri.
+ * JWT issuer separation and auth settings normalization tests.
  *
- * NEW-JWT-1: DB token artık iss: "postgrify/db" taşıyor
- * NEW-JWT-2: verifyAdminOrDb bilinmeyen issuer'ı reddediyor
- * NEW-CASE-1: getAuthSetting lowercase normalizeEdilmiş değer döndürüyor
- * NEW-NGINX-1: HSTS ve güçlendirilmiş CSP nginx.conf'ta mevcut
+ * NEW-JWT-1: DB token now carries iss: "postgrify/db"
+ * NEW-JWT-2: verifyAdminOrDb rejects unknown issuer
+ * NEW-CASE-1: getAuthSetting returns lowercase-normalized value
+ * NEW-NGINX-1: HSTS and hardened CSP are present in nginx.conf
  */
 
 import { describe, it, expect } from "vitest";
@@ -15,62 +15,62 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JWT Issuer ayrımı testleri
+// JWT issuer separation tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-JWT-1/2: JWT issuer ayrımı", () => {
+describe("NEW-JWT-1/2: JWT issuer separation", () => {
   const jwtSrc = readFileSync(
     join(__dirname, "../../src/services/jwtService.ts"),
     "utf-8"
   );
 
-  it("DB_ISSUER sabiti 'postgrify/db' değerinde tanımlı", () => {
+  it("DB_ISSUER constant is defined with value 'postgrify/db'", () => {
     expect(jwtSrc).toContain("DB_ISSUER");
     expect(jwtSrc).toContain("postgrify/db");
   });
 
-  it("üç farklı issuer tipi tanımlı (admin, db, db-auth)", () => {
+  it("three distinct issuer types are defined (admin, db, db-auth)", () => {
     expect(jwtSrc).toContain("ADMIN_ISSUER");
     expect(jwtSrc).toContain("DB_ISSUER");
     expect(jwtSrc).toContain("DB_USER_ISSUER");
   });
 
-  it("signDbToken DB_ISSUER ile token imzalıyor", () => {
-    // setIssuer(DB_ISSUER) çağrısı signDbToken metodunda olmalı
+  it("signDbToken signs token with DB_ISSUER", () => {
+    // setIssuer(DB_ISSUER) call must be present inside signDbToken method
     const signDbIdx = jwtSrc.indexOf("signDbToken");
     const signAdminIdx = jwtSrc.indexOf("signAdminToken");
-    // signDbToken metodunun scope'unda setIssuer var mı?
+    // Is setIssuer in scope of the signDbToken method?
     const dbMethodSlice = jwtSrc.slice(signDbIdx, signDbIdx + 500);
     expect(dbMethodSlice).toContain("setIssuer");
     expect(dbMethodSlice).toContain("DB_ISSUER");
   });
 
-  it("signAdminToken ADMIN_ISSUER ile token imzalıyor", () => {
+  it("signAdminToken signs token with ADMIN_ISSUER", () => {
     const signAdminIdx = jwtSrc.indexOf("signAdminToken");
     const adminMethodSlice = jwtSrc.slice(signAdminIdx, signAdminIdx + 500);
     expect(adminMethodSlice).toContain("setIssuer");
     expect(adminMethodSlice).toContain("ADMIN_ISSUER");
   });
 
-  it("verifyAdminOrDb DB_USER_ISSUER'i reddediyor", () => {
-    // "async verifyAdminOrDb" ile metod body'sini bul (yorum satırını atla)
+  it("verifyAdminOrDb rejects DB_USER_ISSUER", () => {
+    // Find method body of "async verifyAdminOrDb" (skip comment line)
     const verifyIdx = jwtSrc.indexOf("async verifyAdminOrDb");
     const verifySlice = jwtSrc.slice(verifyIdx, verifyIdx + 800);
     expect(verifySlice).toContain("return null");
     expect(verifySlice).toContain("DB_USER_ISSUER");
   });
 
-  it("verifyAdminOrDb bilinmeyen issuer'ı reddediyor", () => {
+  it("verifyAdminOrDb rejects unknown issuer", () => {
     const verifyIdx = jwtSrc.indexOf("async verifyAdminOrDb");
     const verifySlice = jwtSrc.slice(verifyIdx, verifyIdx + 1000);
     expect(verifySlice).toContain("ADMIN_ISSUER");
     expect(verifySlice).toContain("DB_ISSUER");
-    // DB_USER_ISSUER + bilinmeyen issuer = en az 2 null return
+    // DB_USER_ISSUER + unknown issuer = at least 2 null returns
     const nullCount = (verifySlice.match(/return null/g) ?? []).length;
     expect(nullCount).toBeGreaterThanOrEqual(2);
   });
 
-  it("verifyDbUser DB_USER_ISSUER zorunluluğu var", () => {
+  it("verifyDbUser enforces DB_USER_ISSUER requirement", () => {
     const verifyDbIdx = jwtSrc.indexOf("async verifyDbUser");
     const dbUserSlice = jwtSrc.slice(verifyDbIdx, verifyDbIdx + 400);
     expect(dbUserSlice).toContain("issuer");
@@ -79,25 +79,25 @@ describe("NEW-JWT-1/2: JWT issuer ayrımı", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Auth settings case-insensitive normalizasyon
+// Auth settings case-insensitive normalization
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-CASE-1: getAuthSetting lowercase normalizasyonu", () => {
+describe("NEW-CASE-1: getAuthSetting lowercase normalization", () => {
   const provisionSrc = readFileSync(
     join(__dirname, "../../src/routes/db/auth/provision.ts"),
     "utf-8"
   );
 
-  it("provision.ts getAuthSetting toLowerCase() uygulayarak döndürüyor", () => {
+  it("provision.ts getAuthSetting returns value with toLowerCase() applied", () => {
     expect(provisionSrc).toContain("toLowerCase()");
-    // getAuthSetting fonksiyon tanımı içinde toLowerCase çağrısı
+    // toLowerCase call must be inside the getAuthSetting function definition
     const fnIdx = provisionSrc.indexOf("getAuthSetting");
     const fnSlice = provisionSrc.slice(fnIdx, fnIdx + 400);
     expect(fnSlice).toContain("toLowerCase()");
   });
 
-  it("normalizasyon case-insensitive boolean kontrolü sağlar", () => {
-    // Inline simülasyon — provision.ts'deki mantığı yansıtır
+  it("normalization enables case-insensitive boolean checks", () => {
+    // Inline simulation — mirrors the logic in provision.ts
     function mockGetAuthSetting(rawValue: string): string {
       return rawValue.toLowerCase();
     }
@@ -110,10 +110,10 @@ describe("NEW-CASE-1: getAuthSetting lowercase normalizasyonu", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// nginx HSTS ve güçlendirilmiş CSP
+// nginx HSTS and hardened CSP
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-NGINX-1: nginx HSTS ve güçlendirilmiş CSP", () => {
+describe("NEW-NGINX-1: nginx HSTS and hardened CSP", () => {
   const nginxConf = readFileSync(
     join(__dirname, "../../packages/gui/nginx.conf").replace(
       "/packages/api",
@@ -122,38 +122,38 @@ describe("NEW-NGINX-1: nginx HSTS ve güçlendirilmiş CSP", () => {
     "utf-8"
   );
 
-  it("nginx.conf okunabilir", () => {
+  it("nginx.conf is readable", () => {
     expect(nginxConf.length).toBeGreaterThan(0);
   });
 
-  it("Strict-Transport-Security (HSTS) header mevcut", () => {
+  it("Strict-Transport-Security (HSTS) header is present", () => {
     expect(nginxConf).toContain("Strict-Transport-Security");
     expect(nginxConf).toContain("max-age=");
   });
 
-  it("HSTS 1 yıl (31536000 saniye) ile ayarlanmış", () => {
+  it("HSTS is configured with 1 year (31536000 seconds)", () => {
     expect(nginxConf).toContain("31536000");
   });
 
-  it("CSP connect-src ws: ve wss: içeriyor (terminal WebSocket için)", () => {
+  it("CSP connect-src includes ws: and wss: (for terminal WebSocket)", () => {
     expect(nginxConf).toContain("ws:");
     expect(nginxConf).toContain("wss:");
   });
 
-  it("CSP object-src 'none' içeriyor (plugin/Flash XSS kapatılmış)", () => {
+  it("CSP object-src 'none' is present (plugin/Flash XSS disabled)", () => {
     expect(nginxConf).toContain("object-src 'none'");
   });
 
-  it("CSP base-uri 'self' içeriyor (base tag injection önleme)", () => {
+  it("CSP base-uri 'self' is present (prevents base tag injection)", () => {
     expect(nginxConf).toContain("base-uri 'self'");
   });
 
-  it("X-Frame-Options DENY header mevcut", () => {
+  it("X-Frame-Options DENY header is present", () => {
     expect(nginxConf).toContain("X-Frame-Options");
     expect(nginxConf).toContain("DENY");
   });
 
-  it("Referrer-Policy strict ayarlı", () => {
+  it("Referrer-Policy is set to strict", () => {
     expect(nginxConf).toContain("Referrer-Policy");
     expect(nginxConf).toContain("strict-origin");
   });

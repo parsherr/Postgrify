@@ -1,8 +1,8 @@
 /**
- * GET /auth/admin/me — Geçerli admin kullanıcı bilgilerini döner.
+ * GET /auth/admin/me — Returns current admin user information.
  *
- * Token payload'ından email, role, iat, exp okunur.
- * Yeni token üretmez — sadece mevcut token'ı introspect eder.
+ * Reads email, role, iat, and exp from the token payload.
+ * Does not issue a new token — only introspects the current one.
  */
 
 import type { FastifyInstance } from "fastify";

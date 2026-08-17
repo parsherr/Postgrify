@@ -1,6 +1,6 @@
 /**
- * Ortam değişkenlerini okur, doğrular ve tip-güvenli config nesnesi döner.
- * Eksik zorunlu değişken varsa başlangıçta hata fırlatır.
+ * Reads, validates, and returns a type-safe config object from environment variables.
+ * Throws on startup if any required variable is missing.
  */
 
 import { z } from "zod";
@@ -21,14 +21,14 @@ const envSchema = z.object({
   PG_POOL_IDLE_TIMEOUT: z.coerce.number().default(120_000),
   PG_POOL_MAX_LIFETIME: z.coerce.number().default(3_600_000),
 
-  // Auth — production'da gerçek değer zorunlu; development'ta placeholder kabul edilir
+  // Auth — real values required in production; placeholders accepted in development
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters").default("placeholder-will-be-replaced-by-setup-wizard-32x"),
   ADMIN_SECRET: z.string().min(16, "ADMIN_SECRET must be at least 16 characters").default("placeholder-setup-16x"),
   JWT_EXPIRY: z.string().default("24h"),
 
-  // Admin kullanıcı kimlik bilgileri (GUI login için)
+  // Admin user credentials (for GUI login)
   ADMIN_EMAIL: z.string().email("ADMIN_EMAIL must be a valid email").optional(),
-  ADMIN_PASSWORD_HASH: z.string().optional(), // argon2id hash — scripts/hash-password.ts ile üret
+  ADMIN_PASSWORD_HASH: z.string().optional(), // argon2id hash — generate with scripts/hash-password.ts
   ACCESS_TOKEN_EXPIRY: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRY: z.string().default("7d"),
   /** C-08: revoked refresh reuse grace (seconds); after this → revoke all user sessions */
@@ -39,11 +39,11 @@ const envSchema = z.object({
   RATE_LIMIT_DB: z.coerce.number().default(500),
   RATE_LIMIT_ADMIN: z.coerce.number().default(200),
 
-  // Redis (opsiyonel — yoksa in-memory cache devreye girer)
+  // Redis (optional — falls back to in-memory cache when not set)
   REDIS_URL: z.string().optional(),
   REDIS_PASSWORD: z.string().optional(),
 
-  // Sunucu
+  // Server
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -53,7 +53,7 @@ const envSchema = z.object({
     .default("info"),
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
 
-  // SMTP (magic link, email verify, şifre sıfırlama için)
+  // SMTP (for magic link, email verification, and password reset)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional(),
@@ -61,14 +61,14 @@ const envSchema = z.object({
   SMTP_FROM: z.string().default("noreply@postgrify.local"),
   SMTP_SECURE: z.string().transform((v) => v === "true").default("false"),
 
-  // Genel uygulama URL'i (email linklerinde kullanılır)
+  // Base application URL (used in email links)
   APP_URL: z.string().default("http://localhost:5173"),
 
   // Backup
   BACKUP_DIR: z.string().default("/data/backups"),
   BACKUP_MAX_SIZE_MB: z.coerce.number().default(500),
 
-  // Özellik bayrakları
+  // Feature flags
   ALLOW_RAW_SQL_ADMIN: z
     .string()
     .transform((v) => v === "true")
@@ -88,8 +88,8 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-// Production'da bilinen placeholder secret'larla çalışmayı reddet.
-// Bu değerler herkesçe bilindiği için geçerli token üretmek trivial hale gelir.
+// Refuse to run in production with known placeholder secrets.
+// These values are publicly known, making it trivial to forge valid tokens.
 const KNOWN_PLACEHOLDER_JWT_SECRETS = new Set([
   "placeholder-will-be-replaced-by-setup-wizard-32x",
 ]);

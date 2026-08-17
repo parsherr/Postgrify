@@ -1,7 +1,7 @@
 /**
- * Cache Plugin — Redis veya in-memory LRU cache.
- * Redis URL varsa Redis, yoksa otomatik olarak in-memory devreye girer.
- * `server.cache` decorator'ı üzerinden erişilir.
+ * Cache Plugin — Redis or in-memory LRU cache.
+ * Uses Redis when a Redis URL is configured, otherwise falls back to in-memory automatically.
+ * Accessible via the `server.cache` decorator.
  */
 
 import fp from "fastify-plugin";

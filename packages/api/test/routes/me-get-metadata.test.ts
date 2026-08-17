@@ -1,33 +1,33 @@
 /**
- * SORUN #12 Fix — GET /:database/auth/me response'da metadata alanı
+ * Issue #12 Fix — metadata field in GET /:database/auth/me response
  *
  * me.ts GET response: { id, email, role, full_name, avatar_url,
  *                       email_verified, is_active, provider,
  *                       created_at, last_login, metadata }
  *
- * metadata: hassas alanlar (reset_token, magic_token vb.) temizlenmiş JSONB
- * Bu test metadata alanının response'da mevcut olduğunu doğrular.
+ * metadata: JSONB with sensitive fields (reset_token, magic_token, etc.) stripped
+ * This test verifies that the metadata field is present in the response.
  */
 
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 import Fastify from "fastify";
 import { JwtService } from "../../src/services/jwtService.js";
 
-// Setup.ts'nin ayarladığı JWT_SECRET ile aynı değeri kullan — me.ts config.JWT_SECRET'ı bunu okur
+// Use the same JWT_SECRET value that setup.ts sets — me.ts reads config.JWT_SECRET from this
 const JWT_SECRET = "test-secret-must-be-at-least-32-characters";
 const TEST_USER_ID = "a1b2c3d4-0000-0000-0000-000000000001";
 
 vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 
-// provision.ts mock'u — ensureAuthSchema DB çağrısını atla
+// provision.ts mock — skip the ensureAuthSchema DB call
 vi.mock("../../src/routes/db/auth/provision.js", () => ({
   ensureAuthSchema: vi.fn().mockResolvedValue(undefined),
   insertAuditLog: vi.fn().mockResolvedValue(undefined),
   getAuthSetting: vi.fn().mockResolvedValue("false"),
 }));
 
-// Sahte kullanıcı verisi — DB'den geldiği gibi
+// Fake user data — as returned from the DB
 const fakeUser = {
   id: TEST_USER_ID,
   email: "alice@test.com",
@@ -52,7 +52,7 @@ beforeAll(async () => {
 
   app = Fastify({ logger: false });
 
-  // sql mock: SELECT FROM _postgrify_auth.users → fakeUser döndür
+  // sql mock: SELECT FROM _postgrify_auth.users → returns fakeUser
   const fakeSql = Object.assign(
     async () => [fakeUser], // tagged template query
     {
@@ -84,8 +84,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("SORUN #12 — GET /:database/auth/me metadata alanı", () => {
-  it("response metadata alanı içermeli", async () => {
+describe("Issue #12 — GET /:database/auth/me metadata field", () => {
+  it("response should include a metadata field", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/testdb/auth/me",
@@ -97,7 +97,7 @@ describe("SORUN #12 — GET /:database/auth/me metadata alanı", () => {
     expect(body).toHaveProperty("metadata");
   });
 
-  it("tüm profil alanları mevcut olmalı", async () => {
+  it("all profile fields should be present", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/testdb/auth/me",
@@ -120,7 +120,7 @@ describe("SORUN #12 — GET /:database/auth/me metadata alanı", () => {
     expect(body).toHaveProperty("metadata");
   });
 
-  it("token olmadan 401 dönmeli", async () => {
+  it("should return 401 without a token", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/testdb/auth/me",
@@ -128,7 +128,7 @@ describe("SORUN #12 — GET /:database/auth/me metadata alanı", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("admin token ile 401 dönmeli (DB user token zorunlu)", async () => {
+  it("should return 401 with an admin token (DB user token is required)", async () => {
     const jwtSvc = new JwtService(JWT_SECRET);
     const adminToken = await jwtSvc.signAdminToken();
 
@@ -137,11 +137,11 @@ describe("SORUN #12 — GET /:database/auth/me metadata alanı", () => {
       url: "/testdb/auth/me",
       headers: { authorization: `Bearer ${adminToken}` },
     });
-    // verifyDbUser admin token'ı reddeder
+    // verifyDbUser rejects admin tokens
     expect(res.statusCode).toBe(401);
   });
 
-  it("yanlış database token ile 403 dönmeli", async () => {
+  it("should return 403 with a token for the wrong database", async () => {
     const jwtSvc = new JwtService(JWT_SECRET);
     const wrongDbToken = await jwtSvc.signDbUserToken("otherdb", TEST_USER_ID, "alice@test.com", "editor");
 

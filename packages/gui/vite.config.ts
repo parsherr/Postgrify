@@ -9,8 +9,8 @@ const pkg = JSON.parse(
 
 export default defineConfig({
   plugins: [react()],
-  // __dirname: packages/gui — workspace root'tan çalıştırılınca CWD değişiyor,
-  // publicDir ve root'u absolute path ile sabitle
+  // __dirname: packages/gui — CWD changes when run from workspace root,
+  // so pin publicDir and root to absolute paths
   root: path.resolve(__dirname),
   publicDir: path.resolve(__dirname, "public"),
   resolve: {

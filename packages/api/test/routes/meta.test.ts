@@ -1,8 +1,8 @@
 /**
- * DB metadata route testleri.
- * GET /db/:database/size  — disk boyutu
- * GET /db/:database/stats — tablo istatistikleri
- * postgres.js ve cache mock'lanır.
+ * DB metadata route tests.
+ * GET /db/:database/size  — disk size
+ * GET /db/:database/stats — table statistics
+ * postgres.js and cache are mocked.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -100,7 +100,7 @@ afterAll(async () => {
 });
 
 describe("GET /db/:database/size", () => {
-  it("admin token ile DB boyutunu döner", async () => {
+  it("returns DB size with admin token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/size",
@@ -112,7 +112,7 @@ describe("GET /db/:database/size", () => {
     expect(body).toHaveProperty("size_human");
   });
 
-  it("DB token (read scope) ile 200 döner", async () => {
+  it("returns 200 with DB token (read scope)", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/size",
@@ -121,7 +121,7 @@ describe("GET /db/:database/size", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("token olmadan 401 döner", async () => {
+  it("returns 401 without a token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/size",
@@ -129,7 +129,7 @@ describe("GET /db/:database/size", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("geçersiz DB adı 400 döner", async () => {
+  it("returns 400 for an invalid DB name", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/123invalid/size",
@@ -140,7 +140,7 @@ describe("GET /db/:database/size", () => {
 });
 
 describe("GET /db/:database/stats", () => {
-  it("admin token ile tablo istatistiklerini döner", async () => {
+  it("returns table statistics with admin token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/stats",
@@ -152,7 +152,7 @@ describe("GET /db/:database/stats", () => {
     expect(Array.isArray(body.tables)).toBe(true);
   });
 
-  it("token olmadan 401 döner", async () => {
+  it("returns 401 without a token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/stats",

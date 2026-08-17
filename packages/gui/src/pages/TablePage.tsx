@@ -1,6 +1,6 @@
 /**
- * TablePage — veri tablosu görünümü.
- * DataGrid bileşeni ile TanStack Table + virtual scroll + inline edit.
+ * TablePage — data table view.
+ * Uses the DataGrid component with TanStack Table + virtual scroll + inline edit.
  */
 
 import React from "react";
@@ -28,7 +28,7 @@ export default function TablePage() {
     refetch,
   } = useRows(db, table, { limit: pageSize, offset: page * pageSize });
 
-  // Sayfa değiştiğinde en üste scroll
+  // Scroll to top when page changes
   React.useEffect(() => {
     setPage(0);
   }, [table, db]);
@@ -49,10 +49,10 @@ export default function TablePage() {
     colKey: string,
     value: unknown
   ) {
-    // PK'yı bul — API'ye hangi satırı güncellediğimizi söylemek için
+    // Find PK — to tell the API which row we're updating
     const pkCol = schema?.columns.find((c) => c.primary_key);
     if (!pkCol) {
-      throw new Error("Bu tablo için birincil anahtar bulunamadı");
+      throw new Error("No primary key found for this table");
     }
     const pkValue = row[pkCol.name];
     await api.patch(`/db/${db}/tables/${table}/rows/${pkValue}`, {
@@ -75,7 +75,7 @@ export default function TablePage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Başlık */}
+      {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <nav className="flex items-center gap-1 text-xs text-muted-foreground">
           <Link to="/databases" className="hover:text-foreground transition-colors">
@@ -113,7 +113,7 @@ export default function TablePage() {
         )}
       </div>
 
-      {/* Kolon şeması — ince bilgi çubuğu */}
+      {/* Column schema — thin info bar */}
       {!schemaLoading && schema && (
         <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border/50 bg-card/50 px-4 py-1.5">
           {schema.columns.map((col: Column) => (

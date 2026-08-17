@@ -1,5 +1,5 @@
 /**
- * Kolon yönetim endpoint testleri:
+ * Column management endpoint tests:
  *   POST   /db/:database/tables/:table/columns
  *   DELETE /db/:database/tables/:table/columns/:col
  *   PATCH  /db/:database/tables/:table/columns/:col
@@ -15,7 +15,7 @@ const JWT_SECRET = "test-secret-must-be-at-least-32-characters";
 vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 
-// sqlFn module closure'da yaşar — beforeAll'dan erişmek için burada tanımlanır
+// sqlFn lives in the module closure — defined here for beforeAll access
 const unsafeMock = vi.fn().mockResolvedValue([]);
 
 vi.mock("postgres", () => {
@@ -97,8 +97,8 @@ afterAll(async () => {
 
 // ─── POST /db/:database/tables/:table/columns ────────────────────────────────
 
-describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
-  it("schema scope ile kolon ekler → 201", async () => {
+describe("POST /db/:database/tables/:table/columns — add column", () => {
+  it("adds a column with schema scope → 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -111,7 +111,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(body.added).toBe(true);
   });
 
-  it("admin token ile kolon ekler → 201", async () => {
+  it("adds a column with admin token → 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -121,7 +121,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("read scope ile 403 döner", async () => {
+  it("returns 403 with read scope", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -131,7 +131,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("geçersiz kolon adı → 400", async () => {
+  it("invalid column name → 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -141,7 +141,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçersiz tablo adı (SQL keyword) → 400", async () => {
+  it("invalid table name (SQL keyword) → 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/select/columns",
@@ -151,7 +151,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçersiz tip injection → 400", async () => {
+  it("invalid type injection → 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -161,7 +161,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("parantezli tip (NUMERIC(10,2)) geçer → 201", async () => {
+  it("parenthesized type (NUMERIC(10,2)) passes → 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/products/columns",
@@ -171,7 +171,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("nullable:false + default → NOT NULL ile ALTER TABLE çağrılır", async () => {
+  it("nullable:false + default → ALTER TABLE is called with NOT NULL", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "POST",
@@ -180,7 +180,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
       payload: { name: "score", type: "INTEGER", nullable: false, default: "0" },
     });
     expect(res.statusCode).toBe(201);
-    // ALTER TABLE ... ADD COLUMN ... NOT NULL çağrısı gitmiş olmalı
+    // ALTER TABLE ... ADD COLUMN ... NOT NULL call must have been made
     const call = unsafeMock?.mock.calls.find((c) =>
       (c[0] as string).includes("NOT NULL")
     );
@@ -190,7 +190,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(call![0]).toContain("NOT NULL");
   });
 
-  it("nullable:false + default yok → 400 (mevcut satırları kırar)", async () => {
+  it("nullable:false + no default → 400 (would break existing rows)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -201,7 +201,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
     expect(res.json().error).toMatch(/NOT NULL/);
   });
 
-  it("now() default geçer → 201", async () => {
+  it("now() default passes → 201", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/db/project1/tables/users/columns",
@@ -224,7 +224,7 @@ describe("POST /db/:database/tables/:table/columns — kolon ekle", () => {
 
 // ─── DELETE /db/:database/tables/:table/columns/:col ─────────────────────────
 
-describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => {
+describe("DELETE /db/:database/tables/:table/columns/:col — delete column", () => {
   it("schema scope ile kolon siler → 200", async () => {
     const res = await server.inject({
       method: "DELETE",
@@ -246,7 +246,7 @@ describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => 
     expect(res.statusCode).toBe(200);
   });
 
-  it("read scope ile 403 döner", async () => {
+  it("returns 403 with read scope", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/db/project1/tables/users/columns/bio",
@@ -255,7 +255,7 @@ describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => 
     expect(res.statusCode).toBe(403);
   });
 
-  it("geçersiz kolon adı (SQL keyword) → 400", async () => {
+  it("invalid column name (SQL keyword) → 400", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/db/project1/tables/users/columns/drop",
@@ -264,7 +264,7 @@ describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => 
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçersiz tablo adı → 400", async () => {
+  it("invalid table name → 400", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/db/project1/tables/insert/columns/bio",
@@ -273,7 +273,7 @@ describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => 
     expect(res.statusCode).toBe(400);
   });
 
-  it("DROP COLUMN IF EXISTS SQL doğru üretilir", async () => {
+  it("DROP COLUMN IF EXISTS SQL is generated correctly", async () => {
     unsafeMock?.mockClear();
     await server.inject({
       method: "DELETE",
@@ -292,8 +292,8 @@ describe("DELETE /db/:database/tables/:table/columns/:col — kolon sil", () => 
 
 // ─── PATCH /db/:database/tables/:table/columns/:col ──────────────────────────
 
-describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", () => {
-  it("nullable:false → SET NOT NULL SQL üretir → 200", async () => {
+describe("PATCH /db/:database/tables/:table/columns/:col — update column", () => {
+  it("nullable:false → generates SET NOT NULL SQL → 200", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -310,7 +310,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(call![0]).toContain('"email"');
   });
 
-  it("nullable:true → DROP NOT NULL SQL üretir → 200", async () => {
+  it("nullable:true → generates DROP NOT NULL SQL → 200", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -325,7 +325,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(call).toBeDefined();
   });
 
-  it("default değeri → SET DEFAULT SQL üretir → 200", async () => {
+  it("default value → generates SET DEFAULT SQL → 200", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -341,7 +341,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(call![0]).toContain('"stock"');
   });
 
-  it("dropDefault:true → DROP DEFAULT SQL üretir → 200", async () => {
+  it("dropDefault:true → generates DROP DEFAULT SQL → 200", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -356,7 +356,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(call).toBeDefined();
   });
 
-  it("dropDefault:true, default field görmezden gelinir", async () => {
+  it("dropDefault:true, default field is ignored", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -365,14 +365,14 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
       payload: { dropDefault: true, default: "99" },
     });
     expect(res.statusCode).toBe(200);
-    // SET DEFAULT çağrısı olmamalı — dropDefault öncelik alır
+    // SET DEFAULT call must not happen — dropDefault takes priority
     const setDefaultCall = unsafeMock?.mock.calls.find((c) =>
       (c[0] as string).includes("SET DEFAULT")
     );
     expect(setDefaultCall).toBeUndefined();
   });
 
-  it("nullable + default aynı anda → iki ayrı ALTER çağrısı → 200", async () => {
+  it("nullable + default at the same time → two separate ALTER calls → 200", async () => {
     unsafeMock?.mockClear();
     const res = await server.inject({
       method: "PATCH",
@@ -391,7 +391,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(defaultCall).toBeDefined();
   });
 
-  it("hiç alan verilmezse → 400", async () => {
+  it("returns 400 when no fields are provided", async () => {
     const res = await server.inject({
       method: "PATCH",
       url: "/db/project1/tables/users/columns/email",
@@ -402,7 +402,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(res.json().error).toMatch(/No valid fields/);
   });
 
-  it("read scope ile 403 döner", async () => {
+  it("returns 403 with read scope", async () => {
     const res = await server.inject({
       method: "PATCH",
       url: "/db/project1/tables/users/columns/email",
@@ -412,7 +412,7 @@ describe("PATCH /db/:database/tables/:table/columns/:col — kolon güncelle", (
     expect(res.statusCode).toBe(403);
   });
 
-  it("geçersiz kolon adı → 400", async () => {
+  it("invalid column name → 400", async () => {
     const res = await server.inject({
       method: "PATCH",
       url: "/db/project1/tables/users/columns/select",

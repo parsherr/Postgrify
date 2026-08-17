@@ -1,12 +1,12 @@
 /**
  * AuthContext — global admin auth state.
  *
- * Strateji:
- *   - accessToken sadece memory'de (XSS koruması)
- *   - refreshToken localStorage'da ("postgrify_refresh_token")
- *   - Sayfa yüklenince: refreshToken varsa → /auth/admin/refresh → accessToken yenile
- *   - login(): POST /auth/admin/login → her iki token'ı sakla
- *   - logout(): POST /auth/admin/logout → her şeyi temizle
+ * Strategy:
+ *   - accessToken in memory only (XSS protection)
+ *   - refreshToken in localStorage ("postgrify_refresh_token")
+ *   - On page load: if refreshToken exists → /auth/admin/refresh → renew accessToken
+ *   - login(): POST /auth/admin/login → store both tokens
+ *   - logout(): POST /auth/admin/logout → clear everything
  */
 
 import React, { createContext, useCallback, useEffect, useRef, useState } from "react";
@@ -23,12 +23,12 @@ export interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  /** api.ts tarafından 401 sonrası sessiz yenileme için kullanılır */
+  /** Used by api.ts for silent refresh after a 401 */
   refreshAccessToken: () => Promise<string | null>;
-  /** api.ts'in token'ı okuması için — React dışı bağlam */
+  /** For api.ts to read the token in non-React contexts */
   getAccessToken: () => string | null;
   setAccessToken: (token: string) => void;
-  /** Setup wizard: sunucudan gelen token'larla oturumu başlat, login isteği atmaz */
+  /** Setup wizard: initialize session with server-issued tokens, skips login request */
   loginWithTokens: (accessToken: string, refreshToken: string | null, email: string) => void;
 }
 
@@ -39,7 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // api.ts circular import'tan kaçınmak için ref üzerinden erişim
+  // Accessed via ref to avoid circular imports with api.ts
   const accessTokenRef = useRef<string | null>(null);
 
   const setAccessToken = useCallback((token: string) => {
@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const getAccessToken = useCallback(() => accessTokenRef.current, []);
 
-  /** Refresh token ile yeni access token al */
+  /** Exchange refresh token for a new access token */
   const refreshAccessToken = useCallback(async (): Promise<string | null> => {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) return null;
@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [setAccessToken]);
 
-  /** Sayfa yüklenince refresh token varsa sessizce yenile */
+  /** On page load, silently renew if a refresh token exists */
   useEffect(() => {
     async function init() {
       setIsLoading(true);
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (refreshToken) {
         const token = await refreshAccessToken();
         if (token) {
-          // Email'i /auth/admin/me'den al
+          // Fetch email from /auth/admin/me
           try {
             const meRes = await fetch(`${API_BASE}/auth/admin/me`, {
               headers: { Authorization: `Bearer ${token}` },
@@ -94,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setEmail(me.email);
             }
           } catch {
-            // email olmadan da devam edilebilir
+            // Proceed without email — not critical
           }
         }
       }
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? "Giriş başarısız");
+        throw new Error(err.error ?? "Login failed");
       }
 
       const data = (await res.json()) as {
@@ -147,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     const token = accessTokenRef.current;
 
-    // Sunucuda revoke et (hata olursa sessizce geç)
+    // Revoke on the server (ignore errors — best effort)
     if (token && refreshToken) {
       try {
         await fetch(`${API_BASE}/auth/admin/logout`, {
@@ -163,7 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Her durumda local state'i temizle
+    // Clear local state regardless
     accessTokenRef.current = null;
     setAccessTokenState(null);
     setEmail(null);

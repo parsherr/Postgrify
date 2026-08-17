@@ -1,5 +1,5 @@
 /**
- * DB boyut ve istatistik hook'ları.
+ * Database size and stats hooks.
  */
 
 import { useQuery } from "@tanstack/react-query";

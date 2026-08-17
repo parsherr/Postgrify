@@ -1,12 +1,12 @@
 /**
- * SORUN #H Fix — DB user token (editor rolü) /query endpoint'ine erişebilmeli.
+ * Issue #H Fix — DB user token (editor role) should be able to access /query endpoint.
  *
  * query.ts preHandler: [server.authenticateAny, scopeGuard("query")]
- *   - authenticateAny: DB user token'larını req.dbUser'a set eder
- *   - scopeGuard("query"): editor rolü → query scope var ✓
+ *   - authenticateAny: sets DB user tokens on req.dbUser
+ *   - scopeGuard("query"): editor role → has query scope ✓
  *
- * Eski hata: preHandler sadece [scopeGuard("query")] içeriyordu.
- * authenticateAny olmadan req.dbUser hiç set edilmiyordu → 403.
+ * Former bug: preHandler only contained [scopeGuard("query")].
+ * Without authenticateAny, req.dbUser was never set → 403.
  */
 
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
@@ -73,7 +73,7 @@ beforeAll(async () => {
   server.decorateRequest("dbName", null);
   server.decorateRequest("dbUser", null);
 
-  // authenticate: admin ve DB-scoped token kabul eder
+  // authenticate: accepts admin and DB-scoped tokens
   server.decorate("authenticate", async (req: never, reply: never) => {
     const auth = (req as { headers: Record<string, string> }).headers.authorization;
     if (!auth?.startsWith("Bearer ")) return (reply as { status: (n: number) => { send: (b: unknown) => void } }).status(401).send({ error: "Unauthorized" });
@@ -84,7 +84,7 @@ beforeAll(async () => {
 
   server.decorate("authenticateAdmin", async () => {});
 
-  // authenticateAny: admin, DB-scoped ve DB-user token'ları kabul eder
+  // authenticateAny: accepts admin, DB-scoped, and DB-user tokens
   server.decorate("authenticateAny", async (req: never, reply: never) => {
     const auth = (req as { headers: Record<string, string> }).headers.authorization;
     if (!auth?.startsWith("Bearer ")) return (reply as { status: (n: number) => { send: (b: unknown) => void } }).status(401).send({ error: "Unauthorized" });
@@ -111,8 +111,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("SORUN #H — DB user token /query endpoint erişimi", () => {
-  it("editor rolü SELECT query yapabilmeli (200)", async () => {
+describe("Issue #H — DB user token access to /query endpoint", () => {
+  it("editor role should be able to run a SELECT query (200)", async () => {
     const res = await server.inject({
       method:  "POST",
       url:     "/project1/query",
@@ -128,7 +128,7 @@ describe("SORUN #H — DB user token /query endpoint erişimi", () => {
     expect(body.offset).toBeNull();
   });
 
-  it("viewer rolü /query → 403 (query scope yok)", async () => {
+  it("viewer role /query → 403 (no query scope)", async () => {
     const res = await server.inject({
       method:  "POST",
       url:     "/project1/query",
@@ -150,7 +150,7 @@ describe("SORUN #H — DB user token /query endpoint erişimi", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("token olmadan /query → 401", async () => {
+  it("without a token /query → 401", async () => {
     const res = await server.inject({
       method:  "POST",
       url:     "/project1/query",
@@ -160,7 +160,7 @@ describe("SORUN #H — DB user token /query endpoint erişimi", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("editor rolü SELECT-only kısıtına tabidir (DROP → 403)", async () => {
+  it("editor role is subject to the SELECT-only restriction (DROP → 403)", async () => {
     const res = await server.inject({
       method:  "POST",
       url:     "/project1/query",
@@ -168,7 +168,7 @@ describe("SORUN #H — DB user token /query endpoint erişimi", () => {
       payload: { sql: "DROP TABLE tweets" },
     });
 
-    // SELECT-only mod — DDL reddedilir
+    // SELECT-only mode — DDL is rejected
     expect(res.statusCode).toBe(403);
   });
 });

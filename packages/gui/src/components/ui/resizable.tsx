@@ -1,6 +1,6 @@
 /**
- * Resizable panel bileşenleri — react-resizable-panels wrapper.
- * Bu kütüphane Group / Panel / Separator export eder (PanelGroup/PanelResizeHandle değil).
+ * Resizable panel components — react-resizable-panels wrapper.
+ * This library exports Group / Panel / Separator (not PanelGroup/PanelResizeHandle).
  */
 
 import { GripVertical } from "lucide-react";

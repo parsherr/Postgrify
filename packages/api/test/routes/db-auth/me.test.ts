@@ -1,8 +1,8 @@
 /**
- * GET  /:database/auth/me testleri.
- * PATCH /:database/auth/me testleri.
+ * GET  /:database/auth/me tests.
+ * PATCH /:database/auth/me tests.
  *
- * Her iki endpoint de DB user JWT gerektirir — admin token reddedilir.
+ * Both endpoints require a DB user JWT — admin token is rejected.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
@@ -64,7 +64,7 @@ beforeAll(async () => {
     req.user = payload;
   });
   server.decorate("authenticateAdmin", async () => {});
-  // me.ts, jwtService decorator'ını kullanır
+  // me.ts uses the jwtService decorator
   server.decorate("jwtService", jwtSvc);
 
   const { authMeRoute } = await import("../../../src/routes/db/auth/me.js");
@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 
 describe("GET /:database/auth/me", () => {
-  it("Geçerli DB user token → 200, user objesi döner", async () => {
+  it("Valid DB user token → 200, returns user object", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb",
       "user-uuid-1",
@@ -115,15 +115,15 @@ describe("GET /:database/auth/me", () => {
     const body = res.json();
     expect(body.email).toBe("user@example.com");
     expect(body.role).toBe("viewer");
-    // password_hash response'da olmamalı
+    // password_hash must not be in the response
     expect(body).not.toHaveProperty("password_hash");
   });
 
-  it("Authorization header yok → 401 Missing authorization", async () => {
+  it("No Authorization header → 401 Missing authorization", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/me",
-      // Header yok
+      // No header
     });
 
     expect(res.statusCode).toBe(401);
@@ -139,14 +139,14 @@ describe("GET /:database/auth/me", () => {
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
-    // verifyDbUser admin token'ı reddeder
+    // verifyDbUser rejects admin tokens
     expect(res.statusCode).toBe(401);
     expect(res.json().error).toContain("Invalid or expired token");
   });
 
-  it("Başka DB için üretilmiş token → 403 Token database mismatch", async () => {
+  it("Token issued for a different DB → 403 Token database mismatch", async () => {
     const otherDbToken = await jwtSvc.signDbUserToken(
-      "otherdb", // farklı DB
+      "otherdb", // different DB
       "user-uuid-1",
       "user@example.com",
       "viewer",
@@ -155,7 +155,7 @@ describe("GET /:database/auth/me", () => {
 
     const res = await server.inject({
       method: "GET",
-      url: "/testdb/auth/me", // testdb için isteniyor ama token otherdb için
+      url: "/testdb/auth/me", // requested for testdb but token is for otherdb
       headers: { authorization: `Bearer ${otherDbToken}` },
     });
 
@@ -163,7 +163,7 @@ describe("GET /:database/auth/me", () => {
     expect(res.json().error).toContain("mismatch");
   });
 
-  it("Kullanıcı DB'de bulunamadıysa → 404", async () => {
+  it("User not found in DB → 404", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb",
       "deleted-user-uuid",
@@ -172,7 +172,7 @@ describe("GET /:database/auth/me", () => {
       "1h"
     );
 
-    sqlFnRef.mockResolvedValue([]); // kullanıcı yok
+    sqlFnRef.mockResolvedValue([]); // user not found
 
     const res = await server.inject({
       method: "GET",
@@ -185,7 +185,7 @@ describe("GET /:database/auth/me", () => {
   });
 });
 
-describe("PATCH /:database/auth/me — profil güncelle", () => {
+describe("PATCH /:database/auth/me — update profile", () => {
   const mockUser = {
     id: "user-uuid-1",
     email: "user@example.com",
@@ -200,7 +200,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     metadata: {},
   };
 
-  it("full_name güncelle → 200, güncellenmiş user döner", async () => {
+  it("update full_name → 200, returns updated user", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -219,7 +219,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(body).not.toHaveProperty("password_hash");
   });
 
-  it("avatar_url güncelle → 200", async () => {
+  it("update avatar_url → 200", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -253,7 +253,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(res.json().metadata).toEqual({ theme: "dark" });
   });
 
-  it("full_name null → alanı temizler → 200", async () => {
+  it("full_name null → clears the field → 200", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -270,7 +270,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(res.json().full_name).toBeNull();
   });
 
-  it("boş body → 400", async () => {
+  it("empty body → 400", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -310,7 +310,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(res.json().error).toContain("Invalid or expired token");
   });
 
-  it("Başka DB için token → 403 mismatch", async () => {
+  it("Token for a different DB → 403 mismatch", async () => {
     const otherDbToken = await jwtSvc.signDbUserToken(
       "otherdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -326,11 +326,11 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(res.json().error).toContain("mismatch");
   });
 
-  it("Kullanıcı DB'de yok → 404", async () => {
+  it("User does not exist in DB → 404", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "deleted-uuid", "gone@example.com", "viewer", "1h"
     );
-    sqlFnRef.mockResolvedValue([]); // kullanıcı yok
+    sqlFnRef.mockResolvedValue([]); // user not found
 
     const res = await server.inject({
       method: "PATCH",
@@ -342,7 +342,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("izin verilmeyen alan (email) gönderilirse → 400 (additionalProperties: false)", async () => {
+  it("returns 400 when a disallowed field (email) is sent → 400 (additionalProperties: false)", async () => {
     const dbUserToken = await jwtSvc.signDbUserToken(
       "testdb", "user-uuid-1", "user@example.com", "viewer", "1h"
     );
@@ -354,7 +354,7 @@ describe("PATCH /:database/auth/me — profil güncelle", () => {
       payload: { email: "hacker@evil.com" },
     });
 
-    // additionalProperties: false → Fastify validation 400 döner
+    // additionalProperties: false → Fastify validation returns 400
     expect(res.statusCode).toBe(400);
   });
 });

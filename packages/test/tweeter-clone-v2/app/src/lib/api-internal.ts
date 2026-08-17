@@ -1,2 +1,2 @@
-// Dahili — ExplorePage için
+// Internal — for ExplorePage
 export { getAccessToken } from "./api";

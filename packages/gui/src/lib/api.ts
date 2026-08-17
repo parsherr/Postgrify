@@ -1,12 +1,12 @@
 /**
- * Merkezi API istemcisi.
+ * Central API client.
  *
- * Token yönetimi:
- *   - accessToken memory'den okunur (AuthContext ref üzerinden)
- *   - 401 alınca: refreshToken ile sessiz yenileme denenır, başarısızsa /login
+ * Token management:
+ *   - accessToken is read from memory (via AuthContext ref)
+ *   - On 401: silent refresh with refreshToken is attempted; on failure → /login
  *
- * AuthContext circular import'tan kaçınmak için setter/getter fonksiyonları
- * AuthContext tarafından buraya inject edilir (setTokenAccessors).
+ * To avoid circular imports with AuthContext, setter/getter functions
+ * are injected here by AuthContext (setTokenAccessors).
  */
 
 // ── Backup types ─────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export const BASE_URL =
 
 const REFRESH_TOKEN_KEY = "postgrify_refresh_token";
 
-// AuthContext tarafından mount sırasında inject edilir
+// Injected at mount by AuthContext
 let _getToken: (() => string | null) | null = null;
 let _setToken: ((token: string) => void) | null = null;
 
@@ -49,7 +49,7 @@ export function getToken(): string | null {
   return _getToken ? _getToken() : null;
 }
 
-// Eş zamanlı 401'lerde tek refresh isteği gönder
+// Send a single refresh request even when multiple 401s occur simultaneously
 let refreshPromise: Promise<string | null> | null = null;
 
 async function doRefresh(): Promise<string | null> {
@@ -194,7 +194,7 @@ export const api = {
     request<T>("DELETE", path, undefined, options) as Promise<T>,
 };
 
-// ── Setup API (auth gerektirmez, doğrudan fetch) ──────────────────────────────
+// ── Setup API (no auth required, direct fetch) ────────────────────────────────
 
 export interface SetupStatus {
   configured: boolean;
@@ -218,9 +218,9 @@ export interface SetupResult {
 }
 
 export async function getSetupStatus(): Promise<SetupStatus> {
-  // Network hatası veya !res.ok durumunda throw et — React Query retry mekanizması
-  // devreye girsin. "API erişilemedi = kurulum gerekli" yanlış bir çıkarım:
-  // API henüz başlamıyor olabilir ve kurulum gerçekte tamamlanmış durumda olabilir.
+  // Throw on network error or !res.ok — let React Query's retry mechanism handle it.
+  // "API unreachable = setup required" is a wrong assumption:
+  // the API may not have started yet while setup is already complete.
   const res = await fetch(`${BASE_URL}/setup/status`);
   if (!res.ok) throw new Error(`Setup status check failed: ${res.status}`);
   return res.json() as Promise<SetupStatus>;
@@ -252,55 +252,44 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const body = new FormData();
-  body.append("file", file);
+  const formData = new FormData();
+  formData.append("file", file);
 
-  const res = await fetch(`${BASE_URL}${path}`, { method: "POST", headers, body });
-
-  if (res.status === 401) {
-    if (!refreshPromise) {
-      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
-    }
-    const newToken = await refreshPromise;
-    if (!newToken) {
-      window.location.href = "/login";
-      throw new Error("Session expired");
-    }
-    headers["Authorization"] = `Bearer ${newToken}`;
-    const retry = await fetch(`${BASE_URL}${path}`, { method: "POST", headers, body });
-    if (!retry.ok) throw new Error(await retry.text());
-    return retry.json() as Promise<T>;
-  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
 
   if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try { msg = (JSON.parse(text) as { message?: string; error?: string }).message ?? (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
-    throw new Error(msg);
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const err = (await res.json()) as { error?: string; message?: string };
+      message = err.error ?? err.message ?? message;
+    } catch { /* ignore */ }
+    throw new Error(message);
   }
 
-  if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 }
 
 // ── Backup API ────────────────────────────────────────────────────────────────
 
-export function listBackups(db: string): Promise<{ backups: BackupMeta[] }> {
-  return api.get(`/db/${db}/backup/list`);
+export function listBackups(db: string): Promise<BackupMeta[]> {
+  return api.get(`/db/${db}/backup`);
 }
 
 export function createBackup(db: string): Promise<BackupMeta> {
-  return api.post(`/db/${db}/backup/create`, {});
+  return api.post(`/db/${db}/backup`);
 }
 
-export function deleteBackup(db: string, backupId: string): Promise<void> {
-  return api.delete(`/db/${db}/backup/${backupId}`);
+export function deleteBackup(db: string, id: string): Promise<void> {
+  return api.delete(`/db/${db}/backup/${id}`);
 }
 
-/** Returns the URL to download a specific saved backup file. */
-export function downloadBackupUrl(db: string, backupId: string): string {
+export function getBackupDownloadUrl(db: string, id: string): string {
   const token = getToken();
-  return `${BASE_URL}/db/${db}/backup/${backupId}/download${token ? `?token=${token}` : ""}`;
+  return `${BASE_URL}/db/${db}/backup/${id}/download${token ? `?token=${token}` : ""}`;
 }
 
 export function restoreBackup(db: string, file: File): Promise<{ restored: boolean; database: string }> {

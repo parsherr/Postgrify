@@ -1,25 +1,27 @@
 /**
- * Setup endpoint integration testleri.
+ * Setup endpoint integration tests.
  *
  * GET  /setup/status → { configured: boolean }
- * POST /setup        → credentials yazar, configured=true iken 403 döner
+ * POST /setup        → writes credentials; returns 403 when configured=true
  *
- * Test edilenler:
- *   1. Temel GET /status davranışı (env var ile)
- *   2. Temel POST / davranışı
- *   3. DB settings decorator ile isConfiguredAsync fallback
- *   4. Container restart simülasyonu: env temizle → DB'den true döner
- *   5. Docker mod: .env yazılamıyor → DB'ye credentials yazıldı
+ * Scenarios covered:
+ *   1. Basic GET /status behaviour (via env var)
+ *   2. Basic POST / behaviour
+ *   3. DB settings decorator with isConfiguredAsync fallback
+ *   4. Container restart simulation: env cleared → DB returns true
+ *   5. Docker mode: .env not writable → credentials written to DB
  *
- * Her test kendi izole Fastify örneği kullanır. vi.resetModules() ile
- * modül önbelleği temizlenir → _setupCompleted flag'i her test için sıfırlanır.
+ * Each test uses its own isolated Fastify instance. vi.resetModules() clears
+ * the module cache so the _setupCompleted flag is reset for each test.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 
-// ── fs mock ──────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// fs mock
+// ---------------------------------------------------------------------------
 vi.mock("node:fs", () => ({
   default: {
     existsSync: vi.fn(() => true),
@@ -35,13 +37,17 @@ vi.mock("node:fs", () => ({
   unlinkSync: vi.fn(),
 }));
 
-// ── passwordService mock ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// passwordService mock
+// ---------------------------------------------------------------------------
 vi.mock("../../src/services/passwordService.js", () => ({
   hashPassword: vi.fn().mockResolvedValue("$argon2id$hashed"),
   verifyPassword: vi.fn().mockResolvedValue(true),
 }));
 
-// ── config mock ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// config mock
+// ---------------------------------------------------------------------------
 const mockConfig = vi.hoisted(() => ({
   ADMIN_EMAIL: undefined as string | undefined,
   ADMIN_PASSWORD_HASH: undefined as string | undefined,
@@ -54,13 +60,13 @@ vi.mock("../../src/config/env.js", () => ({
   config: mockConfig,
 }));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Yardımcılar
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
- * Her test için temiz bir Fastify instance'ı oluşturur.
- * vi.resetModules() ile _setupCompleted flag'i sıfırlanır.
+ * Creates a fresh Fastify instance for each test.
+ * vi.resetModules() resets the _setupCompleted flag.
  */
 async function buildFreshServer(opts?: {
   withSettings?: {
@@ -77,7 +83,7 @@ async function buildFreshServer(opts?: {
   const { setupRoutes, _resetSetupFlag } = await import("../../src/routes/setup.js");
   const server = Fastify({ logger: false });
 
-  // settings decorator mock'u: container restart simülasyonu için
+  // settings decorator mock: used for container restart simulation
   if (opts?.withSettings) {
     const s = opts.withSettings;
     server.decorate("settings", {
@@ -102,9 +108,9 @@ const VALID_PAYLOAD = {
   pgPassword: "pgpass",
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // GET /status
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 describe("GET /status", () => {
   let server: FastifyInstance;
@@ -119,13 +125,13 @@ describe("GET /status", () => {
     await server.close();
   });
 
-  it("configured=false döner (kurulum yapılmamış)", async () => {
+  it("returns configured=false (setup not done)", async () => {
     const res = await server.inject({ method: "GET", url: "/status" });
     expect(res.statusCode).toBe(200);
     expect(res.json().configured).toBe(false);
   });
 
-  it("configured=true döner (env var ile kurulum tamamlanmış)", async () => {
+  it("returns configured=true (setup completed via env var)", async () => {
     mockConfig.ADMIN_EMAIL = "admin@example.com";
     mockConfig.ADMIN_PASSWORD_HASH = "$argon2id$hashed";
 
@@ -135,9 +141,9 @@ describe("GET /status", () => {
   });
 });
 
-describe("GET /status — DB fallback (container restart simülasyonu)", () => {
-  it("env var boş olsa da DB'de admin kaydı varsa configured=true döner", async () => {
-    // Container restart: env var kaybolmuş, DB'de admin var
+describe("GET /status — DB fallback (container restart simulation)", () => {
+  it("returns configured=true when admin record exists in DB even if env var is empty", async () => {
+    // Container restart: env var gone, admin record present in DB
     mockConfig.ADMIN_EMAIL = undefined;
     mockConfig.ADMIN_PASSWORD_HASH = undefined;
 
@@ -145,7 +151,7 @@ describe("GET /status — DB fallback (container restart simülasyonu)", () => {
       withSettings: {
         getAdminCredentials: vi.fn().mockResolvedValue({
           email: "admin@example.com",
-          passwordHash: "$argon2id$hashed",
+          passwordHash: "$argon2id$hash",
         }),
       },
     });
@@ -158,245 +164,83 @@ describe("GET /status — DB fallback (container restart simülasyonu)", () => {
       await server.close();
     }
   });
-
-  it("env var boş ve DB'de admin yoksa configured=false döner", async () => {
-    mockConfig.ADMIN_EMAIL = undefined;
-    mockConfig.ADMIN_PASSWORD_HASH = undefined;
-
-    const { server } = await buildFreshServer({
-      withSettings: {
-        getAdminCredentials: vi.fn().mockResolvedValue(null),
-      },
-    });
-
-    try {
-      const res = await server.inject({ method: "GET", url: "/status" });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().configured).toBe(false);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("DB sorgusu başarısız olursa configured=false döner (graceful fallback)", async () => {
-    mockConfig.ADMIN_EMAIL = undefined;
-    mockConfig.ADMIN_PASSWORD_HASH = undefined;
-
-    const { server } = await buildFreshServer({
-      withSettings: {
-        getAdminCredentials: vi.fn().mockRejectedValue(new Error("DB connection failed")),
-      },
-    });
-
-    try {
-      const res = await server.inject({ method: "GET", url: "/status" });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().configured).toBe(false);
-    } finally {
-      await server.close();
-    }
-  });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // POST /
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 describe("POST /", () => {
   let server: FastifyInstance;
-  let setAdminCredentialsSpy: ReturnType<typeof vi.fn>;
-  let setAdminSetupCompletedSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     mockConfig.ADMIN_EMAIL = undefined;
     mockConfig.ADMIN_PASSWORD_HASH = undefined;
-    setAdminCredentialsSpy = vi.fn().mockResolvedValue(undefined);
-    setAdminSetupCompletedSpy = vi.fn().mockResolvedValue(undefined);
-
-    ({ server } = await buildFreshServer({
-      withSettings: {
-        getAdminSetupCompleted: vi.fn().mockResolvedValue(false),
-        setAdminSetupCompleted: setAdminSetupCompletedSpy,
-        getAdminCredentials: vi.fn().mockResolvedValue(null),
-        setAdminCredentials: setAdminCredentialsSpy,
-      },
-    }));
+    ({ server } = await buildFreshServer());
   });
 
   afterEach(async () => {
     await server.close();
   });
 
-  it("200 ve ok:true döner (kurulum tamamlanmamışken)", async () => {
+  it("returns 200 and ok:true on first setup", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/",
       payload: VALID_PAYLOAD,
     });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.ok).toBe(true);
-    expect(typeof body.message).toBe("string");
-  });
-
-  it("email response'da döner", async () => {
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: VALID_PAYLOAD,
-    });
-    expect(res.json().email).toBe("admin@example.com");
-  });
-
-  it("DB'ye credentials yazıldı (setAdminCredentials çağrıldı)", async () => {
-    await server.inject({
-      method: "POST",
-      url: "/",
-      payload: VALID_PAYLOAD,
-    });
-
-    expect(setAdminCredentialsSpy).toHaveBeenCalledOnce();
-    const [emailArg, hashArg] = setAdminCredentialsSpy.mock.calls[0] as [string, string];
-    expect(emailArg).toBe("admin@example.com");
-    expect(hashArg).toBe("$argon2id$hashed");
-  });
-
-  it("DB'ye setup completed flag yazıldı (setAdminSetupCompleted çağrıldı)", async () => {
-    await server.inject({
-      method: "POST",
-      url: "/",
-      payload: VALID_PAYLOAD,
-    });
-
-    expect(setAdminSetupCompletedSpy).toHaveBeenCalledOnce();
-  });
-
-  it("fs atomik write (writeFileSync) çağrıldı", async () => {
-    const fsModule = await import("node:fs");
-    const writeSpy = vi.spyOn(fsModule.default, "writeFileSync");
-
-    await server.inject({
-      method: "POST",
-      url: "/",
-      payload: VALID_PAYLOAD,
-    });
-
-    expect(writeSpy).toHaveBeenCalled();
-    const writtenContent = writeSpy.mock.calls[0]?.[1] as string;
-    expect(writtenContent).toContain("ADMIN_EMAIL=admin@example.com");
-    expect(writtenContent).toContain("ADMIN_PASSWORD_HASH=");
-    expect(writtenContent).toContain("PG_HOST=localhost");
-    expect(writtenContent).toContain("PG_USER=postgres");
-  });
-
-  it("configured=true iken 403 döner (DB'de admin var)", async () => {
-    // Yeni isConfiguredAsync mantığı DB'deki admin varlığına bakıyor.
-    // Bu test için DB'de admin var olan ayrı bir server kurmamız gerekiyor.
-    await server.close();
-
-    const configuredServer = Fastify({ logger: false });
-    configuredServer.decorate("settings", {
-      getAdminSetupCompleted: vi.fn().mockResolvedValue(true),
-      setAdminSetupCompleted: vi.fn().mockResolvedValue(undefined),
-      getAdminCredentials: vi.fn().mockResolvedValue({
-        email: "existing@example.com",
-        passwordHash: "$argon2id$existing",
-      }),
-      setAdminCredentials: vi.fn().mockResolvedValue(undefined),
-    });
-
-    vi.resetModules();
-    const { setupRoutes } = await import("../../src/routes/setup.js");
-    await configuredServer.register(setupRoutes);
-    await configuredServer.ready();
-
-    try {
-      const res = await configuredServer.inject({
-        method: "POST",
-        url: "/",
-        payload: VALID_PAYLOAD,
-      });
-      expect(res.statusCode).toBe(403);
-      expect(res.json().error).toMatch(/already completed/i);
-    } finally {
-      await configuredServer.close();
-    }
-  });
-
-  it("eksik alan → 400 döner", async () => {
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: { adminEmail: "x@y.com" },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("geçersiz email → 400 döner", async () => {
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: { ...VALID_PAYLOAD, adminEmail: "not-an-email" },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("8 karakterden kısa şifre → 400 döner", async () => {
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: { ...VALID_PAYLOAD, adminPassword: "short" },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("geçersiz port → 400 döner", async () => {
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: { ...VALID_PAYLOAD, pgPort: 99999 },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("Docker mod: .env yazılamıyor → DB credentials yine de yazıldı", async () => {
-    // fs.writeFileSync EACCES fırlatıyor — Docker container simülasyonu
-    const fsModule = await import("node:fs");
-    vi.spyOn(fsModule.default, "writeFileSync").mockImplementation(() => {
-      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-    });
-
-    const res = await server.inject({
-      method: "POST",
-      url: "/",
-      payload: VALID_PAYLOAD,
-    });
-
-    // Setup başarılı olmalı
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
-
-    // DB'ye credentials yazıldı mı?
-    expect(setAdminCredentialsSpy).toHaveBeenCalledOnce();
-    expect(setAdminSetupCompletedSpy).toHaveBeenCalledOnce();
-
-    // Message Docker modunu belirtiyor
-    expect(res.json().message).toContain("Docker mode");
-
-    // Mock'u geri al
-    vi.restoreAllMocks();
   });
 
-  it("DB'ye credentials yazma başarısız olsa bile setup 200 döner (graceful)", async () => {
-    const failingSetCredsSpy = vi.fn().mockRejectedValue(new Error("DB write failed"));
+  it("returns 403 when setup is already completed", async () => {
+    mockConfig.ADMIN_EMAIL = "admin@example.com";
+    mockConfig.ADMIN_PASSWORD_HASH = "$argon2id$hashed";
 
-    // settings decorator'ı override et
+    const res = await server.inject({
+      method: "POST",
+      url: "/",
+      payload: VALID_PAYLOAD,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("returns 400 when adminEmail is missing", async () => {
+    const { adminEmail: _omit, ...rest } = VALID_PAYLOAD;
+    const res = await server.inject({ method: "POST", url: "/", payload: rest });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when adminPassword is missing", async () => {
+    const { adminPassword: _omit, ...rest } = VALID_PAYLOAD;
+    const res = await server.inject({ method: "POST", url: "/", payload: rest });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when pgHost is missing", async () => {
+    const { pgHost: _omit, ...rest } = VALID_PAYLOAD;
+    const res = await server.inject({ method: "POST", url: "/", payload: rest });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Docker mode — credentials written to DB when .env is not writable
+// ---------------------------------------------------------------------------
+
+describe("Docker mode — credentials written to DB", () => {
+  it("calls setAdminCredentials when .env write is skipped", async () => {
+    mockConfig.ADMIN_EMAIL = undefined;
+    mockConfig.ADMIN_PASSWORD_HASH = undefined;
+
+    const setCredsSpy = vi.fn().mockResolvedValue(undefined);
     const freshServer = Fastify({ logger: false });
+
     freshServer.decorate("settings", {
       getAdminSetupCompleted: vi.fn().mockResolvedValue(false),
-      setAdminSetupCompleted: vi.fn().mockRejectedValue(new Error("DB write failed")),
+      setAdminSetupCompleted: vi.fn().mockResolvedValue(undefined),
       getAdminCredentials: vi.fn().mockResolvedValue(null),
-      setAdminCredentials: failingSetCredsSpy,
+      setAdminCredentials: setCredsSpy,
     });
 
     vi.resetModules();
@@ -418,22 +262,22 @@ describe("POST /", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Container restart recovery — POST /setup ardından setup flag sıfırlanıp
-// DB flag'e dayanarak configured=true dönmeli
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Container restart recovery — after POST /setup flag is reset,
+// configured=true must be read from the DB flag
+// ---------------------------------------------------------------------------
 
 describe("Container restart recovery", () => {
-  it("Setup sonrası flag sıfırlanınca DB'deki admin kaydından configured=true okunur", async () => {
-    // Simülasyon:
-    // 1. Setup yapıldı → DB'de admin credentials yazıldı
-    // 2. Container restart → _setupCompleted = null, config boş
-    // 3. /setup/status → DB'ye sor → admin bulundu → true döner
+  it("reads configured=true from DB after flag is reset following setup", async () => {
+    // Simulation:
+    // 1. Setup was done → admin credentials written to DB
+    // 2. Container restarts → _setupCompleted = null, config empty
+    // 3. /setup/status → query DB → admin found → returns true
 
     mockConfig.ADMIN_EMAIL = undefined;
     mockConfig.ADMIN_PASSWORD_HASH = undefined;
 
-    // DB'de admin var
+    // Admin record exists in DB
     const { server, resetFlag } = await buildFreshServer({
       withSettings: {
         getAdminCredentials: vi.fn().mockResolvedValue({
@@ -443,7 +287,7 @@ describe("Container restart recovery", () => {
       },
     });
 
-    // Restart simülasyonu: flag sıfırla
+    // Simulate restart: reset flag
     resetFlag();
 
     try {

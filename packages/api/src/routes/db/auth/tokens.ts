@@ -1,12 +1,12 @@
 /**
- * DB Auth Token routes — email+şifre ile login, JWT üretimi ve logout.
+ * DB Auth Token routes — email+password login, JWT generation and logout.
  *
  *   POST /:database/auth/login   — C-07 GoTrue snake_case session
- *   POST /:database/auth/logout  — refresh token revoke et
- *   POST /:database/auth/refresh — yeni access token al (C-08 snake_case sonraki adım)
+ *   POST /:database/auth/logout  — revoke refresh token
+ *   POST /:database/auth/refresh — obtain new access token (C-08 snake_case next step)
  *
- * Bu endpoint'ler authenticate preHandler gerektirmez — public.
- * Rate limit: 10 req/dk (brute-force koruması).
+ * These endpoints do not require the authenticate preHandler — they are public.
+ * Rate limit: 10 req/min (brute-force protection).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -19,15 +19,16 @@ import { buildSessionResponse, parseDurationMs, pickRefreshToken } from "./sessi
 import crypto from "node:crypto";
 
 /**
- * Refresh token'ı SHA-256 ile hash'ler.
+ * Hashes a refresh token with SHA-256.
  *
- * DB'de plain-text refresh token saklamak, DB dump'ı veya admin API
- * sızıntısında tüm aktif session'ların ele geçirilmesine yol açar.
- * Hash saklayarak bu riski sıfıra indiririz: hash'ten ham token türetilemez.
+ * Storing a plain-text refresh token in the DB would expose all active sessions
+ * in the event of a DB dump or admin API leak.
+ * By storing only the hash we reduce this risk to zero: the raw token cannot be
+ * derived from the hash.
  *
- * Akış:
- *   login/refresh → randomBytes(48) token üret → hash'i DB'ye yaz → ham token'ı client'a gönder
- *   refresh/logout → gelen ham token'ı hash'le → hash ile DB'de ara
+ * Flow:
+ *   login/refresh → generate randomBytes(48) token → write hash to DB → send raw token to client
+ *   refresh/logout → hash the incoming raw token → look up by hash in the DB
  */
 function hashRefreshToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -93,7 +94,7 @@ export async function authTokensRoute(server: FastifyInstance) {
       const sql = server.poolManager.getPool(database);
       await ensureAuthSchema(sql);
 
-      // Kullanıcıyı bul (hash + lockout + GoTrue user alanları)
+      // Find the user (hash + lockout + GoTrue user fields)
       const [user] = await sql`
         SELECT id, email, password_hash, role, is_active,
                email_verified, failed_attempts, locked_until,
@@ -103,7 +104,7 @@ export async function authTokensRoute(server: FastifyInstance) {
       `;
 
       if (!user) {
-        // Timing-safe: kullanıcı yoksa da hash verify maliyetini simüle et
+        // Timing-safe: simulate hash-verify cost even when the user does not exist
         await verifyPassword(
           "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           password
@@ -124,7 +125,7 @@ export async function authTokensRoute(server: FastifyInstance) {
         return reply.status(403).send({ error: "Account is disabled" });
       }
 
-      // Hesap kilit kontrolü — çok fazla başarısız deneme
+      // Account lockout check — too many failed attempts
       if (user.locked_until && new Date(user.locked_until as string) > new Date()) {
         await insertAuditLog(sql, "login_failed", user.id as string, {
           ip: req.ip,
@@ -136,8 +137,8 @@ export async function authTokensRoute(server: FastifyInstance) {
           lockedUntil: user.locked_until,
         });
       }
-
-      // email_verify_required kontrolü — getAuthSetting normalizeEdilmiş (lowercase) döner
+    // Handle DB user token separately
+      // email_verify_required check — getAuthSetting returns a normalized lowercase value
       const verifyRequired = await getAuthSetting(sql, "email_verify_required", "false");
       if (verifyRequired === "true" && !user.email_verified) {
         return reply.status(403).send({
@@ -148,7 +149,7 @@ export async function authTokensRoute(server: FastifyInstance) {
 
       const valid = await verifyPassword(user.password_hash as string, password);
       if (!valid) {
-        // Başarısız deneme sayısını artır; politika sınırını aşarsa kilitle
+        // Increment failed attempt count; lock the account if the policy threshold is exceeded
         const maxAttempts = parseInt(
           await getAuthSetting(sql, "account_lockout_attempts", "5"),
           10
@@ -178,7 +179,7 @@ export async function authTokensRoute(server: FastifyInstance) {
         return reply.status(401).send({ error: "Invalid credentials" });
       }
 
-      // Başarılı giriş — failed_attempts ve locked_until sıfırla + last_login güncelle
+      // Successful login — reset failed_attempts and locked_until + update last_login
       await sql`
         UPDATE _postgrify_auth.users
         SET last_login      = now(),
@@ -201,8 +202,7 @@ export async function authTokensRoute(server: FastifyInstance) {
         config.ACCESS_TOKEN_EXPIRY
       );
 
-      // Refresh token — DB'ye hash'ini kaydet, client'a ham token gönder.
-      // Ham token yalnızca client'ta tutulur; DB'de SHA-256 hash'i saklanır.
+      // Refresh token — store the hash in the DB, send the raw token to the client.
       const refreshToken = crypto.randomBytes(48).toString("hex");
       const refreshTokenHash = hashRefreshToken(refreshToken);
       const expiresAt = new Date(Date.now() + parseDurationMs(config.REFRESH_TOKEN_EXPIRY));
@@ -353,7 +353,7 @@ export async function authTokensRoute(server: FastifyInstance) {
       const sessionId = session.id as string;
       const sessionUserId = session.user_id as string;
 
-      // Eski token'ı revoke et (token rotation) — only if still active row
+      // Revoke the old token (token rotation) — only if the row is still active
       await sql`
         UPDATE _postgrify_auth.sessions
         SET revoked = true, revoked_at = now()

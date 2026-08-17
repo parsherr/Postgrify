@@ -1,18 +1,18 @@
 /**
- * Global Error Handler — production'da stack trace sızıntısını önler.
+ * Global Error Handler — prevents stack trace leakage in production.
  *
- * Fastify varsayılan olarak hataları otomatik serialize eder.
- * Ancak unhandled exception'larda stack trace ve iç hata mesajları
- * client'a sızabilir. Bu plugin:
+ * Fastify serializes errors automatically by default.
+ * However, in unhandled exceptions, stack traces and internal error messages
+ * can leak to the client. This plugin:
  *
- *   - Her hatayı benzersiz bir errorId ile loglar (debug için izlenebilir)
- *   - Production'da stack trace ve iç hata mesajlarını gizler
- *   - Fastify validation hatalarını (400) temiz bir formata dönüştürür
- *   - Bilinen HTTP hata kodlarını (4xx, 5xx) doğru status ile iletir
+ *   - Logs every error with a unique errorId (traceable for debugging)
+ *   - Hides stack traces and internal error details in production
+ *   - Converts Fastify validation errors (400) to a clean format
+ *   - Forwards known HTTP error codes (4xx, 5xx) with the correct status
  *
- * Güvenlik notu: hata mesajlarında dosya yolu, SQL sorgusu veya
- * iç servis adları gibi bilgiler saldırgana rehber olabilir.
- * Bu handler bunları production'da bastırır.
+ * Security note: error messages containing file paths, SQL queries, or
+ * internal service names can guide an attacker.
+ * This handler suppresses them in production.
  */
 
 import fp from "fastify-plugin";
@@ -25,10 +25,10 @@ function isProduction(): boolean {
 
 export const errorHandlerPlugin = fp(async (server: FastifyInstance) => {
   server.setErrorHandler((error: FastifyError, _req, reply) => {
-    // Her hata için benzersiz ID — support/debug için loglanır
+    // Unique ID per error — logged for support and debugging
     const errorId = crypto.randomUUID();
 
-    // Tüm hatalar sunucu tarafında tam detay ile loglanır
+    // All errors are logged server-side with full detail
     server.log.error(
       { err: error, errorId },
       `[${errorId}] ${error.message}`
@@ -36,17 +36,17 @@ export const errorHandlerPlugin = fp(async (server: FastifyInstance) => {
 
     const statusCode = error.statusCode ?? 500;
 
-    // Fastify schema validation hatası (400)
+    // Fastify schema validation error (400)
     if (error.validation) {
       return reply.status(400).send({
         error: "Validation Error",
         message: error.message,
-        // Validation detaylarını her ortamda göster — bunlar public schema bilgisi
+        // Show validation details in all environments — this is public schema information
         details: error.validation,
       });
     }
 
-    // 4xx: client hataları — mesajı ilet (Fastify'ın BusinessError'ları)
+    // 4xx: client errors — forward the message (Fastify BusinessErrors)
     if (statusCode >= 400 && statusCode < 500) {
       return reply.status(statusCode).send({
         error: error.message,
@@ -54,9 +54,9 @@ export const errorHandlerPlugin = fp(async (server: FastifyInstance) => {
       });
     }
 
-    // 5xx: server hataları
+    // 5xx: server errors
     if (isProduction()) {
-      // Production'da iç hata detaylarını gizle
+      // Hide internal error details in production
       return reply.status(statusCode).send({
         error: "Internal Server Error",
         message: "An unexpected error occurred. Please contact support.",
@@ -64,7 +64,7 @@ export const errorHandlerPlugin = fp(async (server: FastifyInstance) => {
       });
     }
 
-    // Development: tam detay
+    // Development: full detail
     return reply.status(statusCode).send({
       error: error.message,
       stack: error.stack,
@@ -72,8 +72,8 @@ export const errorHandlerPlugin = fp(async (server: FastifyInstance) => {
     });
   });
 
-  // Unhandled rejection'ları yakala — bunlar Fastify'ın errorHandler'ına düşmez
-  // ve process'i crash edebilir. Log et + graceful devam et.
+  // Catch unhandled rejections — these do not reach Fastify's errorHandler
+  // and can crash the process. Log them and continue gracefully.
   server.addHook("onError", async (_req, _reply, error) => {
     const errorId = crypto.randomUUID();
     server.log.error({ err: error, errorId }, `[onError hook] ${error.message}`);

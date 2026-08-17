@@ -1,6 +1,6 @@
 /**
- * ChangelogPage — tüm CHANGELOG.md içeriğini versiyonlara göre listeler.
- * Sidebar'daki "Changes" linkinden açılır.
+ * ChangelogPage — lists all CHANGELOG.md content grouped by version.
+ * Opened from the "Changes" link in the Sidebar.
  */
 
 import { parseChangelog } from "@/lib/changelog";
@@ -20,19 +20,19 @@ const SECTION_COLORS: Record<string, string> = {
 export default function ChangelogPage() {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-8">
-      {/* Başlık */}
+      {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-medium tracking-[-0.03em] text-white">
           Changelog
         </h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Postgrify sürüm geçmişi ve değişiklikler.
+          Postgrify version history and changes.
         </p>
       </div>
 
-      {/* Sürüm listesi */}
+      {/* Version list */}
       <div className="relative flex flex-col gap-10">
-        {/* Dikey çizgi */}
+        {/* Vertical line */}
         <div className="absolute left-[7px] top-2 bottom-2 w-px bg-zinc-800" />
 
         {ENTRIES.map((entry) => (
@@ -42,9 +42,9 @@ export default function ChangelogPage() {
               <div className="h-3.5 w-3.5 rounded-full border-2 border-zinc-700 bg-zinc-950" />
             </div>
 
-            {/* İçerik */}
+            {/* Content */}
             <div className="flex-1 pb-2">
-              {/* Versiyon başlığı */}
+              {/* Version heading */}
               <div className="flex items-baseline gap-3">
                 <span className="font-mono text-lg font-semibold text-white">
                   v{entry.version}

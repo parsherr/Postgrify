@@ -1,21 +1,21 @@
 /**
- * Image upload route'ları — PostgreSQL bytea kolonu üzerinden.
+ * Image upload routes — using a PostgreSQL bytea column.
  *
- *   POST /db/:database/:table/:column/upload  — Multipart dosya al, bytea olarak yaz
- *   GET  /db/:database/:table/:id/:column/raw — bytea oku, image olarak serve et
+ *   POST /db/:database/:table/:column/upload  — Accept a multipart file, write as bytea
+ *   GET  /db/:database/:table/:id/:column/raw — Read bytea, serve as an image
  *
- * Kullanım örneği:
- *   1. Tablonda bir bytea kolonu oluştur:
+ * Usage example:
+ *   1. Create a bytea column in your table:
  *      ALTER TABLE products ADD COLUMN photo bytea;
- *      ALTER TABLE products ADD COLUMN photo_mime text;   -- opsiyonel, önerilir
+ *      ALTER TABLE products ADD COLUMN photo_mime text;   -- optional, recommended
  *
  *   2. Upload:
  *      POST /db/mydb/products/photo/upload?id=42
- *      Content-Type: multipart/form-data  (file field adı: "file")
+ *      Content-Type: multipart/form-data  (file field name: "file")
  *
- *   3. Çekme:
+ *   3. Retrieve:
  *      GET /db/mydb/products/42/photo/raw
- *      → binary image döner, Content-Type: image/jpeg (veya photo_mime kolonundan)
+ *      → returns binary image, Content-Type: image/jpeg (or from the photo_mime column)
  */
 
 import type { FastifyInstance } from "fastify";
@@ -25,9 +25,9 @@ import { scopeGuard } from "../../middleware/scopeGuard.js";
 import { assertIdentifier } from "../../utils/identifier.js";
 
 /**
- * Magic bytes (dosya imzası) tablosu.
- * Her MIME tipi için dosyanın başındaki byte dizileri tanımlanır.
- * Birden fazla imza desteklenir (örn. JPEG birkaç farklı başlangıçla gelebilir).
+ * Magic bytes (file signature) table.
+ * Defines the leading byte sequences for each MIME type.
+ * Multiple signatures are supported (e.g. JPEG can start with several different byte patterns).
  */
 const MAGIC_BYTES: Record<string, Uint8Array[]> = {
   "image/jpeg": [
@@ -51,24 +51,24 @@ const MAGIC_BYTES: Record<string, Uint8Array[]> = {
     new Uint8Array([0x49, 0x49, 0x2A, 0x00]), // little-endian
     new Uint8Array([0x4D, 0x4D, 0x00, 0x2A]), // big-endian
   ],
-  // SVG: XML-based — magic bytes yok; sadece metin içeriği kontrol edilir
+  // SVG: XML-based — no magic bytes; only text content is checked
   "image/svg+xml": [],
 };
 
 /**
- * Buffer'ın başındaki byte'ların beklenen magic bytes ile eşleşip eşleşmediğini kontrol eder.
- * SVG gibi metin tabanlı formatlar için imza kontrolü yapılmaz (boş dizi → geç).
+ * Checks whether the leading bytes of a Buffer match the expected magic bytes.
+ * No signature check is performed for text-based formats such as SVG (empty array → pass).
  */
 function isValidMagicBytes(buffer: Buffer, mime: string): boolean {
   const signatures = MAGIC_BYTES[mime];
 
-  // Bilinen MIME tiplerinden biri ama imza listesi boşsa (SVG) → geç
+  // Known MIME type but empty signature list (SVG) → pass
   if (signatures !== undefined && signatures.length === 0) return true;
 
-  // MIME tipi tabloda yoksa → reddet
+  // MIME type not in table → reject
   if (!signatures) return false;
 
-  // WebP özel: RIFF header + offset 8'de WEBP kontrolü
+  // WebP special case: RIFF header + WEBP check at offset 8
   if (mime === "image/webp") {
     if (buffer.length < 12) return false;
     const riff = buffer.slice(0, 4);
@@ -79,7 +79,7 @@ function isValidMagicBytes(buffer: Buffer, mime: string): boolean {
     );
   }
 
-  // Genel prefix karşılaştırma
+  // General prefix comparison
   return signatures.some((sig) => {
     if (buffer.length < sig.length) return false;
     for (let i = 0; i < sig.length; i++) {
@@ -89,7 +89,7 @@ function isValidMagicBytes(buffer: Buffer, mime: string): boolean {
   });
 }
 
-/** İzin verilen MIME tipleri */
+/** Allowed MIME types */
 const ALLOWED_MIME = new Set([
   "image/jpeg",
   "image/png",
@@ -100,12 +100,12 @@ const ALLOWED_MIME = new Set([
   "image/tiff",
 ]);
 
-/** Varsayılan max dosya boyutu: 10 MB */
+/** Default maximum file size: 10 MB */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 export async function uploadRoute(server: FastifyInstance) {
-  // @fastify/multipart sadece bu scope'a register edilir.
-  // Global kayıt yapılmaz — JSON body parser'a dokunmaz.
+  // @fastify/multipart is registered only for this scope.
+  // Not registered globally — does not affect the JSON body parser.
   await server.register(multipart, {
     limits: {
       fileSize: MAX_FILE_SIZE,
@@ -174,7 +174,7 @@ export async function uploadRoute(server: FastifyInstance) {
       }
       const rowId = query.id;
 
-      // Multipart dosyayı oku
+      // Read the multipart file
       let fileData: multipart.MultipartFile;
       try {
         const part = await req.file();
@@ -200,7 +200,7 @@ export async function uploadRoute(server: FastifyInstance) {
 
       const mime = fileData.mimetype;
       if (!ALLOWED_MIME.has(mime)) {
-        // Stream'i tüket, aksi takdirde bağlantı askıda kalır
+        // Drain the stream, otherwise the connection hangs
         await fileData.toBuffer().catch(() => undefined);
         return reply.status(415).send({
           error: "Unsupported media type",
@@ -209,12 +209,12 @@ export async function uploadRoute(server: FastifyInstance) {
         });
       }
 
-      // Dosyayı tamamen belleğe al
+      // Read the entire file into memory
       const buffer = await fileData.toBuffer();
 
-      // Magic bytes kontrolü — istemci Content-Type header'ına güvenme.
-      // Saldırgan image/jpeg header'ı ile PHP/shell dosyası yükleyebilir.
-      // İlk byte'ları gerçek format ile karşılaştır.
+      // Magic bytes check — do not trust the client Content-Type header.
+      // An attacker could upload a PHP/shell file with an image/jpeg header.
+      // Compare the leading bytes against the actual format.
       if (!isValidMagicBytes(buffer, mime)) {
         return reply.status(415).send({
           error: "File content does not match declared MIME type",
@@ -224,7 +224,7 @@ export async function uploadRoute(server: FastifyInstance) {
 
       const sql = server.poolManager.getPool(dbName);
 
-      // <column>_mime kolonu var mı kontrol et — varsa MIME'ı da yaz
+      // Check if a <column>_mime column exists — if so, also write the MIME type
       const mimeColumn = `${column}_mime`;
       const [colCheck] = await sql`
         SELECT column_name
@@ -325,7 +325,7 @@ export async function uploadRoute(server: FastifyInstance) {
 
       const sql = server.poolManager.getPool(dbName);
 
-      // <column>_mime kolonu var mı?
+      // Does a <column>_mime column exist?
       const mimeColumn = `${column}_mime`;
       const [colCheck] = await sql`
         SELECT column_name
@@ -367,7 +367,7 @@ export async function uploadRoute(server: FastifyInstance) {
         });
       }
 
-      // MIME türünü belirle: DB kolonu > query param > fallback
+      // Determine MIME type: DB column > query param > fallback
       const mimeFromDb = hasMimeCol
         ? (row[mimeColumn] as string | null)
         : null;

@@ -1,14 +1,14 @@
 /**
- * useBackup — Backup ve schedule işlemleri için React Query hooks.
+ * useBackup — React Query hooks for backup and schedule operations.
  *
  * Hooks:
- *   useBackups(db)          — backup listesi
- *   useBackupSchedule(db)   — schedule konfigürasyonu
- *   useCreateBackup(db)     — manuel backup tetikleme
- *   useDeleteBackup(db)     — backup silme
- *   useRestoreBackup(db)    — backup restore (multipart)
- *   useSetBackupSchedule(db)— schedule oluştur / güncelle
- *   useDeleteBackupSchedule(db) — schedule sil
+ *   useBackups(db)          — backup list
+ *   useBackupSchedule(db)   — schedule configuration
+ *   useCreateBackup(db)     — trigger manual backup
+ *   useDeleteBackup(db)     — delete backup
+ *   useRestoreBackup(db)    — restore backup (multipart)
+ *   useSetBackupSchedule(db)— create / update schedule
+ *   useDeleteBackupSchedule(db) — delete schedule
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -23,7 +23,7 @@ const backupKeys = {
 
 // ── Read hooks ────────────────────────────────────────────────────────────────
 
-/** Belirtilen DB'nin tüm kayıtlı backup'larını döner. */
+/** Returns all registered backups for the given database. */
 export function useBackups(db: string) {
   return useQuery({
     queryKey: backupKeys.list(db),
@@ -34,7 +34,7 @@ export function useBackups(db: string) {
   });
 }
 
-/** Belirtilen DB'nin backup schedule konfigürasyonunu döner. */
+/** Returns the backup schedule configuration for the given database. */
 export function useBackupSchedule(db: string) {
   return useQuery({
     queryKey: backupKeys.schedule(db),
@@ -47,7 +47,7 @@ export function useBackupSchedule(db: string) {
 
 // ── Mutation hooks ────────────────────────────────────────────────────────────
 
-/** Manuel backup tetikler. Tamamlanınca backup listesini yeniler. */
+/** Triggers a manual backup. Invalidates the backup list on success. */
 export function useCreateBackup(db: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -58,7 +58,7 @@ export function useCreateBackup(db: string) {
   });
 }
 
-/** Belirli bir backup'ı siler. */
+/** Deletes a specific backup. */
 export function useDeleteBackup(db: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -69,14 +69,14 @@ export function useDeleteBackup(db: string) {
   });
 }
 
-/** Yüklenen .sql.gz dosyasından DB'yi restore eder. */
+/** Restores the database from an uploaded .sql.gz file. */
 export function useRestoreBackup(db: string) {
   return useMutation({
     mutationFn: (file: File) => api.restoreBackup(db, file),
   });
 }
 
-/** Schedule konfigürasyonunu kaydeder veya günceller. */
+/** Saves or updates the schedule configuration. */
 export function useSetBackupSchedule(db: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -87,7 +87,7 @@ export function useSetBackupSchedule(db: string) {
   });
 }
 
-/** Schedule'ı iptal eder ve siler. */
+/** Cancels and deletes the schedule. */
 export function useDeleteBackupSchedule(db: string) {
   const qc = useQueryClient();
   return useMutation({

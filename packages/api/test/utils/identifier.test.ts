@@ -1,5 +1,5 @@
 /**
- * Identifier validasyon testleri.
+ * Identifier validation tests.
  */
 
 import { describe, it, expect } from "vitest";
@@ -9,7 +9,7 @@ import {
 } from "../../src/utils/identifier.js";
 
 describe("isValidIdentifier", () => {
-  it("geçerli isimler için true döner", () => {
+  it("returns true for valid names", () => {
     expect(isValidIdentifier("users")).toBe(true);
     expect(isValidIdentifier("my_table")).toBe(true);
     expect(isValidIdentifier("_private")).toBe(true);
@@ -17,45 +17,45 @@ describe("isValidIdentifier", () => {
     expect(isValidIdentifier("CamelCase")).toBe(true);
   });
 
-  it("rakamla başlayan isim reddedilir", () => {
+  it("rejects a name starting with a digit", () => {
     expect(isValidIdentifier("1table")).toBe(false);
   });
 
-  it("tire (-) içeren isim reddedilir", () => {
+  it("rejects a name containing a hyphen (-)", () => {
     expect(isValidIdentifier("my-table")).toBe(false);
   });
 
-  it("nokta içeren isim reddedilir", () => {
+  it("rejects a name containing a dot (.)", () => {
     expect(isValidIdentifier("schema.table")).toBe(false);
   });
 
-  it("boş string reddedilir", () => {
+  it("rejects an empty string", () => {
     expect(isValidIdentifier("")).toBe(false);
   });
 
-  it("64 karakterden uzun isim reddedilir", () => {
+  it("rejects a name longer than 63 characters", () => {
     expect(isValidIdentifier("a".repeat(64))).toBe(false);
     expect(isValidIdentifier("a".repeat(63))).toBe(true);
   });
 
-  it("SQL reserved keyword'ler reddedilir", () => {
+  it("rejects SQL reserved keywords", () => {
     expect(isValidIdentifier("select")).toBe(false);
     expect(isValidIdentifier("DROP")).toBe(false);
     expect(isValidIdentifier("delete")).toBe(false);
     expect(isValidIdentifier("insert")).toBe(false);
   });
 
-  it("boşluk içeren isim reddedilir", () => {
+  it("rejects a name containing a space", () => {
     expect(isValidIdentifier("my table")).toBe(false);
   });
 });
 
 describe("assertIdentifier", () => {
-  it("geçerli isimde hata fırlatmaz", () => {
+  it("does not throw for a valid name", () => {
     expect(() => assertIdentifier("users", "table")).not.toThrow();
   });
 
-  it("geçersiz isimde açıklayıcı hata fırlatır", () => {
+  it("throws a descriptive error for an invalid name", () => {
     expect(() => assertIdentifier("1bad", "column")).toThrow(/Invalid column/);
   });
 });

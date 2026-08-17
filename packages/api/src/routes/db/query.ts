@@ -1,13 +1,13 @@
 /**
- * POST /db/:database/query — Ham SQL çalıştırma.
+ * POST /db/:database/query — Raw SQL execution.
  * POST /db/:database/query/explain — E-87 EXPLAIN (FORMAT JSON) plan.
  *
- * Varsayılan mod: yalnızca SELECT ifadeleri izin verilir.
- * Admin token veya "query" scope ile tam SQL (admin ayarına bağlı).
+ * Default mode: only SELECT statements are allowed.
+ * Full SQL available with an admin token or "query" scope (depends on admin setting).
  *
- * Güvenlik:
- *   - SELECT dışındaki keyword'ler blocklist ile engellenir (varsayılan)
- *   - Parametrik sorgular desteklenir: { sql, params: [] }
+ * Security:
+ *   - Non-SELECT keywords are blocked via blocklist (default)
+ *   - Parameterized queries are supported: { sql, params: [] }
  */
 
 import type { FastifyInstance } from "fastify";
@@ -19,7 +19,7 @@ import { insertAuditLog } from "./auth/provision.js";
 const BLOCKED_KEYWORDS =
   /\b(DROP|TRUNCATE|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY)\b/i;
 
-// WITH ... (INSERT|UPDATE|DELETE|...) SELECT şeklindeki writeable CTE'leri yakalar
+// Catches writable CTEs of the form WITH ... (INSERT|UPDATE|DELETE|...) SELECT
 const WRITABLE_CTE_PATTERN =
   /\bWITH\b[\s\S]*?\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER|CREATE)\b/i;
 
@@ -80,10 +80,10 @@ export async function queryRoute(server: FastifyInstance) {
   server.post(
     "/:database/query",
     {
-      // authenticateAny: admin token, DB-scoped token ve DB-user token'ları kabul eder.
-      // scopeGuard("query"): DB-user token'ları için rol-scope eşlemesini kontrol eder
-      //   (editor → query scope var; viewer → yok).
-      // authenticateAny olmadan req.dbUser hiç set edilmez → DB-user token 403 alır.
+      // authenticateAny: accepts admin token, DB-scoped token, and DB-user tokens.
+      // scopeGuard("query"): checks the role-scope mapping for DB-user tokens
+      //   (editor → has query scope; viewer → does not).
+      // Without authenticateAny, req.dbUser is never set → DB-user token gets 403.
       preHandler: [server.authenticateAny, scopeGuard("query")],
       schema: {
         description:
@@ -167,7 +167,7 @@ export async function queryRoute(server: FastifyInstance) {
               },
             });
           } catch {
-            // Auth schema olmayan DB'lerde audit log yazılamaz
+            // Audit log cannot be written on DBs without an auth schema
           }
         }
       }

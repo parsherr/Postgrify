@@ -1,5 +1,5 @@
 /**
- * Veritabanı yönetim hook'ları.
+ * Database management hooks.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -65,4 +65,3 @@ export function useRotateApiKey() {
     },
   });
 }
-

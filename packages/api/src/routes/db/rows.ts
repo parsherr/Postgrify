@@ -1,19 +1,19 @@
 /**
- * Row CRUD route'ları.
+ * Row CRUD routes.
  *
- * C-01 (aktif): GET list → PostgREST array + Content-Range + Prefer:count
+ * C-01 (active): GET list → PostgREST array + Content-Range + Prefer:count
  * E-23: Accept: text/csv → CSV body
- * Mutations: legacy body shape korunuyor (sonraki turtle adımlarında Prefer eklenecek)
+ * Mutations: legacy body shape preserved (Prefer will be added in upcoming steps)
  *
- *   GET    /db/:database/:table
- *   HEAD   /db/:database/:table   (E-01)
- *   OPTIONS /db/:database/:table  (E-02 — Allow, no DB)
- *   POST   /db/:database/:table
- *   PATCH  /db/:database/:table
- *   DELETE /db/:database/:table
- *   GET    /db/:database/:table/:id
- *   PUT    /db/:database/:table/:id
- *   DELETE /db/:database/:table/:id
+ *   GET     /db/:database/:table
+ *   HEAD    /db/:database/:table   (E-01)
+ *   OPTIONS /db/:database/:table   (E-02 — Allow, no DB)
+ *   POST    /db/:database/:table
+ *   PATCH   /db/:database/:table
+ *   DELETE  /db/:database/:table
+ *   GET     /db/:database/:table/:id
+ *   PUT     /db/:database/:table/:id
+ *   DELETE  /db/:database/:table/:id
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -757,7 +757,7 @@ export async function rowsRoute(server: FastifyInstance) {
       const pkCol = resolvePkColumn(pk);
       const preferHeader = req.headers.prefer;
       const prefer = parsePrefer(preferHeader);
-      // Prefer yoksa representation (GUI geriye uyum); açık Prefer honor edilir
+      // Default to representation when Prefer is absent (GUI backward compat); explicit Prefer is honoured
       const returnMode =
         preferHeader === undefined || preferHeader === ""
           ? "representation"

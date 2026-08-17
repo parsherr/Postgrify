@@ -1,9 +1,9 @@
 /**
- * SEC-6: Global error handler testleri.
+ * SEC-6: Global error handler tests.
  *
- * Production'da stack trace'ler ve iç hata mesajları gizlenmeli.
- * Development'ta tam hata detayı dönmeli.
- * 4xx hataları mesajını ileterek 5xx'leri gizlemeli.
+ * Stack traces and internal error messages must be hidden in production.
+ * Full error detail must be returned in development.
+ * 4xx errors pass their message through; 5xx errors are hidden.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -19,7 +19,7 @@ async function buildServer(env: "development" | "production" | "test") {
   const server = Fastify({ logger: false });
   await server.register(errorHandlerPlugin);
 
-  // Test route'ları
+  // Test routes
   server.get("/throw-500", async () => {
     throw new Error("Internal database connection failed with secret key: abc123");
   });
@@ -38,24 +38,24 @@ async function buildServer(env: "development" | "production" | "test") {
 }
 
 describe("SEC-6: Error handler — production mode", () => {
-  it("500 hatası internal mesajı gizler", async () => {
+  it("500 error hides internal message", async () => {
     const server = await buildServer("production");
     const res = await server.inject({ method: "GET", url: "/throw-500" });
 
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    // Stack trace production'da olmamalı
+    // Stack trace must not be present in production
     expect(body.stack).toBeUndefined();
-    // Internal hata mesajı sızdırılmamalı
+    // Internal error message must not be leaked
     expect(body.error).not.toContain("database connection failed");
     expect(body.error).not.toContain("secret key");
-    // Generic mesaj
+    // Generic message
     expect(body.error).toBe("Internal Server Error");
-    // errorId olmalı (support için izlenebilir)
+    // errorId must be present (traceable for support)
     expect(body.errorId).toBeDefined();
   });
 
-  it("errorId UUID formatında", async () => {
+  it("errorId is in UUID format", async () => {
     const server = await buildServer("production");
     const res = await server.inject({ method: "GET", url: "/throw-500" });
     const body = JSON.parse(res.body);
@@ -64,19 +64,19 @@ describe("SEC-6: Error handler — production mode", () => {
 });
 
 describe("SEC-6: Error handler — development mode", () => {
-  it("development'ta stack trace dönebilir", async () => {
+  it("stack trace may be returned in development", async () => {
     const server = await buildServer("development");
     const res = await server.inject({ method: "GET", url: "/throw-500" });
 
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    // Development'ta stack veya error mesajı görünebilir
+    // Stack or error message may be visible in development
     expect(body.errorId).toBeDefined();
   });
 });
 
 describe("SEC-6: Error handler — HTTP status codes", () => {
-  it("4xx status kodu korunur", async () => {
+  it("4xx status code is preserved", async () => {
     const server = await buildServer("production");
     const res = await server.inject({ method: "GET", url: "/throw-fastify-error" });
 
@@ -85,12 +85,12 @@ describe("SEC-6: Error handler — HTTP status codes", () => {
     expect(body.errorId).toBeDefined();
   });
 
-  it("200 response normal dönmeli", async () => {
-    // Kendi server'ını kur — önceki buildServer çağrısından bağımsız
+  it("200 response returns normally", async () => {
+    // Set up its own server — independent of previous buildServer calls
     vi.stubEnv("NODE_ENV", "production");
     const server = Fastify({ logger: false });
     await server.register(errorHandlerPlugin);
-    // Route'ları ready() öncesinde ekle
+    // Add routes before ready()
     server.get("/ok", async () => ({ ok: true }));
     await server.ready();
 
@@ -102,8 +102,8 @@ describe("SEC-6: Error handler — HTTP status codes", () => {
   });
 });
 
-describe("SEC-6: errorHandlerPlugin.ts kod kontrolü", () => {
-  it("production'da stack trace gizleme kodu mevcut", async () => {
+describe("SEC-6: errorHandlerPlugin.ts code check", () => {
+  it("stack trace hiding code is present in production", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");
@@ -118,7 +118,7 @@ describe("SEC-6: errorHandlerPlugin.ts kod kontrolü", () => {
     expect(content).toMatch(/randomUUID/);
   });
 
-  it("errorHandlerPlugin plugins/index.ts'e kayıtlı", async () => {
+  it("errorHandlerPlugin is registered in plugins/index.ts", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");

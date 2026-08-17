@@ -1,5 +1,5 @@
 /**
- * IP adresi yardımcı fonksiyonları — sıfır bağımlılık.
+ * IP address utility functions — zero dependencies.
  *
  * Desteklenen formatlar:
  *   - IPv4 exact:   "192.168.1.100"
@@ -7,7 +7,7 @@
  *   - IPv6 exact:   "::1", "2001:db8::1"
  *   - IPv6 CIDR:    "2001:db8::/32"
  *
- * Kullanım:
+ * Usage:
  *   isIpAllowed("1.2.3.4", { mode: "allowlist", ips: ["1.2.3.0/24"] }) // true
  */
 
@@ -15,24 +15,24 @@ export type IpAllowlistMode = "everyone" | "same_network" | "allowlist";
 
 export interface IpAllowlistConfig {
   mode: IpAllowlistMode;
-  /** allowlist modunda geçerli IP/CIDR kuralları. Diğer modlarda görmezden gelinir. */
+  /** Valid IP/CIDR rules in allowlist mode. Ignored in other modes. */
   ips: string[];
 }
 
-/** Varsayılan config — herkese açık (geriye dönük uyumluluk). */
+/** Default config — open to everyone (backward compatibility). */
 export const DEFAULT_IP_ALLOWLIST: IpAllowlistConfig = {
   mode: "everyone",
   ips: [],
 };
 
-/** Maksimum izin verilen kural sayısı (DoS önlemi). */
+/** Maximum number of allowed rules (DoS prevention). */
 const MAX_RULES = 100;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IPv4 yardımcıları
+// IPv4 helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** IPv4 adresi 32-bit sayıya çevirir. Geçersizse null döner. */
+/** Converts an IPv4 address to a 32-bit number. Returns null if invalid. */
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split(".");
   if (parts.length !== 4) return null;
@@ -45,13 +45,13 @@ function ipv4ToInt(ip: string): number | null {
   return result >>> 0; // unsigned 32-bit
 }
 
-/** IPv4 adresinin geçerliliğini kontrol eder. */
+/** Checks whether an IPv4 address is valid. */
 export function isValidIpv4(ip: string): boolean {
   return ipv4ToInt(ip) !== null;
 }
 
 /**
- * IPv4 adresinin belirtilen CIDR bloğunda olup olmadığını kontrol eder.
+ * Checks whether an IPv4 address is within the specified CIDR block.
  * @example isIpv4InCidr("192.168.1.50", "192.168.1.0/24") // true
  */
 export function isIpv4InCidr(ip: string, cidr: string): boolean {
@@ -75,12 +75,12 @@ export function isIpv4InCidr(ip: string, cidr: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IPv6 yardımcıları
+// IPv6 helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * IPv6 adresini normalize eder (:: expansion, lowercase).
- * Geçersiz format için null döner.
+ * Returns null for invalid format.
  */
 function normalizeIpv6(ip: string): string | null {
   // Temel format kontrolleri
@@ -89,10 +89,10 @@ function normalizeIpv6(ip: string): string | null {
   // :: expand
   let expanded = ip.toLowerCase();
 
-  // IPv4-mapped IPv6 (::ffff:1.2.3.4) → sadece IPv4 parçasını al
+  // IPv4-mapped IPv6 (::ffff:1.2.3.4) → extract only the IPv4 part
   const ipv4Mapped = expanded.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   if (ipv4Mapped) {
-    // IPv4-mapped adresi IPv4 olarak işle
+    // Treat IPv4-mapped address as IPv4
     return `::ffff:${ipv4Mapped[1]}`;
   }
 
@@ -114,7 +114,7 @@ function normalizeIpv6(ip: string): string | null {
     expanded = parts.map((p) => p.padStart(4, "0")).join(":");
   }
 
-  // 8 grup × 4 hex = geçerli
+  // 8 groups × 4 hex = valid
   const parts = expanded.split(":");
   if (parts.length !== 8) return null;
   for (const p of parts) {
@@ -124,19 +124,19 @@ function normalizeIpv6(ip: string): string | null {
   return expanded;
 }
 
-/** Normalize edilmiş IPv6 adresini BigInt'e çevirir. */
+/** Converts a normalised IPv6 address to a BigInt. */
 function ipv6ToBigInt(normalized: string): bigint {
   const hex = normalized.replace(/:/g, "");
   return BigInt("0x" + hex);
 }
 
-/** IPv6 adresinin geçerliliğini kontrol eder. */
+/** Checks whether an IPv6 address is valid. */
 export function isValidIpv6(ip: string): boolean {
   return normalizeIpv6(ip) !== null;
 }
 
 /**
- * IPv6 adresinin belirtilen CIDR bloğunda olup olmadığını kontrol eder.
+ * Checks whether an IPv6 address is within the specified CIDR block.
  * @example isIpv6InCidr("2001:db8::1", "2001:db8::/32") // true
  */
 export function isIpv6InCidr(ip: string, cidr: string): boolean {
@@ -161,15 +161,15 @@ export function isIpv6InCidr(ip: string, cidr: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Geçerlilik kontrolleri
+// Validity checks
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** IP veya CIDR string'inin geçerli olup olmadığını kontrol eder. */
+/** Checks whether an IP or CIDR string is valid. */
 export function isValidIpOrCidr(value: string): boolean {
   if (!value || typeof value !== "string") return false;
 
   if (value.includes("/")) {
-    // CIDR formatı
+    // CIDR format
     const [ip, prefix] = value.split("/");
     const prefixNum = parseInt(prefix, 10);
 
@@ -191,7 +191,7 @@ export function isValidIpOrCidr(value: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * İstemci IP'sinin belirli bir kural listesinde olup olmadığını kontrol eder.
+ * Checks whether the client IP matches any rule in the given list.
  * IPv4-mapped IPv6 adresleri (::ffff:1.2.3.4) otomatik olarak IPv4'e normalize edilir.
  */
 export function isIpInRules(clientIp: string, rules: string[]): boolean {
@@ -213,9 +213,9 @@ export function isIpInRules(clientIp: string, rules: string[]): boolean {
         if (isIpv4InCidr(ip, rule)) return true;
       }
     } else {
-      // Exact match — normalize karşılaştırma
+      // Exact match — normalised comparison
       if (ip === rule) return true;
-      // IPv6 normalize karşılaştırma
+      // Normalised IPv6 comparison
       if (ip.includes(":") && rule.includes(":")) {
         const normIp = normalizeIpv6(ip);
         const normRule = normalizeIpv6(rule);
@@ -229,7 +229,7 @@ export function isIpInRules(clientIp: string, rules: string[]): boolean {
 
 /**
  * Config'i parse edip validate eder.
- * Geçersiz format için hata fırlatır.
+ * Throws for invalid format.
  */
 export function parseIpAllowlist(raw: unknown): IpAllowlistConfig {
   if (!raw || typeof raw !== "object") {

@@ -1,11 +1,11 @@
 /**
- * Admin backup route'ları — /admin/backup/*
+ * Admin backup routes — /admin/backup/*
  *
- * Endpoint'ler:
- *   GET  /admin/backup/overview — Tüm DB'lerin son backup durumu + aktif schedule sayısı
- *   POST /admin/backup/run-all  — Tüm aktif schedule'lı DB'ler için anlık backup tetikle
+ * Endpoints:
+ *   GET  /admin/backup/overview — Latest backup status for all DBs + active schedule count
+ *   POST /admin/backup/run-all  — Trigger an immediate backup for all DBs with an active schedule
  *
- * Admin token gerektirir (authenticateAdmin preHandler route group seviyesinde uygulanır).
+ * Requires admin token (authenticateAdmin preHandler applied at route group level).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -84,7 +84,7 @@ export async function adminBackupRoute(server: FastifyInstance) {
     asyncHandler(async (_req, reply) => {
       const scheduledDbs = server.backupScheduler.activeSchedules();
 
-      // Arka planda başlat — sonuçları beklemiyoruz (202 Accepted)
+      // Start in background — we do not await the results (202 Accepted)
       for (const dbName of scheduledDbs) {
         const sql = server.poolManager.getPool(dbName);
         server.backupService

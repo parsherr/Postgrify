@@ -1,13 +1,13 @@
 /**
- * Email Service — SMTP üzerinden işlemsel email gönderimi.
+ * Email Service — transactional email delivery via SMTP.
  *
- * SMTP_HOST ortam değişkeni yoksa servis "devre dışı" modda çalışır:
- * gönderim yapılmaz ama token'lar üretilir ve console'a loglanır
- * (geliştirme ortamı için).
+ * When SMTP_HOST is not set the service runs in "disabled" mode:
+ * no emails are sent but tokens are generated and logged to the console
+ * (for development environments).
  *
- * Desteklenen email türleri:
- *   - Email doğrulama (signup verify)
- *   - Şifre sıfırlama
+ * Supported email types:
+ *   - Email verification (signup verify)
+ *   - Password reset
  *   - Magic link
  */
 
@@ -40,13 +40,13 @@ function getTransporter(): nodemailer.Transporter | null {
 }
 
 /**
- * Email gönderir. SMTP yapılandırılmamışsa geliştirme modunda console'a yazar.
+ * Sends an email. Writes to the console in development mode when SMTP is not configured.
  */
 export async function sendEmail(opts: EmailOptions): Promise<void> {
   const t = getTransporter();
 
   if (!t) {
-    // Dev modu: SMTP yok, token'ı logla
+    // Dev mode: no SMTP, log the token
     console.log(`[EmailService] SMTP not configured — would send email:`);
     console.log(`  To:      ${opts.to}`);
     console.log(`  Subject: ${opts.subject}`);
@@ -63,7 +63,7 @@ export async function sendEmail(opts: EmailOptions): Promise<void> {
   });
 }
 
-// ── Email şablonları ─────────────────────────────────────────────────────────
+// ── Email templates ───────────────────────────────────────────────────────────
 
 export function buildVerifyEmail(opts: {
   appUrl: string;
@@ -74,18 +74,18 @@ export function buildVerifyEmail(opts: {
   const url = `${opts.appUrl}/db/${opts.database}/auth/verify?token=${opts.token}`;
   return {
     to: opts.email,
-    subject: "Email adresinizi doğrulayın",
-    text: `Email adresinizi doğrulamak için bu linke tıklayın: ${url}`,
+    subject: "Verify your email address",
+    text: `Click this link to verify your email address: ${url}`,
     html: emailTemplate({
-      title: "Email Doğrulama",
-      preheader: "Postgrify hesabınızı etkinleştirin.",
+      title: "Email Verification",
+      preheader: "Activate your Postgrify account.",
       body: `
-        <p>Merhaba,</p>
-        <p>Aşağıdaki butona tıklayarak email adresinizi doğrulayın.</p>
-        <p>Bu link <strong>24 saat</strong> geçerlidir.</p>
+        <p>Hello,</p>
+        <p>Click the button below to verify your email address.</p>
+        <p>This link is valid for <strong>24 hours</strong>.</p>
       `,
       ctaUrl: url,
-      ctaText: "Email Adresimi Doğrula",
+      ctaText: "Verify my email address",
     }),
   };
 }
@@ -128,23 +128,23 @@ export function buildMagicLinkEmail(opts: {
   const url = `${opts.appUrl}/db/${opts.database}/auth/magic-link/verify?token=${opts.token}`;
   return {
     to: opts.email,
-    subject: "Giriş linkiniz",
-    text: `Giriş yapmak için bu linke tıklayın: ${url}\n\nBu link 15 dakika geçerlidir.`,
+    subject: "Your sign-in link",
+    text: `Click this link to sign in: ${url}\n\nThis link is valid for 15 minutes.`,
     html: emailTemplate({
-      title: "Şifresiz Giriş",
-      preheader: "Tek tıkla giriş yapın.",
+      title: "Passwordless Sign-In",
+      preheader: "Sign in with a single click.",
       body: `
-        <p>Merhaba,</p>
-        <p>Aşağıdaki butona tıklayarak şifresiz giriş yapın.</p>
-        <p>Bu link <strong>15 dakika</strong> geçerlidir ve yalnızca bir kez kullanılabilir.</p>
+        <p>Hello,</p>
+        <p>Click the button below to sign in without a password.</p>
+        <p>This link is valid for <strong>15 minutes</strong> and can only be used once.</p>
       `,
       ctaUrl: url,
-      ctaText: "Giriş Yap",
+      ctaText: "Sign In",
     }),
   };
 }
 
-// ── HTML şablon yardımcısı ───────────────────────────────────────────────────
+// ── HTML template helper ─────────────────────────────────────────────────────
 
 function emailTemplate(opts: {
   title: string;
@@ -184,7 +184,7 @@ function emailTemplate(opts: {
                 </a>
               </div>
               <p style="font-size:12px;color:#52525b;margin:0;">
-                Buton çalışmıyorsa bu URL'yi kopyalayın:<br>
+                If the button does not work, copy this URL:<br>
                 <a href="${opts.ctaUrl}" style="color:#71717a;word-break:break-all;">${opts.ctaUrl}</a>
               </p>
             </td>

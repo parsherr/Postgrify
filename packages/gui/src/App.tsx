@@ -1,5 +1,5 @@
 /**
- * Uygulama kökü — routing ve layout.
+ * Application root — routing and layout.
  */
 
 import { useEffect } from "react";
@@ -32,8 +32,8 @@ const queryClient = new QueryClient({
 });
 
 /**
- * api.ts'e token accessor'larını inject eder.
- * AuthContext mount olduğunda bir kez çalışır.
+ * Injects token accessors into api.ts.
+ * Runs once when AuthContext mounts.
  */
 function TokenInjector() {
   const { getAccessToken, setAccessToken } = useAuthContext();
@@ -46,10 +46,10 @@ function TokenInjector() {
 }
 
 /**
- * Kimlik doğrulaması gerekli sayfalar.
- * - isLoading: refresh token kontrol ediliyor → boş bekle
- * - isAuthenticated: accessToken memory'de var → render et
- * - aksi hâlde login'e yönlendir
+ * Pages that require authentication.
+ * - isLoading: refresh token is being checked → show spinner
+ * - isAuthenticated: accessToken is in memory → render
+ * - otherwise: redirect to login
  */
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthContext();
@@ -72,19 +72,19 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * SetupGuard — uygulama ilk yüklendiğinde /setup/status kontrol eder.
- * configured=false ise tüm route'ları /setup'a yönlendirir.
- * configured=true ise normal akış devam eder.
+ * SetupGuard — checks /setup/status on initial app load.
+ * If configured=false, redirects all routes to /setup.
+ * If configured=true, normal flow continues.
  *
- * isLoading ve isError (API henüz hazır değil, retry devam ediyor) → spinner.
- * Tüm retry'lar bitip hâlâ hata varsa → setup sayfasına yönlendirir.
- * Bu sayede "API henüz ayakta değil" durumu setup sayfası açmasına yol açmaz.
+ * isLoading and isError (API not ready yet, retries ongoing) → spinner.
+ * If all retries are exhausted and still erroring → redirects to setup page.
+ * This prevents "API not yet available" from incorrectly triggering the setup page.
  */
 function SetupGuard({ children }: { children: React.ReactNode }) {
   const { data, isLoading, isError, failureCount } = useSetupStatus();
 
-  // API'ye ulaşılamıyor: retry'lar sürüyor → spinner göster, setup'a atma
-  // failureCount < 5: henüz tüm retry'lar bitmedi
+  // API unreachable: retries ongoing → show spinner, don't redirect to setup
+  // failureCount < 5: not all retries exhausted yet
   if (isLoading || (isError && failureCount < 5)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -93,7 +93,7 @@ function SetupGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Kurulum tamamlanmamış (veya tüm retry'lar başarısız — API tamamen erişilemez)
+  // Setup not complete (or all retries failed — API completely unreachable)
   if (!data?.configured) {
     return (
       <Routes>

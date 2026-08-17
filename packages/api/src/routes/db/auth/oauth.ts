@@ -1,11 +1,11 @@
 /**
  * OAuth flow:
  *
- *   GET /:database/auth/oauth/:provider           — provider'a redirect
- *   GET /:database/auth/oauth/:provider/callback  — code exchange, session oluştur
+ *   GET /:database/auth/oauth/:provider           — redirect to provider
+ *   GET /:database/auth/oauth/:provider/callback  — code exchange, create session
  *
- * State parametresi CSRF koruması için kullanılır (opaque token, session'a bağlı).
- * Provider config DB'den okunur (_postgrify_auth.oauth_providers).
+ * The state parameter is used for CSRF protection (opaque token, bound to the session).
+ * Provider config is read from the DB (_postgrify_auth.oauth_providers).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -21,13 +21,13 @@ import crypto from "node:crypto";
 /**
  * OAuth CSRF state store.
  *
- * Redis varsa: state'ler Redis'te TTL ile saklanır — restart ve multi-instance'ta kalıcı.
- * Redis yoksa: in-memory Map fallback — tek instance, restart'ta sıfırlanır.
+ * With Redis: states are stored in Redis with a TTL — persistent across restarts and multiple instances.
+ * Without Redis: in-memory Map fallback — single instance, resets on restart.
  *
- * State değeri JSON string olarak saklanır: { database, provider, exp }
+ * State value is stored as a JSON string: { database, provider, exp }
  */
 
-const STATE_TTL_SECONDS = 10 * 60; // 10 dakika
+const STATE_TTL_SECONDS = 10 * 60; // 10 minutes
 
 interface OAuthState {
   database: string;
@@ -80,10 +80,10 @@ async function stateDel(
   }
 }
 
-// In-memory fallback (Redis yoksa)
+// In-memory fallback (when Redis is unavailable)
 const memStateStore = new Map<string, OAuthState>();
 
-// In-memory TTL temizliği
+// In-memory TTL cleanup
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of memStateStore) {
@@ -94,8 +94,8 @@ setInterval(() => {
 export async function authOAuthRoute(server: FastifyInstance) {
   const jwtService = new JwtService(() => config.JWT_SECRET);
 
-  // Redis client — state store için (varsa).
-  // Redis yoksa memStateStore fallback kullanılır.
+  // Redis client — for the state store (if available).
+  // Falls back to memStateStore when Redis is unavailable.
   let redisClient: import("ioredis").Redis | null = null;
   if (config.REDIS_URL) {
     try {
@@ -215,7 +215,7 @@ export async function authOAuthRoute(server: FastifyInstance) {
       const { database, provider } = req.params as { database: string; provider: string };
       const { code, state } = req.query as { code: string; state: string };
 
-      // CSRF kontrolü — state Redis veya in-memory store'dan al, tek kullanımlık sil
+    // CSRF protection: validate state
       const stateData = await stateGet(redisClient, memStateStore, state);
       if (!stateData || stateData.database !== database || stateData.provider !== provider) {
         return reply.status(400).send({ error: "Invalid or expired OAuth state" });
@@ -250,7 +250,7 @@ export async function authOAuthRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "OAuth authentication failed" });
       }
 
-      // Kullanıcıyı bul veya oluştur
+    // Find or create user
       let [user] = await sql`
         SELECT id, email, role, is_active
         FROM _postgrify_auth.users
@@ -271,7 +271,7 @@ export async function authOAuthRoute(server: FastifyInstance) {
         `;
         isNewUser = true;
       } else {
-        // Mevcut kullanıcının OAuth bilgilerini güncelle
+        // Update the existing user's OAuth information
         await sql`
           UPDATE _postgrify_auth.users
           SET
@@ -288,7 +288,7 @@ export async function authOAuthRoute(server: FastifyInstance) {
         return reply.status(403).send({ error: "Account is disabled" });
       }
 
-      // Session oluştur
+    // Create session and return token
       const accessToken = await jwtService.signDbUserToken(
         database,
         user.id as string,

@@ -1,6 +1,6 @@
 /**
- * Sidebar — tree-nav ile DB/tablo navigasyonu.
- * VSCode tarzı alt panel (slide-up mini SQL editörü) ve version satırı içerir.
+ * Sidebar — tree-nav for DB/table navigation.
+ * Includes a VSCode-style bottom panel (slide-up mini SQL editor) and version line.
  */
 
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -28,12 +28,12 @@ const VERSION = (import.meta as unknown as { env: { VITE_APP_VERSION?: string } 
 
 const navItems = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
-  { label: "Veritabanları", to: "/databases", icon: Database },
-  { label: "SQL Editörü", to: "/query", icon: Code2 },
+  { label: "Databases", to: "/databases", icon: Database },
+  { label: "SQL Editor", to: "/query", icon: Code2 },
   { label: "API Keys", to: "/api-keys", icon: KeyRound },
 ];
 
-/** Tek bir veritabanının sidebar satırını gösterir */
+/** Renders the sidebar row for a single database */
 function DbTreeNode({
   dbName,
   collapsed,
@@ -92,9 +92,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
   return (
     <div className="flex h-full flex-col text-sm">
-      {/* Navigasyon */}
+      {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Üst nav */}
+        {/* Top nav */}
         <nav className="space-y-0.5 px-2">
           {navItems.map(({ label, to, icon: Icon }) => {
             const active =
@@ -157,22 +157,22 @@ export function Sidebar({ collapsed }: SidebarProps) {
                   )}
                 >
                   <Plus className="h-3.5 w-3.5 shrink-0" />
-                  {!collapsed && <span className="text-xs">Veritabanı Ekle</span>}
+                  {!collapsed && <span className="text-xs">Add Database</span>}
                 </Link>
               </TooltipTrigger>
               {collapsed && (
-                <TooltipContent side="right">Veritabanı Ekle</TooltipContent>
+                <TooltipContent side="right">Add Database</TooltipContent>
               )}
             </Tooltip>
           </TooltipProvider>
         </div>
       </div>
 
-      {/* Alt alan — version */}
+      {/* Bottom area — version */}
       <div className="flex flex-col">
         <Separator />
 
-        {/* API Docs — harici link */}
+        {/* API Docs — external link */}
         <div className="px-2 py-0.5">
           <TooltipProvider delayDuration={0}>
             <Tooltip>
@@ -197,7 +197,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
           </TooltipProvider>
         </div>
 
-        {/* Changes */}
+        {/* Changelog */}
         <div className="px-2 py-0.5">
           <TooltipProvider delayDuration={0}>
             <Tooltip>
@@ -233,17 +233,17 @@ export function Sidebar({ collapsed }: SidebarProps) {
                   )}
                 >
                   <LogOut className="h-3.5 w-3.5 shrink-0" />
-                  {!collapsed && <span>Çıkış</span>}
+                  {!collapsed && <span>Logout</span>}
                 </button>
               </TooltipTrigger>
               {collapsed && (
-                <TooltipContent side="right">Çıkış</TooltipContent>
+                <TooltipContent side="right">Logout</TooltipContent>
               )}
             </Tooltip>
           </TooltipProvider>
         </div>
 
-        {/* Version satırı */}
+        {/* Version line */}
         {!collapsed && (
           <div className="flex items-center justify-between border-t border-zinc-800 px-3 py-1.5">
             <span className="font-mono text-2xs text-zinc-600">

@@ -1,5 +1,5 @@
 /**
- * ScopeGuard middleware testleri.
+ * ScopeGuard middleware tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -13,7 +13,7 @@ function buildServer(userOverride?: Partial<JwtPayload> | null) {
   s.decorateRequest("user", null);
   s.decorateRequest("dbName", null);
 
-  // Her request'te user ve dbName'i set et
+  // Set user and dbName on every request
   s.addHook("preHandler", async (req) => {
     req.dbName = "project1";
     req.user = userOverride !== undefined
@@ -28,7 +28,7 @@ function buildServer(userOverride?: Partial<JwtPayload> | null) {
 }
 
 describe("scopeGuard", () => {
-  it("doğru scope ile geçer", async () => {
+  it("passes with the correct scope", async () => {
     const s = buildServer();
     await s.ready();
     const res = await s.inject({ method: "GET", url: "/test" });
@@ -36,7 +36,7 @@ describe("scopeGuard", () => {
     await s.close();
   });
 
-  it("admin token tüm scope'ları geçer", async () => {
+  it("admin token passes all scopes", async () => {
     const s = buildServer({ role: "admin" } as JwtPayload);
     await s.ready();
     const res = await s.inject({ method: "GET", url: "/delete" });
@@ -44,7 +44,7 @@ describe("scopeGuard", () => {
     await s.close();
   });
 
-  it("eksik scope ile 403 döner", async () => {
+  it("returns 403 with a missing scope", async () => {
     const s = buildServer({
       role: "db",
       sub: "project1",
@@ -57,10 +57,10 @@ describe("scopeGuard", () => {
     await s.close();
   });
 
-  it("farklı DB'ye ait token 403 döner", async () => {
+  it("returns 403 for a token belonging to a different DB", async () => {
     const s = buildServer({
       role: "db",
-      sub: "project2",  // project1 için değil
+      sub: "project2",  // not for project1
       scope: ["read", "write"],
     } as JwtPayload);
     await s.ready();
@@ -70,7 +70,7 @@ describe("scopeGuard", () => {
     await s.close();
   });
 
-  it("user null ise 401 döner", async () => {
+  it("returns 401 when user is null", async () => {
     const s = buildServer(null);
     await s.ready();
     const res = await s.inject({ method: "GET", url: "/test" });

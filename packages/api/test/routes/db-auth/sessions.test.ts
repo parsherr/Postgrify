@@ -1,11 +1,11 @@
 /**
- * Per-DB session yönetim route testleri.
+ * Per-DB session management route tests.
  *
- * GET    /:database/auth/sessions       — aktif session listesi
- * DELETE /:database/auth/sessions/:id  — belirli session revoke
- * DELETE /:database/auth/sessions?user_id= — kullanıcının tüm session'ları
+ * GET    /:database/auth/sessions       — active session list
+ * DELETE /:database/auth/sessions/:id  — revoke a specific session
+ * DELETE /:database/auth/sessions?user_id= — all sessions for a user
  *
- * schema scope gerektirir.
+ * Requires schema scope.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
@@ -105,7 +105,7 @@ const MOCK_SESSIONS = [
 ];
 
 describe("GET /:database/auth/sessions", () => {
-  it("Admin token → 200, session listesi döner", async () => {
+  it("Admin token → 200, returns session list", async () => {
     sqlFnRef
       .mockResolvedValueOnce(MOCK_SESSIONS)
       .mockResolvedValueOnce([{ count: 1 }]);
@@ -136,7 +136,7 @@ describe("GET /:database/auth/sessions", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("schema scope yok → 403 Insufficient scope", async () => {
+  it("no schema scope → 403 Insufficient scope", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/sessions",
@@ -146,7 +146,7 @@ describe("GET /:database/auth/sessions", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("Token yok → 401", async () => {
+  it("No token → 401", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/sessions",
@@ -156,12 +156,12 @@ describe("GET /:database/auth/sessions", () => {
   });
 });
 
-// UUID v4 formatında test değerleri — UUID validation artık zorunlu
+// Test values in UUID v4 format — UUID validation is now required
 const TEST_SESSION_UUID = "550e8400-e29b-41d4-a716-446655440000";
 const TEST_USER_UUID    = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
 
 describe("DELETE /:database/auth/sessions/:id", () => {
-  it("Admin token ile belirli session revoke → 204", async () => {
+  it("revokes a specific session with admin token → 204", async () => {
     sqlFnRef.mockResolvedValue([]);
 
     const res = await server.inject({
@@ -174,7 +174,7 @@ describe("DELETE /:database/auth/sessions/:id", () => {
     expect(res.body).toBe("");
   });
 
-  it("geçersiz UUID formatı → 400", async () => {
+  it("invalid UUID format → 400", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/testdb/auth/sessions/not-a-uuid",
@@ -184,7 +184,7 @@ describe("DELETE /:database/auth/sessions/:id", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("schema scope yok → 403", async () => {
+  it("no schema scope → 403", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: `/testdb/auth/sessions/${TEST_SESSION_UUID}`,
@@ -196,7 +196,7 @@ describe("DELETE /:database/auth/sessions/:id", () => {
 });
 
 describe("DELETE /:database/auth/sessions?user_id=", () => {
-  it("user_id ile tüm session'ları revoke → 204", async () => {
+  it("revokes all sessions for a user_id → 204", async () => {
     sqlFnRef.mockResolvedValue([]);
 
     const res = await server.inject({
@@ -208,7 +208,7 @@ describe("DELETE /:database/auth/sessions?user_id=", () => {
     expect(res.statusCode).toBe(204);
   });
 
-  it("geçersiz user_id UUID formatı → 400", async () => {
+  it("invalid user_id UUID format → 400", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/testdb/auth/sessions?user_id=user-uuid-1",

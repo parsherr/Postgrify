@@ -1,10 +1,10 @@
 /**
- * Query Builder — Gelen HTTP parametrelerini güvenli PostgreSQL sorgularına dönüştürür.
+ * Query Builder — converts incoming HTTP parameters into safe PostgreSQL queries.
  *
- * Tüm değerler parametrik ($1, $2, ...) olarak geçirilir — SQL injection imkânsız.
- * Tablo ve kolon adları isValidIdentifier() ile validate edilir.
+ * All values are passed as parameters ($1, $2, ...) — SQL injection is impossible.
+ * Table and column names are validated with isValidIdentifier().
  *
- * Desteklenen operatörler (where ve or param'larında):
+ * Supported operators (in where and or params):
  *   eq, neq, gt, gte, lt, lte, like, ilike, in, is
  *   FTS (E-11): fts, plfts, phfts, wfts — optional lang: plfts(turkish)
  *   JSONB (E-14): settings->>'theme'.eq.dark , attrs->'specs'->>'weight'.lt.5
@@ -12,17 +12,17 @@
  *   Array/range (E-12): tags.cs.{a,b} , schedule.ov.[2026-01-01,2026-06-01]
  *   like(any|all) (E-13): name.like(any).{A*,B*} , title.ilike(all).{*x*,*y*}
  *
- * OR desteği:
+ * OR support:
  *   ?where=status.eq.active&or=role.eq.admin,role.eq.mod
  *   → WHERE "status" = 'active' AND ("role" = 'admin' OR "role" = 'mod')
  *
- * `is` operatörü değerleri:
+ * `is` operator values:
  *   field.is.null     → "field" IS NULL
  *   field.is.not_null → "field" IS NOT NULL
  *
- * Sıralama — iki format desteklenir:
- *   ?order=created_at.desc         (birleşik format)
- *   ?sort=created_at&order=desc    (ayrı format — Supabase/PostgREST uyumlu)
+ * Sorting — two formats are supported:
+ *   ?order=created_at.desc         (combined format)
+ *   ?sort=created_at&order=desc    (separate format — Supabase/PostgREST compatible)
  */
 
 import { isValidIdentifier } from "../utils/identifier.js";

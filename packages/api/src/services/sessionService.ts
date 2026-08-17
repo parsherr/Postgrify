@@ -1,13 +1,13 @@
 /**
- * Session Service — Redis'te admin refresh token yönetimi.
+ * Session Service — admin refresh token management in Redis.
  *
- * - Her login'de crypto.randomBytes(32) ile opaque token üretilir
+ * - On every login, an opaque token is generated with crypto.randomBytes(32)
  * - Redis key: session:<token>  →  JSON { email, createdAt }
- * - TTL: REFRESH_TOKEN_EXPIRY saniyeye çevrilir
- * - Redis yoksa tüm metodlar no-op döner (refresh token desteği yok)
+ * - TTL: REFRESH_TOKEN_EXPIRY is converted to seconds
+ * - When Redis is unavailable, all methods are no-ops (no refresh token support)
  *
- * CacheService'ten ayrı tutulur: farklı namespace (session: vs postgrify:)
- * ve farklı client lifecycle gerektirir.
+ * Kept separate from CacheService: different namespace (session: vs postgrify:)
+ * and different client lifecycle requirements.
  */
 
 import { randomBytes } from "node:crypto";
@@ -43,8 +43,8 @@ export class SessionService {
   }
 
   /**
-   * Yeni refresh token üretir, Redis'e kaydeder ve döner.
-   * Redis yoksa null döner — caller sessiz modda çalışır.
+   * Generates a new refresh token, stores it in Redis, and returns it.
+   * Returns null when Redis is unavailable — the caller operates in silent mode.
    */
   async create(email: string): Promise<string | null> {
     if (!this.client) return null;
@@ -62,7 +62,7 @@ export class SessionService {
   }
 
   /**
-   * Refresh token geçerliyse SessionData döner, geçersizse null.
+   * Returns SessionData if the refresh token is valid, otherwise null.
    */
   async get(token: string): Promise<SessionData | null> {
     if (!this.client) return null;
@@ -78,7 +78,7 @@ export class SessionService {
   }
 
   /**
-   * Refresh token'ı Redis'ten siler (logout / revoke).
+   * Deletes the refresh token from Redis (logout / revoke).
    */
   async revoke(token: string): Promise<void> {
     if (!this.client) return;
@@ -86,15 +86,15 @@ export class SessionService {
   }
 
   /**
-   * Token rotation: eski token'ı sil, yeni token üret ve kaydet.
-   * Güvenlik: her refresh sonrası eski token geçersiz olur.
-   * Redis yoksa null döner.
+   * Token rotation: delete the old token, generate a new one, and store it.
+   * Security: the old token is invalidated after every refresh.
+   * Returns null when Redis is unavailable.
    */
   async rotate(oldToken: string, email: string): Promise<string | null> {
     if (!this.client) return null;
 
-    // Eski token'ı önce sil — race condition'a karşı atomik olmasa da
-    // Redis single-threaded olduğu için DEL + SET ardışık güvenlidir.
+    // Delete the old token first — not atomic, but safe because
+    // Redis is single-threaded, so sequential DEL + SET is safe.
     await this.client.del(`${SESSION_PREFIX}${oldToken}`);
 
     const newToken = randomBytes(32).toString("hex");
@@ -110,8 +110,8 @@ export class SessionService {
   }
 
   /**
-   * Belirli bir email'e ait tüm aktif session'ları döner.
-   * Redis SCAN kullanır — production'da büyük session havuzlarında dikkatli kullanın.
+   * Returns all active sessions belonging to a specific email.
+   * Uses Redis SCAN — use with caution in production on large session pools.
    */
   async listByEmail(email: string): Promise<Array<{ token: string; data: SessionData; ttl: number }>> {
     if (!this.client) return [];
@@ -131,7 +131,7 @@ export class SessionService {
           results.push({ token: key.replace(SESSION_PREFIX, ""), data, ttl });
         }
       } catch {
-        // Bozuk kayıt — atla
+        // Corrupt record — skip
       }
     }
 
@@ -139,7 +139,7 @@ export class SessionService {
   }
 
   /**
-   * Tüm aktif session'ları listeler (admin panel için).
+   * Lists all active sessions (for the admin panel).
    */
   async listAll(): Promise<Array<{ token: string; data: SessionData; ttl: number }>> {
     if (!this.client) return [];
@@ -157,7 +157,7 @@ export class SessionService {
         const data = JSON.parse(raw) as SessionData;
         results.push({ token: key.replace(SESSION_PREFIX, ""), data, ttl });
       } catch {
-        // Bozuk kayıt — atla
+        // Corrupt record — skip
       }
     }
 
@@ -165,7 +165,7 @@ export class SessionService {
   }
 
   /**
-   * Belirli bir email'e ait tüm session'ları revoke eder.
+   * Revokes all sessions belonging to a specific email.
    */
   async revokeAllByEmail(email: string): Promise<number> {
     if (!this.client) return 0;
@@ -177,15 +177,15 @@ export class SessionService {
     return sessions.length;
   }
 
-  /** Redis bağlı mı? */
+  /** Is Redis connected? */
   get isAvailable(): boolean {
     return this.client !== null;
   }
 }
 
 /**
- * "7d", "15m", "24h" gibi string'leri saniyeye çevirir.
- * Geçersiz format → 604800 (7 gün) default.
+ * Converts duration strings like "7d", "15m", "24h" to seconds.
+ * Invalid format → 604800 (7 days) default.
  */
 function parseDuration(value: string): number {
   const match = value.match(/^(\d+)(s|m|h|d)$/);

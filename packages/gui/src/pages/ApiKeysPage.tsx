@@ -1,6 +1,6 @@
 /**
- * ApiKeysPage — DB token oluşturma (Sheet drawer).
- * Mevcut useDbToken hook'unu kullanır.
+ * ApiKeysPage — DB token creation (Sheet drawer).
+ * Uses the existing useDbToken hook.
  */
 
 import React from "react";
@@ -40,11 +40,11 @@ const SCOPE_COLORS: Record<Scope, string> = {
 
 const EXPIRY_OPTIONS = [
   { label: "1 saat", value: "1h" },
-  { label: "1 gün", value: "24h" },
-  { label: "7 gün", value: "7d" },
-  { label: "30 gün", value: "30d" },
-  { label: "90 gün", value: "90d" },
-  { label: "1 yıl", value: "365d" },
+  { label: "1 day", value: "24h" },
+  { label: "7 days", value: "7d" },
+  { label: "30 days", value: "30d" },
+  { label: "90 days", value: "90d" },
+  { label: "1 year", value: "365d" },
 ];
 
 function CopyButton({ value }: { value: string }) {
@@ -65,7 +65,7 @@ function CopyButton({ value }: { value: string }) {
       ) : (
         <Copy className="h-3 w-3" />
       )}
-      {copied ? "Kopyalandı" : "Kopyala"}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -102,7 +102,7 @@ export default function ApiKeysPage() {
 
   async function handleCreate() {
     if (!formDb || formScopes.length === 0) {
-      setFormError("Veritabanı ve en az bir scope seçin");
+      setFormError("Select a database and at least one scope");
       return;
     }
     if (!formSecret.trim()) {
@@ -119,35 +119,35 @@ export default function ApiKeysPage() {
       });
       setNewToken(result.token);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Oluşturulamadı");
+      setFormError(err instanceof Error ? err.message : "Failed to create token");
     }
   }
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
-      {/* Başlık */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-semibold text-foreground">API Keys</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Veritabanı bazlı JWT token'ları oluştur
+            Create per-database JWT tokens
           </p>
         </div>
         <Button size="sm" onClick={openDrawer} className="gap-1.5">
           <Plus className="h-3.5 w-3.5" />
-          Token Oluştur
+          Create Token
         </Button>
       </div>
 
-      {/* Bilgi kartı */}
+      {/* Info card */}
       <div className="rounded border border-border bg-card p-4">
         <div className="flex items-start gap-3">
           <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
           <div className="space-y-1">
-            <p className="text-xs font-medium text-foreground">Token Yapısı</p>
+            <p className="text-xs font-medium text-foreground">Token Structure</p>
             <p className="text-xs text-muted-foreground">
-              Her token tek bir veritabanına ve belirli scope'lara (izinlere) bağlıdır.
-              Token'lar JWT formatında imzalanır ve yalnızca oluşturulduğu anda görüntülenir.
+              Each token is bound to a single database and specific scopes (permissions).
+              Tokens are signed in JWT format and are only shown at the moment of creation.
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {SCOPES.map((scope) => (
@@ -166,16 +166,16 @@ export default function ApiKeysPage() {
         </div>
       </div>
 
-      {/* Token geçmişi (local) */}
+      {/* Token history (local) */}
       <TokenHistory />
 
-      {/* Token oluşturma sheet */}
+      {/* Token creation sheet */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent side="right" className="flex w-96 flex-col gap-0 p-0">
           <SheetHeader className="border-b border-border px-6 py-4">
-            <SheetTitle>Token Oluştur</SheetTitle>
+            <SheetTitle>Create Token</SheetTitle>
             <SheetDescription>
-              Veritabanı erişim token'ı oluşturur. Token yalnızca bir kez gösterilir.
+              Creates a database access token. The token is shown only once.
             </SheetDescription>
           </SheetHeader>
 
@@ -184,10 +184,10 @@ export default function ApiKeysPage() {
               <div className="space-y-4">
                 <div className="rounded border border-green-900/50 bg-green-950/30 p-4">
                   <p className="mb-2 text-xs font-medium text-green-400">
-                    Token oluşturuldu!
+                    Token created!
                   </p>
                   <p className="mb-3 text-2xs text-muted-foreground">
-                    Bu token yalnızca şu an görünür. Kopyalayın ve güvende saklayın.
+                    This token is only visible right now. Copy it and store it securely.
                   </p>
                   <div className="flex items-start gap-2 rounded border border-border bg-background p-3">
                     <code className="flex-1 break-all font-mono text-2xs text-foreground">
@@ -202,7 +202,7 @@ export default function ApiKeysPage() {
                   variant="outline"
                   className="w-full"
                   onClick={() => {
-                    // Geçmişe kaydet
+                    // Save to history
                     addToLocalHistory({ db: formDb, scopes: formScopes, expiry: formExpiry, token: newToken });
                     setNewToken(null);
                     setDrawerOpen(false);
@@ -214,10 +214,10 @@ export default function ApiKeysPage() {
             ) : (
               <div className="space-y-5">
                 <div className="space-y-1.5">
-                  <Label>Veritabanı</Label>
+                  <Label>Database</Label>
                   <Select value={formDb} onValueChange={setFormDb}>
                     <SelectTrigger className="text-xs">
-                      <SelectValue placeholder="Veritabanı seçin…" />
+                      <SelectValue placeholder="Select database…" />
                     </SelectTrigger>
                     <SelectContent>
                       {databases?.map((db) => (
@@ -244,7 +244,7 @@ export default function ApiKeysPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>İzinler (Scope)</Label>
+                  <Label>Permissions (Scope)</Label>
                   <div className="flex flex-wrap gap-2">
                     {SCOPES.map((scope) => {
                       const active = formScopes.includes(scope);
@@ -268,7 +268,7 @@ export default function ApiKeysPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label>Geçerlilik Süresi</Label>
+                  <Label>Expiry Duration</Label>
                   <Select value={formExpiry} onValueChange={setFormExpiry}>
                     <SelectTrigger className="text-xs">
                       <SelectValue />
@@ -295,16 +295,16 @@ export default function ApiKeysPage() {
           {!newToken && (
             <SheetFooter className="border-t border-border px-6 py-4">
               <Button variant="ghost" onClick={() => setDrawerOpen(false)}>
-                İptal
+                Cancel
               </Button>
               <Button onClick={handleCreate} disabled={creating}>
                 {creating ? (
                   <>
                     <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                    Oluşturuluyor…
+                    Creating…
                   </>
                 ) : (
-                  "Token Oluştur"
+                  "Create Token"
                 )}
               </Button>
             </SheetFooter>
@@ -315,7 +315,7 @@ export default function ApiKeysPage() {
   );
 }
 
-// --- Local history (token'ları kopyalamak için) ---
+// --- Local history (for copying tokens) ---
 
 interface LocalTokenEntry {
   db: string;
@@ -353,9 +353,9 @@ function TokenHistory() {
     <div className="rounded border border-border">
       <div className="border-b border-border px-4 py-2.5">
         <span className="text-xs font-medium text-foreground">
-          Oluşturulan Token'lar
+          Created Tokens
         </span>
-        <span className="ml-2 text-2xs text-muted-foreground">(bu cihazda kayıtlı)</span>
+        <span className="ml-2 text-2xs text-muted-foreground">(saved on this device)</span>
       </div>
       <div className="divide-y divide-border/40">
         {tokens.map((entry, i) => (

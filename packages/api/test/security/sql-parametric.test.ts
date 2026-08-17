@@ -1,13 +1,13 @@
 /**
- * KRIT-3: SQL parametrik sorgu testleri.
+ * KRIT-3: SQL parametric query tests.
  *
- * pg_terminate_backend, string interpolasyon yerine $1 parametresi kullanmalı.
- * isValidIdentifier başarısız olsa bile SQL çağrısı parametrize kalır.
+ * pg_terminate_backend must use $1 parameter instead of string interpolation.
+ * SQL call remains parameterized even if isValidIdentifier fails.
  *
- * HIGH-5: Metadata token alanı filtreleme testleri.
+ * HIGH-5: Metadata token field filtering tests.
  *
- * GET /db/:database/auth/users; metadata JSONB'den reset_token, magic_token
- * ve verification_token alanlarını dışarıya sızdırmamalı.
+ * GET /db/:database/auth/users; metadata JSONB must not leak
+ * reset_token, magic_token, and verification_token fields externally.
  */
 
 import { describe, it, expect } from "vitest";
@@ -18,73 +18,73 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KRIT-3: pg_terminate_backend parametrik sorgu
+// KRIT-3: pg_terminate_backend parametric query
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("KRIT-3: pg_terminate_backend parametrik sorgu", () => {
+describe("KRIT-3: pg_terminate_backend parametric query", () => {
   const databasesPath = join(__dirname, "../../src/routes/admin/databases.ts");
   const databasesSrc = readFileSync(databasesPath, "utf-8");
 
-  it("pg_terminate_backend string interpolasyon kullanmıyor", () => {
-    // Eski hatalı pattern: WHERE datname = '${db}'
+  it("pg_terminate_backend does not use string interpolation", () => {
+    // Old bad pattern: WHERE datname = '${db}'
     const badPattern = /datname\s*=\s*['"`]\$\{db\}['"`]/;
     expect(
       badPattern.test(databasesSrc),
-      "pg_terminate_backend sorgusunda string interpolasyon bulundu — $1 kullanılmalı"
+      "string interpolation found in pg_terminate_backend query — must use $1"
     ).toBe(false);
   });
 
-  it("pg_terminate_backend $1 parametresi ve [db] array'i kullanıyor", () => {
+  it("pg_terminate_backend uses $1 parameter and [db] array", () => {
     const hasParam =
       databasesSrc.includes("$1") &&
       (databasesSrc.includes("[db]") || databasesSrc.includes("[ db ]"));
     expect(
       hasParam,
-      "pg_terminate_backend $1 parametresi ve [db] array'i kullanmalı"
+      "pg_terminate_backend must use $1 parameter and [db] array"
     ).toBe(true);
   });
 
-  it("databases.ts isValidIdentifier'ı sql.unsafe'den önce çağırıyor", () => {
+  it("databases.ts calls isValidIdentifier before sql.unsafe", () => {
     const identifierIdx = databasesSrc.indexOf("isValidIdentifier");
     const unsafeIdx = databasesSrc.indexOf("sql.unsafe");
-    expect(identifierIdx, "isValidIdentifier databases.ts'de bulunmalı").toBeGreaterThan(-1);
-    expect(unsafeIdx, "sql.unsafe databases.ts'de bulunmalı").toBeGreaterThan(-1);
+    expect(identifierIdx, "isValidIdentifier must be present in databases.ts").toBeGreaterThan(-1);
+    expect(unsafeIdx, "sql.unsafe must be present in databases.ts").toBeGreaterThan(-1);
     expect(
       identifierIdx < unsafeIdx,
-      "isValidIdentifier sql.unsafe'den önce gelmelidir (savunma derinliği)"
+      "isValidIdentifier must come before sql.unsafe (defense in depth)"
     ).toBe(true);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HIGH-5: /auth/users endpoint'i hassas metadata alanlarını filtrelemeli
+// HIGH-5: /auth/users endpoint must filter sensitive metadata fields
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("HIGH-5: Hassas metadata alanları /auth/users yanıtından filtreleniyor", () => {
+describe("HIGH-5: Sensitive metadata fields are filtered from /auth/users response", () => {
   const usersPath = join(__dirname, "../../src/routes/db/auth/users.ts");
   const usersSrc = readFileSync(usersPath, "utf-8");
 
-  it("users.ts SENSITIVE_METADATA_KEYS sabitini tanımlıyor", () => {
+  it("users.ts defines SENSITIVE_METADATA_KEYS constant", () => {
     expect(usersSrc).toContain("SENSITIVE_METADATA_KEYS");
   });
 
-  it("SENSITIVE_METADATA_KEYS reset_token içeriyor", () => {
+  it("SENSITIVE_METADATA_KEYS contains reset_token", () => {
     expect(usersSrc).toContain("reset_token");
   });
 
-  it("SENSITIVE_METADATA_KEYS magic_token içeriyor", () => {
+  it("SENSITIVE_METADATA_KEYS contains magic_token", () => {
     expect(usersSrc).toContain("magic_token");
   });
 
-  it("SENSITIVE_METADATA_KEYS verification_token içeriyor", () => {
+  it("SENSITIVE_METADATA_KEYS contains verification_token", () => {
     expect(usersSrc).toContain("verification_token");
   });
 
-  it("sanitizeUser() helper users.ts'de tanımlı", () => {
+  it("sanitizeUser() helper is defined in users.ts", () => {
     expect(usersSrc).toContain("sanitizeUser");
   });
 
-  it("stripSensitiveMetadata() reset_token'ı metadata nesnesinden kaldırıyor", () => {
+  it("stripSensitiveMetadata() removes reset_token from metadata object", () => {
     const SENSITIVE_KEYS = [
       "reset_token",
       "reset_token_expires",
@@ -121,17 +121,17 @@ describe("HIGH-5: Hassas metadata alanları /auth/users yanıtından filtreleniy
     expect(cleaned.custom_field).toBe("should-remain");
   });
 
-  it("users list endpoint'i sanitizeUser() çağırıyor", () => {
-    // .map((u) => sanitizeUser(...) gibi çağrı kalıbını eşleştir
-    // Not: [^)]* yerine .*? kullanılıyor çünkü (u) içindeki ) karakteri [^)]* 'i keser
+  it("users list endpoint calls sanitizeUser()", () => {
+    // Match the .map((u) => sanitizeUser(...) call pattern
+    // Note: .*? is used instead of [^)]* because ) inside (u) breaks [^)]*
     expect(usersSrc).toMatch(/\.map\(.*?=>\s*sanitizeUser/s);
   });
 
-  it("sanitizeUser users.ts'de en az 2 yerde kullanılıyor (tanım + çağrı)", () => {
+  it("sanitizeUser appears at least 2 times in users.ts (definition + call)", () => {
     const sanitizeCount = (usersSrc.match(/sanitizeUser/g) ?? []).length;
     expect(
       sanitizeCount,
-      "sanitizeUser en az 2 kez geçmeli (tanım + list endpoint çağrısı)"
+      "sanitizeUser must appear at least 2 times (definition + list endpoint call)"
     ).toBeGreaterThanOrEqual(2);
   });
 });

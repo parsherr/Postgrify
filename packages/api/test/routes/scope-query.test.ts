@@ -1,8 +1,8 @@
 /**
- * Test: SORUN #11 Düzeltmesi — editor rolü "query" scope'una sahip olmalı.
+ * Test: Issue #11 Fix — editor role should have the "query" scope.
  *
- * scopeGuard.ts'deki DB_USER_ROLE_SCOPES.editor dizisine "query" eklendi.
- * Bu test editor rolündeki DB-user token'ının /query endpoint'ine erişebildiğini doğrular.
+ * "query" was added to the DB_USER_ROLE_SCOPES.editor array in scopeGuard.ts.
+ * This test verifies that a DB-user token with the editor role can access the /query endpoint.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -69,7 +69,7 @@ beforeAll(async () => {
 
   jwtSvc = new JwtService(JWT_SECRET);
 
-  // authenticateAny: admin veya DB-user token kabul et
+  // authenticateAny: accept admin or DB-user tokens
   server.decorate("authenticateAny", async (req: Parameters<typeof server.authenticateAny>[0], reply: Parameters<typeof server.authenticateAny>[1]) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) return reply.status(401).send({ error: "Unauthorized" });
@@ -105,8 +105,8 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
-describe("SORUN #11 — editor rolü query scope", () => {
-  it("editor DB-user token'ı /query endpoint'ine erişebilmeli", async () => {
+describe("Issue #11 — editor role query scope", () => {
+  it("editor DB-user token should be able to access the /query endpoint", async () => {
     const editorToken = await jwtSvc.signDbUserToken("testdb", "user-123", "editor@test.com", "editor");
 
     const res = await server.inject({
@@ -116,11 +116,11 @@ describe("SORUN #11 — editor rolü query scope", () => {
       payload: { sql: "SELECT 1 AS n" },
     });
 
-    // 200 bekliyoruz — 403 olursa fix çalışmamış demektir
-    expect(res.statusCode, `editor /query 403 alıyor — scopeGuard fix'i çalışmadı:\n${res.body}`).toBe(200);
+    // expecting 200 — if 403, the fix did not take effect
+    expect(res.statusCode, `editor is getting 403 on /query — scopeGuard fix did not apply:\n${res.body}`).toBe(200);
   });
 
-  it("viewer DB-user token'ı /query endpoint'ine erişememeli", async () => {
+  it("viewer DB-user token should not be able to access the /query endpoint", async () => {
     const viewerToken = await jwtSvc.signDbUserToken("testdb", "user-456", "viewer@test.com", "viewer");
 
     const res = await server.inject({
@@ -130,11 +130,11 @@ describe("SORUN #11 — editor rolü query scope", () => {
       payload: { sql: "SELECT 1 AS n" },
     });
 
-    // viewer query scope'u yok — 403 bekliyoruz
+    // viewer has no query scope — expecting 403
     expect(res.statusCode).toBe(403);
   });
 
-  it("admin DB-user token'ı /query endpoint'ine erişebilmeli", async () => {
+  it("admin DB-user token should be able to access the /query endpoint", async () => {
     const adminToken = await jwtSvc.signDbUserToken("testdb", "user-789", "admin@test.com", "admin");
 
     const res = await server.inject({
@@ -147,7 +147,7 @@ describe("SORUN #11 — editor rolü query scope", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("editor token write scope'una sahip olmalı (rows POST)", async () => {
+  it("editor token should have the write scope (rows POST)", async () => {
     const editorToken = await jwtSvc.signDbUserToken("testdb", "user-123", "editor@test.com", "editor");
 
     const res = await server.inject({
@@ -157,11 +157,11 @@ describe("SORUN #11 — editor rolü query scope", () => {
       payload: { username: "testuser", display_name: "Test User" },
     });
 
-    // 201 veya 200 bekliyoruz (mock döndürür)
+    // expecting 201 or 200 (mock returns a row)
     expect([200, 201]).toContain(res.statusCode);
   });
 
-  it("viewer token write scope'unu reddeder (rows POST)", async () => {
+  it("viewer token should be denied the write scope (rows POST)", async () => {
     const viewerToken = await jwtSvc.signDbUserToken("testdb", "user-456", "viewer@test.com", "viewer");
 
     const res = await server.inject({

@@ -1,6 +1,6 @@
 /**
- * Basit toast bildirimi bileşeni.
- * Kullanım: useToast hook'u ile tetiklenir.
+ * Simple toast notification component.
+ * Usage: triggered via the useToast hook.
  */
 
 import { createContext, useContext, useState, useCallback } from "react";

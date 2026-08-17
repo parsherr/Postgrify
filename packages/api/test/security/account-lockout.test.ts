@@ -1,11 +1,11 @@
 /**
- * HIGH-B: Hesap kilitleme (account lockout) testleri.
+ * HIGH-B: Account lockout tests.
  *
- * tokens.ts login endpoint'inde:
- * - Başarısız girişlerde failed_attempts artırılır
- * - 5 başarısız denemeden sonra locked_until set edilir
- * - Kilitli hesap 429 döner
- * - Başarılı girişte failed_attempts sıfırlanır
+ * In tokens.ts login endpoint:
+ * - failed_attempts is incremented on failed login attempts
+ * - locked_until is set after 5 failed attempts
+ * - Locked account returns 429
+ * - failed_attempts is reset on successful login
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -13,7 +13,7 @@ import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import type { Sql } from "postgres";
 
-// ── Mock'lar ──────────────────────────────────────────────────────────────────
+// ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock("../../src/services/passwordService.js", () => ({
   hashPassword:   vi.fn().mockResolvedValue("$argon2id$hashed"),
@@ -88,7 +88,7 @@ async function buildLoginServer(
   return server;
 }
 
-// ── Testler ───────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("Account Lockout — users.ts lockout logic", () => {
   it("passwordPolicy.ts: whitespace-only password rejected", async () => {
@@ -122,7 +122,7 @@ describe("Account Lockout — locked account behavior", () => {
     vi.restoreAllMocks();
   });
 
-  it("locked_until in future → 429 döner", async () => {
+  it("locked_until in future → returns 429", async () => {
     const futureDate = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const server = await buildLoginServer(
       {
@@ -151,7 +151,7 @@ describe("Account Lockout — locked account behavior", () => {
     expect(body.lockedUntil).toBeDefined();
   });
 
-  it("locked_until in past → giriş denemesine devam eder", async () => {
+  it("locked_until in past → continues with login attempt", async () => {
     const pastDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const server = await buildLoginServer(
       {
@@ -164,7 +164,7 @@ describe("Account Lockout — locked account behavior", () => {
         failed_attempts: 5,
         locked_until: pastDate,
       },
-      true // password geçerli
+      true // password valid
     );
 
     const res = await server.inject({
@@ -174,12 +174,12 @@ describe("Account Lockout — locked account behavior", () => {
     });
 
     await server.close();
-    // Geçmiş tarihli kilide rağmen devam eder
+    // Continues despite past-dated lock
     expect([200, 401, 403]).toContain(res.statusCode);
     expect(res.statusCode).not.toBe(429);
   });
 
-  it("no locked_until → 429 dönmez", async () => {
+  it("no locked_until → does not return 429", async () => {
     const server = await buildLoginServer(
       {
         id: "user-1",

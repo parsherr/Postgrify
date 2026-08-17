@@ -1,7 +1,7 @@
 /**
- * ddlSanitizer unit testleri.
- * assertColumnType ve assertColumnDefault fonksiyonlarının
- * allowlist ve injection koruması doğrulanır.
+ * ddlSanitizer unit tests.
+ * Verifies the allowlist and injection protection of
+ * assertColumnType and assertColumnDefault.
  */
 
 import { describe, it, expect } from "vitest";
@@ -10,10 +10,12 @@ import {
   assertColumnDefault,
 } from "../../src/utils/ddlSanitizer.js";
 
-// ─── assertColumnType ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// assertColumnType
+// ---------------------------------------------------------------------------
 
 describe("assertColumnType", () => {
-  describe("geçerli tipler", () => {
+  describe("valid types", () => {
     const validTypes = [
       "TEXT",
       "INTEGER",
@@ -36,68 +38,70 @@ describe("assertColumnType", () => {
     ];
 
     for (const type of validTypes) {
-      it(`'${type}' geçer`, () => {
+      it(`'${type}' passes`, () => {
         expect(() => assertColumnType(type, "col")).not.toThrow();
       });
     }
 
-    it("küçük harf 'text' büyük harfe normalize edilip geçer", () => {
+    it("lowercase 'text' is normalized to uppercase and passes", () => {
       expect(() => assertColumnType("text", "col")).not.toThrow();
       expect(assertColumnType("text", "col")).toBe("TEXT");
     });
 
-    it("'VARCHAR(255)' parantez normalize edilip geçer", () => {
+    it("'VARCHAR(255)' with parentheses is normalized and passes", () => {
       expect(() => assertColumnType("VARCHAR(255)", "col")).not.toThrow();
     });
 
-    it("'NUMERIC(10,2)' geçer", () => {
+    it("'NUMERIC(10,2)' passes", () => {
       expect(() => assertColumnType("NUMERIC(10,2)", "col")).not.toThrow();
     });
 
-    it("'character varying' geçer", () => {
+    it("'character varying' passes", () => {
       expect(() => assertColumnType("character varying", "col")).not.toThrow();
     });
   });
 
-  describe("geçersiz / injection denemeleri", () => {
-    it("'VOID' reddedilir", () => {
+  describe("invalid types / injection attempts", () => {
+    it("'VOID' is rejected", () => {
       expect(() => assertColumnType("VOID", "col")).toThrow();
     });
 
-    it("'FUNCTION' reddedilir", () => {
+    it("'FUNCTION' is rejected", () => {
       expect(() => assertColumnType("FUNCTION", "col")).toThrow();
     });
 
-    it("'BYTECODE' reddedilir", () => {
+    it("'BYTECODE' is rejected", () => {
       expect(() => assertColumnType("BYTECODE", "col")).toThrow();
     });
 
-    it("boş string reddedilir", () => {
+    it("empty string is rejected", () => {
       expect(() => assertColumnType("", "col")).toThrow();
     });
 
-    it("sadece boşluk reddedilir", () => {
+    it("whitespace-only string is rejected", () => {
       expect(() => assertColumnType("   ", "col")).toThrow();
     });
 
-    it("'TEXT; DROP TABLE users' injection reddedilir", () => {
+    it("'TEXT; DROP TABLE users' injection is rejected", () => {
       expect(() => assertColumnType("TEXT; DROP TABLE users", "col")).toThrow();
     });
 
-    it("'TEXT REFERENCES other(id)' reddedilir", () => {
+    it("'TEXT REFERENCES other(id)' is rejected", () => {
       expect(() => assertColumnType("TEXT REFERENCES other(id)", "col")).toThrow();
     });
 
-    it("hata mesajı kolon adını içerir", () => {
+    it("error message includes the column name", () => {
       expect(() => assertColumnType("VOID", "my_column")).toThrow(/my_column/);
     });
   });
 });
 
-// ─── assertColumnDefault ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// assertColumnDefault
+// ---------------------------------------------------------------------------
 
 describe("assertColumnDefault", () => {
-  describe("güvenli SQL fonksiyonları", () => {
+  describe("safe SQL functions", () => {
     const safeFns = [
       "now()",
       "NOW()",
@@ -117,85 +121,85 @@ describe("assertColumnDefault", () => {
     ];
 
     for (const val of safeFns) {
-      it(`'${val}' geçer`, () => {
+      it(`'${val}' passes`, () => {
         expect(() => assertColumnDefault(val, "col")).not.toThrow();
       });
     }
   });
 
-  describe("sayısal literaller", () => {
-    it("'0' geçer", () => {
+  describe("numeric literals", () => {
+    it("'0' passes", () => {
       expect(() => assertColumnDefault("0", "col")).not.toThrow();
     });
 
-    it("'42' geçer", () => {
+    it("'42' passes", () => {
       expect(() => assertColumnDefault("42", "col")).not.toThrow();
     });
 
-    it("'-1' geçer", () => {
+    it("'-1' passes", () => {
       expect(() => assertColumnDefault("-1", "col")).not.toThrow();
     });
 
-    it("'3.14' geçer", () => {
+    it("'3.14' passes", () => {
       expect(() => assertColumnDefault("3.14", "col")).not.toThrow();
     });
   });
 
-  describe("tek tırnaklı string literaller", () => {
-    it("'active' geçer", () => {
+  describe("single-quoted string literals", () => {
+    it("'active' passes", () => {
       expect(() => assertColumnDefault("'active'", "col")).not.toThrow();
     });
 
-    it("'pending status' geçer", () => {
+    it("'pending status' passes", () => {
       expect(() => assertColumnDefault("'pending status'", "col")).not.toThrow();
     });
 
-    it("boş string '' geçer", () => {
+    it("empty string '' passes", () => {
       expect(() => assertColumnDefault("''", "col")).not.toThrow();
     });
 
-    it("escaped quote 'it''s ok' geçer", () => {
+    it("escaped quote 'it''s ok' passes", () => {
       expect(() => assertColumnDefault("'it''s ok'", "col")).not.toThrow();
     });
   });
 
-  describe("injection denemeleri — tümü reddedilmeli", () => {
-    it("'0); DROP TABLE users; --' reddedilir", () => {
+  describe("injection attempts — all must be rejected", () => {
+    it("'0); DROP TABLE users; --' is rejected", () => {
       expect(() =>
         assertColumnDefault("0); DROP TABLE users; --", "col")
       ).toThrow();
     });
 
-    it("'now()); DROP TABLE foo; --' reddedilir", () => {
+    it("'now()); DROP TABLE foo; --' is rejected", () => {
       expect(() =>
         assertColumnDefault("now()); DROP TABLE foo; --", "col")
       ).toThrow();
     });
 
-    it("tırnak injection '; DROP TABLE users; --' reddedilir", () => {
-      // Tek tırnaklı string gibi görünür ama içinde kapanmamış tırnak var
+    it("quote injection '; DROP TABLE users; --' is rejected", () => {
+      // Looks like a single-quoted string but has an unclosed quote inside
       expect(() =>
         assertColumnDefault("'; DROP TABLE users; --'", "col")
       ).toThrow();
     });
 
-    it("'1 OR 1=1' reddedilir", () => {
+    it("'1 OR 1=1' is rejected", () => {
       expect(() => assertColumnDefault("1 OR 1=1", "col")).toThrow();
     });
 
-    it("'current_time()' reddedilir (SAFE_FUNCTION_DEFAULTS'ta yok)", () => {
+    it("'current_time()' is rejected (not in SAFE_FUNCTION_DEFAULTS)", () => {
       expect(() => assertColumnDefault("current_time()", "col")).toThrow();
     });
 
-    it("boş string (tırnaksız) reddedilir", () => {
+    it("empty string (unquoted) is rejected", () => {
       expect(() => assertColumnDefault("", "col")).toThrow();
     });
 
-    it("sadece boşluk reddedilir", () => {
+    it("whitespace-only string is rejected", () => {
       expect(() => assertColumnDefault("   ", "col")).toThrow();
     });
 
-    it("hata mesajı kolon adını içerir", () => {
+    it("error message includes the column name", () => {
       expect(() =>
         assertColumnDefault("DROP TABLE users", "my_col")
       ).toThrow(/my_col/);

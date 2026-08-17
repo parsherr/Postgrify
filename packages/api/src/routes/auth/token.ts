@@ -1,8 +1,8 @@
 /**
- * POST /auth/token — DB bazlı JWT üretir.
+ * POST /auth/token — Issues a DB-scoped JWT.
  * Body: { database, secret, scope?, expiresIn? }
  *
- * Rate limit: IP başına 20 req/dk (brute-force koruması).
+ * Rate limit: 20 req/min per IP (brute-force protection).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -22,9 +22,9 @@ function assertExpiresIn(value: string, maxHours: number): void {
   }
 }
 
-// Her DB için ayrı secret tanımlanabilir.
-// Yoksa global ADMIN_SECRET'a fallback yapar (geliştirme kolaylığı için).
-// Üretimde DB bazlı secret'lar env veya secret store'dan okunmalıdır.
+// A separate secret can be defined per DB.
+// Falls back to the global ADMIN_SECRET when absent (convenience for development).
+// In production, per-DB secrets should be read from env vars or a secret store.
 function getDbSecret(dbName: string): string {
   const envKey = `DB_SECRET_${dbName.toUpperCase()}`;
   return process.env[envKey] ?? config.ADMIN_SECRET;
@@ -74,7 +74,7 @@ export async function tokenRoute(server: FastifyInstance) {
 
       const expected = getDbSecret(database);
 
-      // Timing-safe karşılaştırma
+      // Timing-safe comparison
       const providedBuf = Buffer.from(secret);
       const expectedBuf = Buffer.from(expected);
       const valid =
@@ -85,7 +85,7 @@ export async function tokenRoute(server: FastifyInstance) {
         return reply.status(401).send({ error: "Invalid secret" });
       }
 
-      // DB token max 168 saat (1 hafta)
+      // DB token maximum 168 hours (1 week)
       const expiry = expiresIn ?? "24h";
       try {
         assertExpiresIn(expiry, 168);

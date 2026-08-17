@@ -1,8 +1,8 @@
 /**
- * Auth users CRUD route testleri.
+ * Auth users CRUD route tests.
  *
  * GET/POST/PATCH/DELETE /:database/auth/users
- * Admin veya uygun scope gerektirir.
+ * Requires admin or appropriate scope.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
@@ -54,9 +54,9 @@ let jwtSvc: JwtService;
 let sqlFnRef: ReturnType<typeof vi.fn>;
 let adminToken: string;
 
-// read scope'lu DB token (testdb için)
+// DB token with read scope (for testdb)
 let readDbToken: string;
-// schema scope yok
+// no schema scope
 let noSchemaToken: string;
 
 beforeAll(async () => {
@@ -78,14 +78,14 @@ beforeAll(async () => {
   server.decorateRequest("user", null);
   server.decorateRequest("dbName", null);
 
-  // authenticate: admin token ise role=admin set et; DB token ise role=db + scope set et
+  // authenticate: set role=admin for admin token; set role=db + scope for DB token
   server.decorate("authenticate", async (req: FastifyRequest, reply: FastifyReply) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) return reply.status(401).send({ error: "Unauthorized" });
     const payload = await jwtSvc.verifyAdminOrDb(auth.slice(7));
     if (!payload) return reply.status(401).send({ error: "Invalid token" });
     req.user = payload;
-    // dbName set et (dbResolverHook burada yok, manuel)
+    // set dbName (dbResolverHook is not here, done manually)
     if (!req.dbName) req.dbName = (req.params as Record<string, string>)?.database;
   });
   server.decorate("authenticateAdmin", async () => {});
@@ -119,7 +119,7 @@ describe("GET /:database/auth/users", () => {
     });
   }
 
-  it("Admin token → 200, users listesi döner", async () => {
+  it("Admin token → 200, returns users list", async () => {
     mockListQueries();
 
     const res = await server.inject({
@@ -170,7 +170,7 @@ describe("GET /:database/auth/users", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("Token yok → 401", async () => {
+  it("No token → 401", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/users",
@@ -181,7 +181,7 @@ describe("GET /:database/auth/users", () => {
 });
 
 describe("POST /:database/auth/users", () => {
-  it("Admin token ile yeni kullanıcı → 201", async () => {
+  it("New user with admin token → 201", async () => {
     sqlFnRef.mockResolvedValue([{
       id: "new-uuid",
       email: "new@ex.com",
@@ -216,7 +216,7 @@ describe("POST /:database/auth/users", () => {
 });
 
 describe("PATCH /:database/auth/users/:id", () => {
-  it("Admin token ile güncelleme → 200", async () => {
+  it("Update with admin token → 200", async () => {
     sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
       const q = strings[0] ?? "";
       if (q.includes("RETURNING")) {
@@ -232,7 +232,7 @@ describe("PATCH /:database/auth/users/:id", () => {
       }
       return Promise.resolve([]);
     });
-    // unsafe kullanır — ayrıca mock et
+    // uses unsafe — mock separately
     sqlFnRef.unsafe = vi.fn().mockResolvedValue([{
       id: "uuid-1", email: "a@ex.com", role: "editor", is_active: true,
       created_at: "2024-01-01", last_login: null, metadata: {},
@@ -248,7 +248,7 @@ describe("PATCH /:database/auth/users/:id", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("Body boş → 400 No fields to update", async () => {
+  it("Empty body → 400 No fields to update", async () => {
     const res = await server.inject({
       method: "PATCH",
       url: "/testdb/auth/users/uuid-1",
@@ -288,8 +288,8 @@ describe("PATCH /:database/auth/users/:id", () => {
 });
 
 describe("DELETE /:database/auth/users/:id", () => {
-  it("Admin token ile silme → 204", async () => {
-    // DELETE ... RETURNING id → silinenin id'sini döndürür
+  it("Deletion with admin token → 204", async () => {
+    // DELETE ... RETURNING id → returns the id of the deleted row
     sqlFnRef.mockResolvedValueOnce([{ id: "uuid-1" }]);
 
     const res = await server.inject({
@@ -301,7 +301,7 @@ describe("DELETE /:database/auth/users/:id", () => {
     expect(res.statusCode).toBe(204);
   });
 
-  it("Token yok → 401", async () => {
+  it("No token → 401", async () => {
     const res = await server.inject({
       method: "DELETE",
       url: "/testdb/auth/users/uuid-1",

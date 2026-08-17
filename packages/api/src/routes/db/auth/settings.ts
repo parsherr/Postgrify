@@ -1,11 +1,11 @@
 /**
- * Per-DB auth ayarları:
+ * Per-DB auth settings:
  *
- *   GET  /:database/auth/settings           — public GoTrue shape; admin+schema → full
- *   PUT  /:database/auth/settings           — ayarları güncelle (schema)
- *   GET  /:database/auth/settings/oauth     — OAuth provider listesi
- *   POST /:database/auth/settings/oauth     — OAuth provider ekle/güncelle
- *   DELETE /:database/auth/settings/oauth/:provider — OAuth provider sil
+ *   GET    /:database/auth/settings                        — public GoTrue shape; admin+schema → full
+ *   PUT    /:database/auth/settings                        — update settings (schema)
+ *   GET    /:database/auth/settings/oauth                  — OAuth provider list
+ *   POST   /:database/auth/settings/oauth                  — add/update OAuth provider
+ *   DELETE /:database/auth/settings/oauth/:provider        — remove OAuth provider
  *
  * C-20: GET is public (apiKey still required via group hook). With admin/schema
  * Bearer, response includes full settings plus typed aliases for the GUI.
@@ -24,8 +24,8 @@ const AUTH_SETTING_KEYS = [
   "signup_redirect_url",
   "token_expiry",
   "refresh_token_expiry",
-  // Yeni kayıt olan kullanıcıların varsayılan rolü (SORUN #7 düzeltmesi).
-  // Değerler: 'viewer' | 'editor' | 'admin'
+  // Default role for newly registered users (Issue #7 fix).
+  // Values: 'viewer' | 'editor' | 'admin'
   "default_user_role",
 ] as const;
 
@@ -176,7 +176,7 @@ export async function authSettingsRoute(server: FastifyInstance) {
             signup_redirect_url: { type: "string" },
             token_expiry: { type: "string", pattern: "^\\d+[smhd]$" },
             refresh_token_expiry: { type: "string", pattern: "^\\d+[smhd]$" },
-            // Yeni kullanıcıların varsayılan rolü (SORUN #7 düzeltmesi)
+            // Default role for new users (Issue #7 fix)
             default_user_role: { type: "string", enum: ["viewer", "editor", "admin"] },
           },
           additionalProperties: false,
@@ -191,9 +191,9 @@ export async function authSettingsRoute(server: FastifyInstance) {
       for (const [key, value] of Object.entries(body)) {
         if (!AUTH_SETTING_KEYS.includes(key as AuthSettingKey)) continue;
 
-        // Güvenlik: signup_redirect_url için URL format doğrulaması.
-        // Geçersiz veya tehlikeli protokol (javascript:, data:) içeren URL'ler reddedilir.
-        // Bu, oauth.ts callback'teki origin whitelist'e ek olarak savunma derinliği sağlar.
+        // Security: URL format validation for signup_redirect_url.
+        // URLs containing invalid or dangerous protocols (javascript:, data:) are rejected.
+        // This provides defense in depth in addition to the origin whitelist in the oauth.ts callback.
         if (key === "signup_redirect_url" && value) {
           let parsedUrl: URL;
           try {
@@ -297,7 +297,7 @@ export async function authSettingsRoute(server: FastifyInstance) {
         RETURNING id, provider, client_id, redirect_uri, enabled, created_at
       `;
 
-      // oauth_enabled'ı otomatik true yap
+      // Automatically set oauth_enabled to true
       await sql`
         INSERT INTO _postgrify_auth.auth_settings (key, value, updated_at)
         VALUES ('oauth_enabled', 'true', now())

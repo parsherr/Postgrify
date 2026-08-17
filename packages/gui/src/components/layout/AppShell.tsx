@@ -1,7 +1,7 @@
 /**
  * AppShell — resizable sidebar + main content wrapper.
- * Tüm protected sayfalarda kullanılır.
- * Sidebar boyutu localStorage'a kaydedilir.
+ * Used on all protected pages.
+ * Sidebar size is saved to localStorage.
  */
 
 import React from "react";
@@ -60,7 +60,7 @@ export function AppShell({ children }: AppShellProps) {
 
           <ResizableHandle />
 
-          {/* Ana içerik */}
+          {/* Main content */}
           <ResizablePanel id="main" defaultSize="100%" className="overflow-hidden">
             <div className="h-full overflow-hidden">
               {children}

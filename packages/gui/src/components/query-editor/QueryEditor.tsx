@@ -1,184 +1,132 @@
-/**
- * QueryEditor — CodeMirror 6 wrapper.
- * PostgreSQL syntax highlighting, autocomplete, custom zinc theme.
- */
-
-import React from "react";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
-import { EditorState, Compartment } from "@codemirror/state";
-import { sql, PostgreSQL } from "@codemirror/lang-sql";
-import {
-  autocompletion,
-  closeBrackets,
-  closeBracketsKeymap,
-  completionKeymap,
-} from "@codemirror/autocomplete";
-import {
-  defaultKeymap,
-  historyKeymap,
-  history,
-  indentWithTab,
-} from "@codemirror/commands";
-import {
-  indentOnInput,
-  bracketMatching,
-  foldGutter,
-  foldKeymap,
-} from "@codemirror/language";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import { zincTheme, zincHighlight } from "./sqlTheme";
-import { cn } from "@/lib/utils";
+import { useRef, useCallback, useEffect } from "react";
+import Editor, { OnMount } from "@monaco-editor/react";
+import { Play, Loader2 } from "lucide-react";
+import { sqlTheme } from "./sqlTheme";
 
 interface QueryEditorProps {
   value: string;
   onChange: (value: string) => void;
-  onRun?: () => void;
-  /** Autocomplete için tablo adları */
-  tableNames?: string[];
-  /** Autocomplete için kolon adları (key: tablo adı) */
-  columnNames?: Record<string, string[]>;
-  className?: string;
+  onExecute: () => void;
+  isExecuting?: boolean;
+  height?: string;
   placeholder?: string;
 }
 
+/**
+ * SQL editor with Monaco, keyboard shortcut support, and execute button.
+ * Ctrl/Cmd+Enter runs the query.
+ */
 export function QueryEditor({
   value,
   onChange,
-  onRun,
-  tableNames = [],
-  columnNames = {},
-  className,
+  onExecute,
+  isExecuting = false,
+  height = "200px",
+  placeholder,
 }: QueryEditorProps) {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const editorRef = React.useRef<EditorView | null>(null);
-  const onRunRef = React.useRef(onRun);
-  const onChangeRef = React.useRef(onChange);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
-  // Ref'leri güncel tut — her render'da yeniden bind etme
-  React.useEffect(() => { onRunRef.current = onRun; }, [onRun]);
-  React.useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  const handleMount: OnMount = useCallback(
+    (editor, monaco) => {
+      editorRef.current = editor;
 
-  // Schema için autocomplete kaynağı
-  const schemaCompartment = React.useRef(new Compartment());
+      // Register custom theme
+      monaco.editor.defineTheme("postgrify-dark", sqlTheme as Parameters<typeof monaco.editor.defineTheme>[1]);
+      monaco.editor.setTheme("postgrify-dark");
 
-  function buildSchema() {
-    const schema: Record<string, string[]> = {};
-    tableNames.forEach((tbl) => {
-      schema[tbl] = columnNames[tbl] ?? [];
-    });
-    return schema;
-  }
+      // Ctrl/Cmd+Enter → execute
+      editor.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+        () => {
+          onExecute();
+        }
+      );
 
-  // Editor'ü ilk kez oluştur
-  React.useEffect(() => {
-    if (!containerRef.current || editorRef.current) return;
+      // Ctrl/Cmd+Shift+F → format
+      editor.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+        () => {
+          editor.getAction("editor.action.formatDocument")?.run();
+        }
+      );
+    },
+    [onExecute]
+  );
 
-    const updateListener = EditorView.updateListener.of((update) => {
-      if (update.docChanged) {
-        onChangeRef.current(update.state.doc.toString());
-      }
-    });
-
-    // Ctrl+Enter / Cmd+Enter → çalıştır
-    const runKeymap = keymap.of([
-      {
-        key: "Ctrl-Enter",
-        mac: "Cmd-Enter",
-        run: () => {
-          onRunRef.current?.();
-          return true;
-        },
-      },
-    ]);
-
-    const state = EditorState.create({
-      doc: value,
-      extensions: [
-        // Tema
-        zincTheme,
-        zincHighlight,
-
-        // Dil — PostgreSQL dialect
-        sql({ dialect: PostgreSQL, schema: buildSchema() }),
-        schemaCompartment.current.of([]),
-
-        // Temel özellikler
-        lineNumbers(),
-        highlightActiveLine(),
-        highlightActiveLineGutter(),
-        history(),
-        foldGutter(),
-        bracketMatching(),
-        closeBrackets(),
-        indentOnInput(),
-        highlightSelectionMatches(),
-        autocompletion(),
-
-        // Keymap'ler
-        keymap.of([
-          ...closeBracketsKeymap,
-          ...defaultKeymap,
-          ...historyKeymap,
-          ...completionKeymap,
-          ...foldKeymap,
-          ...searchKeymap,
-          indentWithTab,
-        ]),
-        runKeymap,
-        updateListener,
-
-        // Word wrap
-        EditorView.lineWrapping,
-      ],
-    });
-
-    const view = new EditorView({
-      state,
-      parent: containerRef.current,
-    });
-
-    editorRef.current = view;
-
-    return () => {
-      view.destroy();
-      editorRef.current = null;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // sadece mount'ta çalışır
-
-  // Dışarıdan value değişince editor'ü güncelle (controlled)
-  React.useEffect(() => {
+  // Update execute handler when it changes without remounting
+  useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const current = editor.state.doc.toString();
-    if (current !== value) {
-      editor.dispatch({
-        changes: { from: 0, to: current.length, insert: value },
-      });
-    }
-  }, [value]);
-
-  // Schema değişince autocomplete'i güncelle
-  React.useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || tableNames.length === 0) return;
-    editor.dispatch({
-      effects: schemaCompartment.current.reconfigure(
-        sql({ dialect: PostgreSQL, schema: buildSchema() })
-      ),
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableNames, columnNames]);
+  }, [onExecute]);
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "h-full w-full overflow-auto",
-        "[&_.cm-editor]:h-full",
-        "[&_.cm-scroller]:h-full",
-        className
-      )}
-    />
+    <div className="flex flex-col h-full">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-700/50 bg-slate-800/50">
+        <span className="text-xs text-slate-500 font-mono">SQL</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-600">Ctrl+Enter to execute</span>
+          <button
+            onClick={onExecute}
+            disabled={isExecuting || !value.trim()}
+            className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
+          >
+            {isExecuting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Play className="w-3.5 h-3.5" />
+            )}
+            {isExecuting ? "Executing..." : "Execute"}
+          </button>
+        </div>
+      </div>
+
+      {/* Editor */}
+      <div className="flex-1 relative">
+        {!value && placeholder && (
+          <div className="absolute top-3 left-14 text-slate-600 text-sm pointer-events-none z-10 font-mono">
+            {placeholder}
+          </div>
+        )}
+        <Editor
+          height={height}
+          language="sql"
+          value={value}
+          onChange={(v) => onChange(v ?? "")}
+          onMount={handleMount}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 13,
+            lineHeight: 20,
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+            fontLigatures: true,
+            scrollBeyondLastLine: false,
+            renderLineHighlight: "line",
+            cursorBlinking: "smooth",
+            smoothScrolling: true,
+            contextmenu: true,
+            folding: false,
+            lineDecorationsWidth: 4,
+            lineNumbersMinChars: 3,
+            overviewRulerLanes: 0,
+            hideCursorInOverviewRuler: true,
+            overviewRulerBorder: false,
+            scrollbar: {
+              vertical: "auto",
+              horizontal: "auto",
+              verticalScrollbarSize: 8,
+              horizontalScrollbarSize: 8,
+            },
+            suggest: {
+              showKeywords: true,
+              showSnippets: true,
+            },
+            wordWrap: "on",
+            automaticLayout: true,
+          }}
+          theme="postgrify-dark"
+        />
+      </div>
+    </div>
   );
 }

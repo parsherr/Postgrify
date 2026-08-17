@@ -1,6 +1,6 @@
 /**
- * useAuthContext — AuthContext için tüketici hook.
- * Provider dışında çağrılırsa hata fırlatır.
+ * useAuthContext — consumer hook for AuthContext.
+ * Throws an error if called outside the Provider.
  */
 
 import { useContext } from "react";

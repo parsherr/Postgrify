@@ -1,13 +1,13 @@
 /**
- * SORUN #8 Fix — DELETE /:database/auth/me kendi hesabını silme
+ * Issue #8 Fix — DELETE /:database/auth/me self-account deletion
  *
  * users.ts DELETE endpoint (/:database/auth/me):
- * - DB user token gerektirir
- * - Tüm aktif session'ları revoke eder
- * - Hesabı siler → 200 { ok: true, message }
- * - Admin token reddedilir (403 — "not a DB-user token")
- * - Yanlış DB token reddedilir (403 — "Token database mismatch")
- * - Token olmadan 401
+ * - Requires a DB user token
+ * - Revokes all active sessions
+ * - Deletes the account → 200 { ok: true, message }
+ * - Admin token is rejected (403 — "not a DB-user token")
+ * - Wrong DB token is rejected (403 — "Token database mismatch")
+ * - 401 without a token
  */
 
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
@@ -65,7 +65,7 @@ beforeAll(async () => {
   app.decorateRequest("dbName", null);
   app.decorateRequest("dbUser", null);
 
-  // dbName'i URL param'dan set et — users.ts'deki req.dbName! için gerekli
+  // Set dbName from the URL param — required for req.dbName! in users.ts
   app.addHook("preHandler", async (req) => {
     const params = req.params as Record<string, string>;
     (req as { dbName: string }).dbName = params.database ?? "testdb";
@@ -81,8 +81,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("SORUN #8 — DELETE /:database/auth/me hesap silme", () => {
-  it("geçerli DB user token ile 200 döner", async () => {
+describe("Issue #8 — DELETE /:database/auth/me account deletion", () => {
+  it("returns 200 with a valid DB user token", async () => {
     const res = await app.inject({
       method: "DELETE",
       url: "/testdb/auth/me",
@@ -93,7 +93,7 @@ describe("SORUN #8 — DELETE /:database/auth/me hesap silme", () => {
     expect(res.json()).toHaveProperty("ok", true);
   });
 
-  it("token olmadan 401 döner", async () => {
+  it("returns 401 without a token", async () => {
     const res = await app.inject({
       method: "DELETE",
       url: "/testdb/auth/me",
@@ -101,7 +101,7 @@ describe("SORUN #8 — DELETE /:database/auth/me hesap silme", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("admin token ile 403 döner (DB user token zorunlu)", async () => {
+  it("returns 403 with an admin token (DB user token is required)", async () => {
     const jwtSvc = new JwtService(JWT_SECRET);
     const adminToken = await jwtSvc.signAdminToken();
 
@@ -110,11 +110,11 @@ describe("SORUN #8 — DELETE /:database/auth/me hesap silme", () => {
       url: "/testdb/auth/me",
       headers: { authorization: `Bearer ${adminToken}` },
     });
-    // users.ts: verifyDbUser admin token'ı reddeder → 403 "not a DB-user token"
+    // users.ts: verifyDbUser rejects admin tokens → 403 "not a DB-user token"
     expect(res.statusCode).toBe(403);
   });
 
-  it("yanlış database token ile 403 döner", async () => {
+  it("returns 403 with a token for the wrong database", async () => {
     const res = await app.inject({
       method: "DELETE",
       url: "/testdb/auth/me",

@@ -1,10 +1,10 @@
 /**
- * Admin DB yönetim route'ları:
- *   GET    /admin/databases       — DB listesi + boyut + tablo sayısı
- *   POST   /admin/databases       — Yeni DB oluştur
- *   DELETE /admin/databases/:db   — DB sil (PostgreSQL seviyesinde DROP)
- *   GET    /admin/databases/:db/api-key        — API key'i döner
- *   POST   /admin/databases/:db/api-key/rotate — API key'i yeniler
+ * Admin DB management routes:
+ *   GET    /admin/databases       — DB list + size + table count
+ *   POST   /admin/databases       — Create a new DB
+ *   DELETE /admin/databases/:db   — Drop DB (PostgreSQL-level DROP)
+ *   GET    /admin/databases/:db/api-key        — Return the API key
+ *   POST   /admin/databases/:db/api-key/rotate — Rotate the API key
  *   POST   /admin/databases/:db/schema-cache/reload — E-27 schema cache invalidate
  */
 
@@ -36,7 +36,7 @@ export async function databasesRoute(server: FastifyInstance) {
         ORDER BY d.datname
       `;
 
-      // Her DB için tablo sayısı — zaten açık pool varsa kullan, yoksa kısa süreli bağlan
+      // Table count per DB — reuse an already-open pool if available, otherwise connect briefly
       const databases = await Promise.all(
         dbRows.map(async (row) => {
           const name = row.name as string;
@@ -52,7 +52,7 @@ export async function databasesRoute(server: FastifyInstance) {
             `;
             tableCount = Number(countRow.table_count);
           } catch {
-            // Bağlantı hatası — 0 döndür
+            // Connection error — return 0
           }
 
           return {
@@ -100,7 +100,7 @@ export async function databasesRoute(server: FastifyInstance) {
         await ensureAuthSchema(dbSql);
         apiKey = await provisionApiKey(dbSql);
       } catch {
-        // Auth schema olmadan da devam et
+        // Continue even without auth schema
       }
 
       server.log.info(`Database created: ${name}`);
@@ -128,15 +128,15 @@ export async function databasesRoute(server: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid database name" });
       }
 
-      // Önce pool'u kapat (açık bağlantılar DROP'u engelleyebilir)
+      // Close the pool first (open connections may block DROP)
       await server.poolManager.releasePool(db);
 
-      // DROP DATABASE — postgres maintenance DB üzerinden çalıştır
+      // DROP DATABASE — run against the postgres maintenance DB
       const sql = server.poolManager.getPool("postgres");
 
-      // Varsa kalan bağlantıları zorla kes
-      // Parametrik sorgu — identifier kontrolü geçmiş olsa bile string
-      // interpolasyonu savunma derinliği ilkesini ihlal eder.
+      // Force-terminate any remaining connections
+      // Parameterised query — even though the identifier has already been validated,
+      // string interpolation would violate defence-in-depth.
       try {
         await sql.unsafe(
           `SELECT pg_terminate_backend(pid)
@@ -145,16 +145,16 @@ export async function databasesRoute(server: FastifyInstance) {
           [db]
         );
       } catch {
-        // Hata olsa bile DROP'u dene
+        // Attempt DROP even if termination fails
       }
 
       await sql.unsafe(`DROP DATABASE IF EXISTS "${db}"`);
 
-      // Settings'i DROP sonrası temizle
+      // Clean up settings after DROP
       try {
         await server.settings.deleteDatabase(db);
       } catch {
-        // Settings kaydı yoksa hata yoksay
+        // Ignore error if no settings record exists
       }
 
       server.log.info(`Database dropped: ${db}`);

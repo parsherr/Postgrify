@@ -1,8 +1,8 @@
 /**
- * POST /auth/token/admin — Admin JWT üretir.
+ * POST /auth/token/admin — Issues an admin JWT.
  * Body: { adminSecret, expiresIn? }
  *
- * Rate limit: IP başına 10 req/dk.
+ * Rate limit: 10 req/min per IP.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -10,7 +10,7 @@ import { timingSafeEqual } from "node:crypto";
 import { JwtService } from "../../services/jwtService.js";
 import { config } from "../../config/env.js";
 
-// expiresIn string'ini saniyeye çevirir; sınırı aşarsa hata fırlatır.
+// Converts an expiresIn string to seconds; throws if the limit is exceeded.
 function assertExpiresIn(value: string, maxHours: number): void {
   const match = value.match(/^(\d+)(s|m|h|d)$/);
   if (!match) throw new Error(`Invalid expiresIn format: '${value}'. Use e.g. '1h', '30m'.`);
@@ -48,7 +48,7 @@ export async function adminTokenRoute(server: FastifyInstance) {
         expiresIn?: string;
       };
 
-      // Timing-safe karşılaştırma — brute-force zamanlamasını önler
+      // Timing-safe comparison — prevents brute-force timing attacks
       const provided = Buffer.from(adminSecret);
       const expected = Buffer.from(config.ADMIN_SECRET);
       const valid =
@@ -59,7 +59,7 @@ export async function adminTokenRoute(server: FastifyInstance) {
         return reply.status(401).send({ error: "Invalid admin secret" });
       }
 
-      // Admin token max 24 saat
+      // Admin token maximum 24 hours
       const expiry = expiresIn ?? "24h";
       try {
         assertExpiresIn(expiry, 24);

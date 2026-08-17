@@ -1,6 +1,6 @@
 /**
  * Fastify global augmentations — session plugin decorator tipi.
- * auth/cache/pool decorator'ları kendi plugin dosyalarında declare edilir.
+ * auth/cache/pool decorators are declared in their respective plugin files.
  */
 
 import type { SessionService } from "../services/sessionService.js";

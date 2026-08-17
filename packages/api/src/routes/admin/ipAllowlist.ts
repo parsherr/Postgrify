@@ -1,11 +1,11 @@
 /**
  * Admin IP Allowlist endpoints.
  *
- * GET    /admin/databases/:db/ip-allowlist  → mevcut config
- * PUT    /admin/databases/:db/ip-allowlist  → config güncelle
- * DELETE /admin/databases/:db/ip-allowlist  → everyone'a sıfırla
+ * GET    /admin/databases/:db/ip-allowlist  → current config
+ * PUT    /admin/databases/:db/ip-allowlist  → update config
+ * DELETE /admin/databases/:db/ip-allowlist  → reset to everyone
  *
- * Tüm endpoint'ler admin route group'unda — authenticateAdmin zaten aktif.
+ * All endpoints are in the admin route group — authenticateAdmin is already active.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -108,7 +108,7 @@ export async function ipAllowlistRoutes(server: FastifyInstance) {
       }
 
       await server.settings.setIpAllowlist(db, config);
-      // Middleware cache'ini temizle — yeni ayar hemen devreye girsin
+      // Invalidate the middleware cache so the new setting takes effect immediately
       invalidateIpAllowlistCache(db);
 
       server.log.info({ db, mode: config.mode, count: config.ips.length }, "IP allowlist updated");

@@ -1,17 +1,17 @@
 /**
- * SEC-5: Fastify trustProxy testleri.
+ * SEC-5: Fastify trustProxy tests.
  *
- * trustProxy: true olmadan nginx arkasındaki API gerçek client IP'sini
- * göremez. Rate-limit tüm requestleri aynı IP'den (proxy IP) görür.
+ * Without trustProxy: true, the API behind nginx cannot see the real client IP.
+ * Rate-limit sees all requests as coming from the same IP (the proxy IP).
  *
- * Test: index.ts'de trustProxy: true ayarının varlığını doğrula.
+ * Test: verifies that trustProxy: true is set in index.ts.
  */
 
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 
-describe("SEC-5: trustProxy konfigürasyonu", () => {
-  it("index.ts trustProxy: true içeriyor", async () => {
+describe("SEC-5: trustProxy configuration", () => {
+  it("index.ts contains trustProxy: true", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");
@@ -23,7 +23,7 @@ describe("SEC-5: trustProxy konfigürasyonu", () => {
     expect(content).toMatch(/trustProxy\s*:\s*true/);
   });
 
-  it("trustProxy: true ile X-Forwarded-For okunabilir", async () => {
+  it("X-Forwarded-For is readable with trustProxy: true", async () => {
     const server = Fastify({
       logger: false,
       trustProxy: true,
@@ -47,7 +47,7 @@ describe("SEC-5: trustProxy konfigürasyonu", () => {
     await server.close();
   });
 
-  it("trustProxy: false (varsayılan) ile X-Forwarded-For görmezden gelinir", async () => {
+  it("X-Forwarded-For is ignored with trustProxy: false (default)", async () => {
     const server = Fastify({ logger: false });
     server.get("/ip", (req) => ({ ip: req.ip }));
     await server.ready();
@@ -61,13 +61,13 @@ describe("SEC-5: trustProxy konfigürasyonu", () => {
     });
 
     const body = JSON.parse(res.body);
-    // trustProxy false olduğunda X-Forwarded-For ignore edilir
+    // X-Forwarded-For is ignored when trustProxy is false
     expect(body.ip).not.toBe("1.2.3.4");
 
     await server.close();
   });
 
-  it("trustProxy belgesi index.ts yorumunda açıklanıyor", async () => {
+  it("trustProxy documentation is explained in index.ts comment", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");
@@ -76,7 +76,7 @@ describe("SEC-5: trustProxy konfigürasyonu", () => {
     const indexPath = join(__dirname, "../../src/index.ts");
     const content = readFileSync(indexPath, "utf-8");
 
-    // trustProxy neden gerekli olduğu yorumlanmış olmalı
+    // Why trustProxy is necessary must be documented in a comment
     expect(content).toMatch(/trustProxy|reverse proxy|req\.ip/i);
   });
 });

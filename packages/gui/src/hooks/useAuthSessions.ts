@@ -1,5 +1,5 @@
 /**
- * Per-DB auth session hook'ları.
+ * Per-DB auth session hooks.
  * GET/DELETE /db/:database/auth/sessions
  */
 

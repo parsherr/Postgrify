@@ -1,6 +1,6 @@
 /**
- * Ana sayfa düzeni — sol sidebar + içerik + sağ panel
- * Twitter'ın 3-kolon düzenini taklit eder.
+ * Main layout — left sidebar + content + right panel
+ * Mimics Twitter's 3-column layout.
  */
 
 import { Link, NavLink, useNavigate } from "react-router-dom";
@@ -21,9 +21,9 @@ interface LayoutProps {
 }
 
 const NAV = [
-  { to: "/",        icon: Home,   label: "Ana Sayfa" },
-  { to: "/explore", icon: Search, label: "Keşfet"    },
-  { to: "/alerts",  icon: Bell,   label: "Bildirimler" },
+  { to: "/",        icon: Home,   label: "Home"          },
+  { to: "/explore", icon: Search, label: "Explore"       },
+  { to: "/alerts",  icon: Bell,   label: "Notifications" },
 ];
 
 export function Layout({ children, rightPanel }: LayoutProps) {
@@ -38,7 +38,7 @@ export function Layout({ children, rightPanel }: LayoutProps) {
   return (
     <div className="min-h-screen flex justify-center bg-black">
       <div className="flex w-full max-w-[1280px]">
-        {/* ── Sol Sidebar ───────────────────────────────────────── */}
+        {/* ── Left Sidebar ───────────────────────────────────────── */}
         <aside className="sticky top-0 h-screen w-[72px] xl:w-[275px] flex flex-col pt-2 px-2 xl:px-4 shrink-0">
           {/* Logo */}
           <Link to="/" className="p-3 hover:bg-white/10 rounded-full w-fit mb-1">
@@ -74,17 +74,17 @@ export function Layout({ children, rightPanel }: LayoutProps) {
                 }
               >
                 <User className="w-7 h-7 shrink-0" />
-                <span className="hidden xl:block">Profil</span>
+                <span className="hidden xl:block">Profile</span>
               </NavLink>
             )}
           </nav>
 
-          {/* Tweet butonu */}
+          {/* Tweet button */}
           <button
             onClick={() => navigate("/?compose=true")}
             className="mt-4 btn-primary py-3 px-4 hidden xl:flex"
           >
-            Tweet At
+            Tweet
           </button>
           <button
             onClick={() => navigate("/?compose=true")}
@@ -93,7 +93,7 @@ export function Layout({ children, rightPanel }: LayoutProps) {
             <Feather className="w-5 h-5 text-white" />
           </button>
 
-          {/* Kullanıcı bilgisi */}
+          {/* User info */}
           {user && (
             <div className="mt-auto mb-4 flex items-center gap-3 p-3 rounded-full hover:bg-white/10 cursor-pointer">
               <div className="w-10 h-10 rounded-full bg-sky-600 flex items-center justify-center shrink-0">
@@ -106,12 +106,12 @@ export function Layout({ children, rightPanel }: LayoutProps) {
                 )}
               </div>
               <div className="hidden xl:block min-w-0">
-                <p className="text-sm font-bold text-white truncate">{profile?.display_name ?? "Kullanıcı"}</p>
+                <p className="text-sm font-bold text-white truncate">{profile?.display_name ?? "User"}</p>
                 <p className="text-sm text-gray-500 truncate">@{profile?.username ?? user.email}</p>
               </div>
               <button
                 onClick={handleSignOut}
-                title="Çıkış"
+                title="Sign out"
                 className="ml-auto hidden xl:block text-gray-400 hover:text-red-400"
               >
                 <LogOut className="w-4 h-4" />
@@ -120,12 +120,12 @@ export function Layout({ children, rightPanel }: LayoutProps) {
           )}
         </aside>
 
-        {/* ── Ana İçerik ─────────────────────────────────────────── */}
+        {/* ── Main Content ─────────────────────────────────────────── */}
         <main className="flex-1 border-x border-gray-800 min-h-screen max-w-[600px]">
           {children}
         </main>
 
-        {/* ── Sağ Panel ─────────────────────────────────────────── */}
+        {/* ── Right Panel ─────────────────────────────────────────── */}
         {rightPanel && (
           <aside className="hidden lg:block w-[350px] pl-8 pt-4 shrink-0">
             {rightPanel}

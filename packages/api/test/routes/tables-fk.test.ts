@@ -1,8 +1,8 @@
 /**
- * Test: SORUN #1 Düzeltmesi — POST /tables'e FK (references) desteği.
+ * Test: Issue #1 Fix — FK (references) support for POST /tables.
  *
- * tables.ts POST handler'ında column definition'a `references` field'ı eklendi.
- * Bu test FK tanımlı tablo oluşturmanın doğru DDL ürettiğini doğrular.
+ * The `references` field was added to the column definition in the tables.ts POST handler.
+ * This test verifies that creating a table with an FK produces the correct DDL.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -15,7 +15,7 @@ const JWT_SECRET = "test-secret-must-be-at-least-32-characters-long";
 vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 
-// DDL ifadelerini yakala
+// Capture DDL statements
 const capturedDDL: string[] = [];
 
 vi.mock("postgres", () => {
@@ -94,8 +94,8 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
-describe("SORUN #1 — POST /tables FK desteği", () => {
-  it("FK olmadan tablo oluşturma çalışmaya devam etmeli", async () => {
+describe("Issue #1 — POST /tables FK support", () => {
+  it("creating a table without an FK should continue to work", async () => {
     capturedDDL.length = 0;
 
     const res = await server.inject({
@@ -111,12 +111,12 @@ describe("SORUN #1 — POST /tables FK desteği", () => {
       },
     });
 
-    expect(res.statusCode, `Tablo oluşturma hatası: ${res.body}`).toBe(201);
+    expect(res.statusCode, `Table creation error: ${res.body}`).toBe(201);
     expect(capturedDDL.some(d => d.includes("CREATE TABLE"))).toBe(true);
     expect(capturedDDL.some(d => d.includes("FOREIGN KEY"))).toBe(false);
   });
 
-  it("references ile tablo oluşturunca DDL'de FOREIGN KEY olmalı", async () => {
+  it("creating a table with references should produce a FOREIGN KEY in the DDL", async () => {
     capturedDDL.length = 0;
 
     const res = await server.inject({
@@ -133,16 +133,16 @@ describe("SORUN #1 — POST /tables FK desteği", () => {
       },
     });
 
-    expect(res.statusCode, `FK tablo oluşturma hatası: ${res.body}`).toBe(201);
+    expect(res.statusCode, `FK table creation error: ${res.body}`).toBe(201);
 
     const ddl = capturedDDL.find(d => d.includes("CREATE TABLE"));
-    expect(ddl, "DDL yakalanmadı").toBeDefined();
+    expect(ddl, "DDL was not captured").toBeDefined();
     expect(ddl).toContain("FOREIGN KEY");
     expect(ddl).toContain('"users"');
     expect(ddl).toContain("ON DELETE CASCADE");
   });
 
-  it("DEFAULT onDelete NO ACTION uygulanmalı", async () => {
+  it("DEFAULT onDelete NO ACTION should be applied", async () => {
     capturedDDL.length = 0;
 
     const res = await server.inject({
@@ -158,13 +158,13 @@ describe("SORUN #1 — POST /tables FK desteği", () => {
       },
     });
 
-    expect(res.statusCode, `likes tablo hatası: ${res.body}`).toBe(201);
+    expect(res.statusCode, `likes table error: ${res.body}`).toBe(201);
 
     const ddl = capturedDDL.find(d => d.includes("CREATE TABLE"));
     expect(ddl).toContain("ON DELETE NO ACTION");
   });
 
-  it("geçersiz onDelete değeri reddedilmeli", async () => {
+  it("an invalid onDelete value should be rejected", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/tables",
@@ -180,7 +180,7 @@ describe("SORUN #1 — POST /tables FK desteği", () => {
     expect([400, 500]).toContain(res.statusCode);
   });
 
-  it("geçersiz referans tablo adı identifier kontrolünden geçmemeli", async () => {
+  it("an invalid referenced table name should fail the identifier check", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/tables",

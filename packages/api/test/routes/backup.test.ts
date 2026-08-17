@@ -1,18 +1,17 @@
 /**
- * Backup route testleri.
+ * Backup route tests.
  *
- * Strategy: BackupService ve BackupScheduler mock'lanır; sadece HTTP katmanı ve
- * route handler mantığı test edilir. Gerçek dosya sistemi veya DB bağlantısı
- * gerekmez.
+ * Strategy: BackupService and BackupScheduler are mocked; only the HTTP layer
+ * and route handler logic is tested. No real filesystem or DB connection required.
  *
- * Kapsanan endpoint'ler:
- *   GET  /db/:database/backup/list
- *   POST /db/:database/backup/create
- *   GET  /db/:database/backup/:backupId/download
+ * Endpoints covered:
+ *   GET    /db/:database/backup/list
+ *   POST   /db/:database/backup/create
+ *   GET    /db/:database/backup/:backupId/download
  *   DELETE /db/:database/backup/:backupId
- *   POST /db/:database/backup/restore
- *   GET  /db/:database/backup/schedule
- *   PUT  /db/:database/backup/schedule
+ *   POST   /db/:database/backup/restore
+ *   GET    /db/:database/backup/schedule
+ *   PUT    /db/:database/backup/schedule
  *   DELETE /db/:database/backup/schedule
  */
 
@@ -20,7 +19,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { backupRoute } from "../../src/routes/db/backup.js";
 
-// ── Mock types ────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Mock types
+// ---------------------------------------------------------------------------
 
 const SAMPLE_BACKUP = {
   id: "abc-123",
@@ -38,7 +39,9 @@ const SAMPLE_SCHEDULE = {
   retain: 7,
 };
 
-// ── Mock services ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Mock service factories
+// ---------------------------------------------------------------------------
 
 function makeBackupServiceMock() {
   return {
@@ -73,24 +76,9 @@ function makeSettingsMock() {
   };
 }
 
-function makeMultipartMock(file: Buffer | null = Buffer.from("fake-gzip-data")) {
-  return {
-    file: vi.fn().mockResolvedValue(
-      file
-        ? {
-            file: {
-              on: vi.fn(),
-              pipe: vi.fn(),
-            },
-            fields: {},
-            toBuffer: vi.fn().mockResolvedValue(file),
-          }
-        : null
-    ),
-  };
-}
-
-// ── Test server factory ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Test server factory
+// ---------------------------------------------------------------------------
 
 async function buildServer() {
   const app = Fastify({ logger: false });
@@ -133,7 +121,9 @@ async function buildServer() {
   return { app, backupService, scheduler, settings };
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe("GET /backup/list", () => {
   it("returns backup list", async () => {
@@ -233,7 +223,7 @@ describe("GET /backup/schedule", () => {
     await app.close();
   });
 
-  it("returns null schedule when none configured", async () => {
+  it("returns null schedule when none is configured", async () => {
     const { app, settings } = await buildServer();
     settings.getBackupSchedule.mockResolvedValueOnce(null);
 

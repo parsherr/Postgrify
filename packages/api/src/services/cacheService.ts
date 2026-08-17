@@ -1,11 +1,11 @@
 /**
- * Cache Service — Redis veya in-memory LRU cache.
- * Dışarıya aynı arayüzü sunar; implementasyon otomatik seçilir.
+ * Cache Service — Redis or in-memory LRU cache.
+ * Exposes the same interface externally; implementation is selected automatically.
  *
- * TTL sabit değerleri (saniye):
+ * TTL constants (seconds):
  *   ROW_QUERY   = 30
- *   SCHEMA      = 300  (5 dk)
- *   TABLE_LIST  = 120  (2 dk)
+ *   SCHEMA      = 300  (5 min)
+ *   TABLE_LIST  = 120  (2 min)
  *   DB_SIZE     = 60
  */
 
@@ -59,12 +59,12 @@ export class CacheService {
   }
 
   /**
-   * Pattern ile eşleşen tüm key'leri siler (invalidasyon için).
-   * In-memory modda prefix eşleşmesi kullanılır.
+   * Deletes all keys matching a pattern (for cache invalidation).
+   * In-memory mode uses prefix matching.
    */
   async invalidatePattern(pattern: string): Promise<void> {
     if (this.redis) {
-      // KEYS yerine SCAN kullan — production Redis'te KEYS blocking'dir
+      // Use SCAN instead of KEYS — KEYS is blocking in production Redis
       const keysToDelete: string[] = [];
       for await (const key of this.redis.scanIterator({ MATCH: pattern, COUNT: 100 })) {
         keysToDelete.push(key);
@@ -82,17 +82,17 @@ export class CacheService {
     if (this.redis) await this.redis.disconnect();
   }
 
-  /** Rate limit plugin'i için Redis client'ını doğrudan expose eder. */
+  /** Directly exposes the Redis client for the rate-limit plugin. */
   get redisClient(): RedisClientType | null {
     return this.redis;
   }
 
   /**
-   * Cache key oluşturur. Her part'tan `:` ve `*` karakterleri sıyrılır.
+   * Builds a cache key. Strips `:` and `*` characters from each part.
    *
-   * Güvenlik: `buildKey("db:evil", "table")` → `postgrify:dbevil:table`
-   * Cache poisoning/traversal saldırısını önler.
-   * Örn: Redis SCAN pattern'ında `*` wildcard inject edilemez.
+   * Security: `buildKey("db:evil", "table")` → `postgrify:dbevil:table`
+   * Prevents cache poisoning/traversal attacks.
+   * e.g. a `*` wildcard cannot be injected into a Redis SCAN pattern.
    */
   buildKey(...parts: string[]): string {
     const safeParts = parts.map((p) => p.replace(/[:\s*]/g, ""));

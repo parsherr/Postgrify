@@ -1,11 +1,11 @@
 /**
- * AuthsTab — per-database auth yönetim paneli.
+ * AuthsTab — per-database auth management panel.
  *
- * Alt sekmeler:
- *   1. Kullanıcılar  — kullanıcı listesi, davet, düzenle, sil
- *   2. Ayarlar       — feature flag'ler, OAuth provider'lar
- *   3. Audit Log     — tüm auth eventlarının kaydı
- *   4. Session'lar   — aktif session listesi, zorla çıkart
+ * Sub-tabs:
+ *   1. Users         — user list, invite, edit, delete
+ *   2. Settings      — feature flags, OAuth providers
+ *   3. Audit Log     — record of all auth events
+ *   4. Sessions      — active session list, force logout
  */
 
 import React, { useState } from "react";
@@ -38,7 +38,7 @@ import { useAuthSessions, useRevokeAuthSession } from "@/hooks/useAuthSessions";
 import type { DbAuthUser, DbAuthUserRole } from "@/types/index";
 import { cn } from "@/lib/utils";
 
-// ── Tip yardımcıları ─────────────────────────────────────────────────────────
+// ── Type helpers ─────────────────────────────────────────────────────────────
 
 const ROLE_META: Record<DbAuthUserRole, { label: string; icon: React.ElementType; color: string }> = {
   admin:  { label: "Admin",  icon: ShieldCheck, color: "text-rose-500" },
@@ -61,9 +61,9 @@ function formatDate(iso: string | null): string {
   return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
 }
 
-// ── Alt sekme bileşenleri ────────────────────────────────────────────────────
+// ── Sub-tab components ───────────────────────────────────────────────────────
 
-// ── 1. Kullanıcılar ──────────────────────────────────────────────────────────
+// ── 1. Users ─────────────────────────────────────────────────────────────────
 
 interface InviteUserDialogProps { db: string; open: boolean; onClose: () => void; }
 
@@ -78,11 +78,11 @@ function InviteUserDialog({ db, open, onClose }: InviteUserDialogProps) {
     e.preventDefault();
     try {
       await mutateAsync({ email, password, role });
-      toast.success(`${email} başarıyla eklendi.`);
+      toast.success(`${email} added successfully.`);
       setEmail(""); setPassword(""); setRole("viewer");
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Kullanıcı oluşturulamadı.");
+      toast.error(err instanceof Error ? err.message : "Failed to create user.");
     }
   }
 
@@ -91,36 +91,36 @@ function InviteUserDialog({ db, open, onClose }: InviteUserDialogProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <UserPlus className="h-4 w-4" />Kullanıcı Davet Et
+            <UserPlus className="h-4 w-4" />Invite User
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="space-y-1.5">
-            <Label htmlFor="invite-email">E-posta</Label>
-            <Input id="invite-email" type="email" placeholder="kullanici@example.com"
+            <Label htmlFor="invite-email">Email</Label>
+            <Input id="invite-email" type="email" placeholder="user@example.com"
               value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="invite-password">Başlangıç Şifresi</Label>
-            <Input id="invite-password" type="password" placeholder="En az 8 karakter"
+            <Label htmlFor="invite-password">Initial Password</Label>
+            <Input id="invite-password" type="password" placeholder="At least 8 characters"
               value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="invite-role">Rol</Label>
+            <Label htmlFor="invite-role">Role</Label>
             <Select value={role} onValueChange={(v) => setRole(v as DbAuthUserRole)}>
               <SelectTrigger id="invite-role"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="viewer">Viewer — Sadece okuma</SelectItem>
-                <SelectItem value="editor">Editor — Okuma + yazma</SelectItem>
-                <SelectItem value="admin">Admin — Tam erişim</SelectItem>
+                <SelectItem value="viewer">Viewer — Read only</SelectItem>
+                <SelectItem value="editor">Editor — Read + write</SelectItem>
+                <SelectItem value="admin">Admin — Full access</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <DialogFooter className="pt-2">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>İptal</Button>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>Cancel</Button>
             <Button type="submit" disabled={isPending}>
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Ekle
+              Add
             </Button>
           </DialogFooter>
         </form>
@@ -141,10 +141,10 @@ function EditUserDialog({ db, user, open, onClose }: EditUserDialogProps) {
     e.preventDefault();
     try {
       await mutateAsync({ id: user.id, role, is_active: isActive });
-      toast.success("Kullanıcı güncellendi.");
+      toast.success("User updated.");
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Güncellenemedi.");
+      toast.error(err instanceof Error ? err.message : "Failed to update.");
     }
   }
 
@@ -153,13 +153,13 @@ function EditUserDialog({ db, user, open, onClose }: EditUserDialogProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Pencil className="h-4 w-4" />Kullanıcıyı Düzenle
+            <Pencil className="h-4 w-4" />Edit User
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <p className="text-sm text-muted-foreground">{user.email}</p>
           <div className="space-y-1.5">
-            <Label>Rol</Label>
+            <Label>Role</Label>
             <Select value={role} onValueChange={(v) => setRole(v as DbAuthUserRole)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -172,12 +172,12 @@ function EditUserDialog({ db, user, open, onClose }: EditUserDialogProps) {
           <div className="flex items-center gap-3">
             <input type="checkbox" id="is-active" checked={isActive} onChange={(e) => setIsActive(e.target.checked)}
               className="h-4 w-4 rounded border-border" />
-            <Label htmlFor="is-active">Hesap aktif</Label>
+            <Label htmlFor="is-active">Account active</Label>
           </div>
           <DialogFooter className="pt-2">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>İptal</Button>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>Cancel</Button>
             <Button type="submit" disabled={isPending}>
-              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Kaydet
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
             </Button>
           </DialogFooter>
         </form>
@@ -197,11 +197,11 @@ function ResetPasswordDialog({ db, user, open, onClose }: ResetPasswordDialogPro
     e.preventDefault();
     try {
       await mutateAsync({ id: user.id, password });
-      toast.success("Şifre güncellendi.");
+      toast.success("Password updated.");
       setPassword("");
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Şifre güncellenemedi.");
+      toast.error(err instanceof Error ? err.message : "Failed to update password.");
     }
   }
 
@@ -210,20 +210,20 @@ function ResetPasswordDialog({ db, user, open, onClose }: ResetPasswordDialogPro
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4" />Şifre Sıfırla
+            <KeyRound className="h-4 w-4" />Reset Password
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <p className="text-sm text-muted-foreground">{user.email}</p>
           <div className="space-y-1.5">
-            <Label htmlFor="new-password">Yeni Şifre</Label>
-            <Input id="new-password" type="password" placeholder="En az 8 karakter"
+            <Label htmlFor="new-password">New Password</Label>
+            <Input id="new-password" type="password" placeholder="At least 8 characters"
               value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus />
           </div>
           <DialogFooter className="pt-2">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>İptal</Button>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>Cancel</Button>
             <Button type="submit" disabled={isPending}>
-              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Sıfırla
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Reset
             </Button>
           </DialogFooter>
         </form>
@@ -245,7 +245,7 @@ function UsersSubTab({ db }: { db: string }) {
   async function handleDelete(user: DbAuthUser) {
     try {
       await deleteUser(user.id);
-      toast.success(`${user.email} silindi.`);
+      toast.success(`${user.email} deleted.`);
       setDeleteTarget(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Silinemedi.");
@@ -266,7 +266,7 @@ function UsersSubTab({ db }: { db: string }) {
             <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
           </Button>
           <Button size="sm" onClick={() => setInviteOpen(true)}>
-            <UserPlus className="mr-1.5 h-3.5 w-3.5" />Davet Et
+            <UserPlus className="mr-1.5 h-3.5 w-3.5" />Invite
           </Button>
         </div>
       </div>
@@ -277,7 +277,7 @@ function UsersSubTab({ db }: { db: string }) {
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">
-          {search ? "Eşleşen kullanıcı yok." : "Henüz kullanıcı yok."}
+          {search ? "No matching users." : "No users yet."}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -285,10 +285,10 @@ function UsersSubTab({ db }: { db: string }) {
             <thead>
               <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
                 <th className="px-4 py-2 text-left font-medium">Email</th>
-                <th className="px-4 py-2 text-left font-medium">Rol</th>
-                <th className="px-4 py-2 text-left font-medium">Durum</th>
-                <th className="px-4 py-2 text-left font-medium">Son Giriş</th>
-                <th className="px-4 py-2 text-right font-medium">İşlemler</th>
+                <th className="px-4 py-2 text-left font-medium">Role</th>
+                <th className="px-4 py-2 text-left font-medium">Status</th>
+                <th className="px-4 py-2 text-left font-medium">Last Login</th>
+                <th className="px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -298,20 +298,20 @@ function UsersSubTab({ db }: { db: string }) {
                   <td className="px-4 py-2.5"><RoleBadge role={user.role} /></td>
                   <td className="px-4 py-2.5">
                     {user.is_active ? (
-                      <Badge variant="outline" className="text-emerald-500 border-emerald-500/30 text-xs">Aktif</Badge>
+                      <Badge variant="outline" className="text-emerald-500 border-emerald-500/30 text-xs">Active</Badge>
                     ) : (
                       <Badge variant="outline" className="text-muted-foreground text-xs">
-                        <CircleSlash className="mr-1 h-3 w-3" />Devre Dışı
+                        <CircleSlash className="mr-1 h-3 w-3" />Inactive
                       </Badge>
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatDate(user.last_login ?? null)}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Düzenle" onClick={() => setEditUser(user)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit" onClick={() => setEditUser(user)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Şifre Sıfırla" onClick={() => setResetUser(user)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Reset Password" onClick={() => setResetUser(user)}>
                         <KeyRound className="h-3.5 w-3.5" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Sil" onClick={() => setDeleteTarget(user)}>
@@ -324,7 +324,7 @@ function UsersSubTab({ db }: { db: string }) {
             </tbody>
           </table>
           <div className="px-4 py-2 border-t border-border bg-muted/20 text-xs text-muted-foreground">
-            {data?.total ?? 0} kullanıcı
+            {data?.total ?? 0} users
           </div>
         </div>
       )}
@@ -333,15 +333,15 @@ function UsersSubTab({ db }: { db: string }) {
       {editUser && <EditUserDialog db={db} user={editUser} open onClose={() => setEditUser(null)} />}
       {resetUser && <ResetPasswordDialog db={db} user={resetUser} open onClose={() => setResetUser(null)} />}
       {deleteTarget && (
-        <ConfirmDialog open title="Kullanıcıyı Sil"
-          description={`"${deleteTarget.email}" kalıcı olarak silinecek.`}
+        <ConfirmDialog open title="Delete User"
+          description={`"${deleteTarget.email}" will be permanently deleted.`}
           confirmLabel="Sil" onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />
       )}
     </div>
   );
 }
 
-// ── 2. Ayarlar ───────────────────────────────────────────────────────────────
+// ── 2. Settings ──────────────────────────────────────────────────────────────
 
 function ToggleRow({
   label, description, value, onChange, disabled,
@@ -411,19 +411,19 @@ function OAuthProviderRow({
     e.preventDefault();
     try {
       await upsert({ provider, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri });
-      toast.success(`${label} yapılandırması kaydedildi.`);
+      toast.success(`${label} configuration saved.`);
       setOpen(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Kaydedilemedi.");
+      toast.error(err instanceof Error ? err.message : "Failed to save.");
     }
   }
 
   async function handleRemove() {
     try {
       await remove(provider);
-      toast.success(`${label} kaldırıldı.`);
+      toast.success(`${label} removed.`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Kaldırılamadı.");
+      toast.error(err instanceof Error ? err.message : "Failed to remove.");
     }
   }
 
@@ -435,15 +435,15 @@ function OAuthProviderRow({
           <div>
             <p className="text-sm font-medium">{label}</p>
             {existing ? (
-              <p className="text-xs text-emerald-500 flex items-center gap-1"><Check className="h-3 w-3" />Yapılandırıldı</p>
+              <p className="text-xs text-emerald-500 flex items-center gap-1"><Check className="h-3 w-3" />Configured</p>
             ) : (
-              <p className="text-xs text-muted-foreground">Yapılandırılmadı</p>
+              <p className="text-xs text-muted-foreground">Not configured</p>
             )}
           </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={openDialog}>
-            {existing ? <><Pencil className="mr-1.5 h-3 w-3" />Düzenle</> : <><Plus className="mr-1.5 h-3 w-3" />Ekle</>}
+            {existing ? <><Pencil className="mr-1.5 h-3 w-3" />Edit</> : <><Plus className="mr-1.5 h-3 w-3" />Add</>}
           </Button>
           {existing && (
             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleRemove} disabled={removing}>
@@ -456,7 +456,7 @@ function OAuthProviderRow({
       <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{label} OAuth Yapılandırması</DialogTitle>
+            <DialogTitle>{label} OAuth Configuration</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSave} className="space-y-4 pt-2">
             <div className="space-y-1.5">
@@ -466,7 +466,7 @@ function OAuthProviderRow({
             <div className="space-y-1.5">
               <Label>Client Secret</Label>
               <Input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)}
-                required={!existing} placeholder={existing ? "Değiştirmek için girin" : `${label} Client Secret`} />
+                required={!existing} placeholder={existing ? "Enter to change" : `${label} Client Secret`} />
             </div>
             <div className="space-y-1.5">
               <Label>Redirect URI</Label>
@@ -474,9 +474,9 @@ function OAuthProviderRow({
                 placeholder="https://yourapp.com/auth/callback" />
             </div>
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>İptal</Button>
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={upserting}>
-                {upserting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Kaydet
+                {upserting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
               </Button>
             </DialogFooter>
           </form>
@@ -496,7 +496,7 @@ function SettingsSubTab({ db }: { db: string }) {
     try {
       await update({ [key]: next });
     } catch {
-      toast.error("Ayar güncellenemedi.");
+      toast.error("Failed to update setting.");
     }
   }
 
@@ -509,19 +509,19 @@ function SettingsSubTab({ db }: { db: string }) {
   return (
     <div className="p-4 space-y-6 max-w-2xl">
       <div>
-        <h3 className="text-sm font-semibold mb-3">Giriş Yöntemleri</h3>
+        <h3 className="text-sm font-semibold mb-3">Login Methods</h3>
         <div className="rounded-lg border border-border px-4">
-          <ToggleRow label="Email + Şifre Kaydı" description="Yeni kullanıcılar email+şifre ile kayıt olabilir."
+          <ToggleRow label="Email + Password Signup" description="New users can register with email and password."
             value={s.email_signup_enabled === "true"} onChange={() => toggle("email_signup_enabled", s.email_signup_enabled ?? "true")} disabled={isPending} />
-          <ToggleRow label="Email Doğrulama Zorunlu" description="Kayıt sonrası email doğrulanana kadar giriş yapılamaz."
+          <ToggleRow label="Require Email Verification" description="Users must verify their email before signing in."
             value={s.email_verify_required === "true"} onChange={() => toggle("email_verify_required", s.email_verify_required ?? "false")} disabled={isPending} />
-          <ToggleRow label="Magic Link (Şifresiz Giriş)" description="Kullanıcılar email'e gelen tek tıkla giriş linkiyle oturum açabilir."
+          <ToggleRow label="Magic Link (Passwordless)" description="Users can sign in via a one-click link sent to their email."
             value={s.magic_link_enabled === "true"} onChange={() => toggle("magic_link_enabled", s.magic_link_enabled ?? "false")} disabled={isPending} />
         </div>
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold mb-3">OAuth Sağlayıcıları</h3>
+        <h3 className="text-sm font-semibold mb-3">OAuth Providers</h3>
         <div className="rounded-lg border border-border px-4">
           <OAuthProviderRow db={db} provider="google" label="Google"
             icon={<svg viewBox="0 0 24 24" className="h-4 w-4"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>} />
@@ -568,9 +568,9 @@ function AuditLogSubTab({ db }: { db: string }) {
     <div>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <Select value={eventFilter} onValueChange={(v) => { setEventFilter(v); setOffset(0); }}>
-          <SelectTrigger className="h-8 w-52 text-xs"><SelectValue placeholder="Tüm eventlar" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-52 text-xs"><SelectValue placeholder="All events" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Tüm eventlar</SelectItem>
+            <SelectItem value="">All events</SelectItem>
             {["login", "logout", "signup", "login_failed", "password_reset", "password_reset_request",
               "magic_link_login", "magic_link_request", "oauth_login", "oauth_signup", "email_verified"].map((e) => (
               <SelectItem key={e} value={e}>{e}</SelectItem>
@@ -587,7 +587,7 @@ function AuditLogSubTab({ db }: { db: string }) {
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : !data?.data.length ? (
-        <div className="py-12 text-center text-sm text-muted-foreground">Kayıt yok.</div>
+        <div className="py-12 text-center text-sm text-muted-foreground">No records.</div>
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -595,9 +595,9 @@ function AuditLogSubTab({ db }: { db: string }) {
               <thead>
                 <tr className="border-b border-border bg-muted/30 text-muted-foreground">
                   <th className="px-4 py-2 text-left font-medium">Event</th>
-                  <th className="px-4 py-2 text-left font-medium">Kullanıcı</th>
+                  <th className="px-4 py-2 text-left font-medium">User</th>
                   <th className="px-4 py-2 text-left font-medium">IP</th>
-                  <th className="px-4 py-2 text-left font-medium">Tarih</th>
+                  <th className="px-4 py-2 text-left font-medium">Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -619,7 +619,7 @@ function AuditLogSubTab({ db }: { db: string }) {
             </table>
           </div>
           <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-muted/20 text-xs text-muted-foreground">
-            <span>{total} kayıt</span>
+            <span>{total} records</span>
             {pages > 1 && (
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="icon" className="h-6 w-6" disabled={current === 1} onClick={() => setOffset(offset - LIMIT)}>
@@ -638,7 +638,7 @@ function AuditLogSubTab({ db }: { db: string }) {
   );
 }
 
-// ── 4. Session'lar ───────────────────────────────────────────────────────────
+// ── 4. Sessions ──────────────────────────────────────────────────────────────
 
 function SessionsSubTab({ db }: { db: string }) {
   const { data, isLoading, refetch } = useAuthSessions(db);
@@ -648,9 +648,9 @@ function SessionsSubTab({ db }: { db: string }) {
   async function handleRevoke(id: string) {
     try {
       await revoke(id);
-      toast.success("Session sonlandırıldı.");
+      toast.success("Session revoked.");
     } catch {
-      toast.error("Session sonlandırılamadı.");
+      toast.error("Failed to revoke session.");
     }
   }
 
@@ -659,7 +659,7 @@ function SessionsSubTab({ db }: { db: string }) {
   return (
     <div>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <span className="text-xs text-muted-foreground">{active.length} aktif session</span>
+        <span className="text-xs text-muted-foreground">{active.length} active session</span>
         <Button variant="ghost" size="sm" onClick={() => refetch()}>
           <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
         </Button>
@@ -670,17 +670,17 @@ function SessionsSubTab({ db }: { db: string }) {
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : !active.length ? (
-        <div className="py-12 text-center text-sm text-muted-foreground">Aktif session yok.</div>
+        <div className="py-12 text-center text-sm text-muted-foreground">Active session yok.</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/30 text-muted-foreground">
-                <th className="px-4 py-2 text-left font-medium">Kullanıcı</th>
+                <th className="px-4 py-2 text-left font-medium">User</th>
                 <th className="px-4 py-2 text-left font-medium">IP</th>
-                <th className="px-4 py-2 text-left font-medium">Oluşturulma</th>
-                <th className="px-4 py-2 text-left font-medium">Son Tarih</th>
-                <th className="px-4 py-2 text-right font-medium">İşlem</th>
+                <th className="px-4 py-2 text-left font-medium">Created At</th>
+                <th className="px-4 py-2 text-left font-medium">Expiry</th>
+                <th className="px-4 py-2 text-right font-medium">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -692,7 +692,7 @@ function SessionsSubTab({ db }: { db: string }) {
                   <td className="px-4 py-2.5 text-muted-foreground">{formatDate(session.expires_at)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <Button variant="ghost" size="sm" className="h-7 text-destructive hover:text-destructive"
-                      onClick={() => handleRevoke(session.id)} title="Session'ı Sonlandır">
+                      onClick={() => handleRevoke(session.id)} title="Revoke Session">
                       <LogOut className="h-3.5 w-3.5" />
                     </Button>
                   </td>
@@ -706,15 +706,15 @@ function SessionsSubTab({ db }: { db: string }) {
   );
 }
 
-// ── Ana bileşen ──────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────
 
 type TabId = "users" | "settings" | "audit" | "sessions";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: "users",    label: "Kullanıcılar", icon: UserPlus },
-  { id: "settings", label: "Ayarlar",      icon: Settings },
+  { id: "users",    label: "Users", icon: UserPlus },
+  { id: "settings", label: "Settings",      icon: Settings },
   { id: "audit",    label: "Audit Log",    icon: ClipboardList },
-  { id: "sessions", label: "Session'lar",  icon: LogOut },
+  { id: "sessions", label: "Sessions",  icon: LogOut },
 ];
 
 export function AuthsTab({ db }: { db: string }) {
@@ -722,7 +722,7 @@ export function AuthsTab({ db }: { db: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sekme başlıkları */}
+      {/* Tab headers */}
       <div className="flex border-b border-border bg-muted/20 px-2">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
@@ -740,7 +740,7 @@ export function AuthsTab({ db }: { db: string }) {
         ))}
       </div>
 
-      {/* İçerik */}
+      {/* Content */}
       <div className="flex-1 overflow-auto">
         {activeTab === "users"    && <UsersSubTab    db={db} />}
         {activeTab === "settings" && <SettingsSubTab db={db} />}

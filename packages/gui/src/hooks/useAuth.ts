@@ -1,8 +1,8 @@
 /**
- * Auth hook'ları — geriye dönük uyumluluk için.
+ * Auth hooks — kept for backward compatibility.
  *
- * useAdminLogin ve useLogout artık AuthContext'e delege eder.
- * useDbToken değişmedi (programatik API erişimi için hâlâ gerekli).
+ * useAdminLogin and useLogout now delegate to AuthContext.
+ * useDbToken is unchanged (still needed for programmatic API access).
  */
 
 import { useMutation } from "@tanstack/react-query";

@@ -1,8 +1,8 @@
 /**
- * Audit log route testleri.
+ * Audit log route tests.
  *
  * GET /:database/auth/audit — paginated audit log
- * schema scope gerektirir.
+ * Requires schema scope.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
@@ -112,7 +112,7 @@ const MOCK_AUDIT_ROWS = [
 ];
 
 describe("GET /:database/auth/audit", () => {
-  it("Admin token → 200, audit log döner", async () => {
+  it("Admin token → 200, returns audit log", async () => {
     sqlFnRef
       .mockResolvedValueOnce(MOCK_AUDIT_ROWS)
       .mockResolvedValueOnce([{ count: 2 }]);
@@ -145,7 +145,7 @@ describe("GET /:database/auth/audit", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("Pagination parametreleri → 200, limit ve offset dönüyor", async () => {
+  it("Pagination parameters → 200, limit and offset are returned", async () => {
     sqlFnRef
       .mockResolvedValueOnce([MOCK_AUDIT_ROWS[0]])
       .mockResolvedValueOnce([{ count: 10 }]);
@@ -162,7 +162,7 @@ describe("GET /:database/auth/audit", () => {
     expect(body.offset).toBe(5);
   });
 
-  it("event filtresi ile → 200", async () => {
+  it("with event filter → 200", async () => {
     sqlFnRef
       .mockResolvedValueOnce([MOCK_AUDIT_ROWS[0]])
       .mockResolvedValueOnce([{ count: 1 }]);
@@ -177,7 +177,7 @@ describe("GET /:database/auth/audit", () => {
     expect(res.json().data).toHaveLength(1);
   });
 
-  it("schema scope yok → 403 Insufficient scope", async () => {
+  it("no schema scope → 403 Insufficient scope", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/audit",
@@ -187,7 +187,7 @@ describe("GET /:database/auth/audit", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("Token yok → 401", async () => {
+  it("No token → 401", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/testdb/auth/audit",

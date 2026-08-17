@@ -1,6 +1,6 @@
 /**
- * GET /admin/stats endpoint testi.
- * poolManager ve postgres mock'lanır.
+ * GET /admin/stats endpoint test.
+ * poolManager and postgres are mocked.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -84,7 +84,7 @@ afterAll(async () => {
 });
 
 describe("GET /admin/stats", () => {
-  it("admin token ile istatistik döner", async () => {
+  it("returns statistics with admin token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/stats",
@@ -99,7 +99,7 @@ describe("GET /admin/stats", () => {
     expect(typeof body.nodeVersion).toBe("string");
   });
 
-  it("token olmadan 401 döner", async () => {
+  it("returns 401 without a token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/stats",
@@ -107,7 +107,7 @@ describe("GET /admin/stats", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("DB token ile 403 döner (admin only)", async () => {
+  it("returns 403 with a DB token (admin only)", async () => {
     const jwtSvc = new JwtService(JWT_SECRET);
     const dbToken = await jwtSvc.signDbToken("project1", ["read"]);
     const res = await server.inject({

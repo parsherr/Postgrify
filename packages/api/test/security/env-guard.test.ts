@@ -1,13 +1,13 @@
 /**
- * KRIT-4: Production ortamında placeholder secret'larla başlatma testi.
+ * KRIT-4: Test for startup with placeholder secrets in production.
  *
- * env.ts, production'da bilinen placeholder değerleriyle başlamayı
- * process.exit(1) ile reddeder. Bu testler o davranışı doğrular.
+ * env.ts rejects startup with known placeholder values in production
+ * via process.exit(1). These tests verify that behavior.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
-// process.exit'i mock'la — gerçek exit istemiyoruz
+// Mock process.exit — we do not want a real exit
 const mockExit = vi.spyOn(process, "exit").mockImplementation((_code?: number) => {
   throw new Error(`process.exit(${_code})`);
 });
@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("KRIT-4: Production placeholder secret guard", () => {
-  it("production'da bilinen JWT_SECRET placeholder'ı reddeder", async () => {
+  it("rejects known JWT_SECRET placeholder in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("JWT_SECRET", "placeholder-will-be-replaced-by-setup-wizard-32x");
     vi.stubEnv("ADMIN_SECRET", "a-valid-admin-secret-that-is-long-enough-here");
@@ -29,7 +29,7 @@ describe("KRIT-4: Production placeholder secret guard", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("production'da bilinen ADMIN_SECRET placeholder'ı reddeder", async () => {
+  it("rejects known ADMIN_SECRET placeholder in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("JWT_SECRET", "a-cryptographically-random-jwt-secret-that-is-long-enough");
     vi.stubEnv("ADMIN_SECRET", "placeholder-setup-16x");
@@ -39,7 +39,7 @@ describe("KRIT-4: Production placeholder secret guard", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("production'da boş PG_PASSWORD reddedilir", async () => {
+  it("rejects empty PG_PASSWORD in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("JWT_SECRET", "a-cryptographically-random-jwt-secret-that-is-long-enough");
     vi.stubEnv("ADMIN_SECRET", "a-valid-admin-secret-that-is-long-enough-here");
@@ -49,18 +49,18 @@ describe("KRIT-4: Production placeholder secret guard", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("development'ta placeholder secret'lar kabul edilir", async () => {
+  it("placeholder secrets are accepted in development", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("JWT_SECRET", "placeholder-will-be-replaced-by-setup-wizard-32x");
     vi.stubEnv("ADMIN_SECRET", "placeholder-setup-16x");
     vi.stubEnv("PG_PASSWORD", "");
 
-    // development'ta exit çağrılmamalı
+    // exit must not be called in development
     await expect(import("../../src/config/env.js")).resolves.toBeDefined();
     expect(mockExit).not.toHaveBeenCalled();
   });
 
-  it("production'da gerçek secret'larla başlatma başarılı olur", async () => {
+  it("startup with real secrets succeeds in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("JWT_SECRET", "a-cryptographically-random-jwt-secret-that-is-long-enough");
     vi.stubEnv("ADMIN_SECRET", "a-valid-admin-secret-that-is-long-enough-here");
@@ -70,7 +70,7 @@ describe("KRIT-4: Production placeholder secret guard", () => {
     expect(mockExit).not.toHaveBeenCalled();
   });
 
-  it("JWT_SECRET 32 karakterden kısa ise başlatma başarısız olur", async () => {
+  it("startup fails when JWT_SECRET is shorter than 32 characters", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("JWT_SECRET", "tooshort");
 
@@ -78,7 +78,7 @@ describe("KRIT-4: Production placeholder secret guard", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("ADMIN_SECRET 16 karakterden kısa ise başlatma başarısız olur", async () => {
+  it("startup fails when ADMIN_SECRET is shorter than 16 characters", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("JWT_SECRET", "a-cryptographically-random-jwt-secret-that-is-long-enough");
     vi.stubEnv("ADMIN_SECRET", "tooshort");

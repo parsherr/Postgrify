@@ -1,5 +1,5 @@
 /**
- * ComposeBox — yeni tweet yazma kutusu
+ * ComposeBox — new tweet composer
  */
 
 import { useState, useRef } from "react";
@@ -32,7 +32,7 @@ export function ComposeBox({ onTweeted }: ComposeBoxProps) {
       setContent("");
       onTweeted?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Tweet gönderilemedi");
+      setError(err instanceof Error ? err.message : "Failed to send tweet");
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,7 @@ export function ComposeBox({ onTweeted }: ComposeBoxProps) {
             ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Ne düşünüyorsun?"
+            placeholder="What's on your mind?"
             rows={3}
             className="w-full bg-transparent text-white text-lg placeholder:text-gray-600
                        resize-none focus:outline-none border-b border-gray-800 pb-3 mb-3"
@@ -84,7 +84,7 @@ export function ComposeBox({ onTweeted }: ComposeBoxProps) {
                 disabled={!canTweet}
                 className="btn-primary py-1.5 px-5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? "Gönderiliyor..." : "Tweet At"}
+                {loading ? "Sending..." : "Tweet"}
               </button>
             </div>
           </div>

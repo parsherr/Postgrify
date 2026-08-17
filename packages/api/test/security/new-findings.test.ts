@@ -1,9 +1,9 @@
 /**
- * Yeni güvenlik bulguları testleri (Round 4 analizi).
+ * New security findings tests (Round 4 analysis).
  *
- * NEW-1: Admin login timing saldırısı koruması
- * NEW-6: identifier.ts sistem prefix kontrolü (pg_, _postgrify_)
- * NEW-3/4: Token expiry NULL/Invalid Date koruması
+ * NEW-1: Admin login timing attack protection
+ * NEW-6: identifier.ts system prefix check (pg_, _postgrify_)
+ * NEW-3/4: Token expiry NULL/Invalid Date protection
  * NEW-5: Failed login audit log
  */
 
@@ -15,62 +15,62 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW-1: Admin login timing saldırısı koruması
+// NEW-1: Admin login timing attack protection
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-1: Admin login timing saldırısı koruması", () => {
+describe("NEW-1: Admin login timing attack protection", () => {
   const loginSrc = readFileSync(
     join(__dirname, "../../src/routes/auth/adminLogin.ts"),
     "utf-8"
   );
 
-  it("adminLogin.ts her zaman verifyPassword çağırıyor (email eşleşmeden bağımsız)", () => {
-    // emailMatch değişkeni oluşturulmalı — ayrı boolean
+  it("adminLogin.ts always calls verifyPassword (regardless of email match)", () => {
+    // emailMatch variable must be created — separate boolean
     expect(loginSrc).toContain("emailMatch");
-    // verifyPassword her durumda çağrılmalı
+    // verifyPassword must always be called
     expect(loginSrc).toContain("verifyPassword");
   });
 
-  it("email kontrolü ile şifre kontrolü if bloğunda birleştiriliyor", () => {
-    // !emailMatch || !valid şeklinde combined check
+  it("email check and password check are combined in a single if block", () => {
+    // Combined check in the form !emailMatch || !valid
     expect(loginSrc).toMatch(/!emailMatch\s*\|\|\s*!valid/);
   });
 
-  it("email eşleşmezse erken return yapılmıyor (şifre doğrulaması atlanmıyor)", () => {
-    // Eski kötü pattern: email eşleşmezse hemen return
+  it("early return is not done when email does not match (password validation is not skipped)", () => {
+    // Old bad pattern: return immediately if email does not match
     const badEarlyReturn = /if\s*\([^)]*email[^)]*!==.*\)[\s\S]{0,50}return.*401/;
     expect(loginSrc).not.toMatch(badEarlyReturn);
   });
 
-  it("timing koruması hakkında açıklayıcı yorum mevcut", () => {
+  it("explanatory comment about timing protection is present", () => {
     expect(loginSrc).toContain("timing");
   });
 
-  it("adminLogin.ts verifyPassword'ü await ile çağırıyor", () => {
+  it("adminLogin.ts calls verifyPassword with await", () => {
     expect(loginSrc).toMatch(/await\s+verifyPassword/);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW-6: identifier.ts sistem prefix kontrolü
+// NEW-6: identifier.ts system prefix check
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-6: identifier.ts sistem prefix koruması", () => {
-  // Modül import — Vitest ESM test ortamı
-  it("isValidIdentifier pg_ prefix'i reddediyor", async () => {
+describe("NEW-6: identifier.ts system prefix protection", () => {
+  // Module import — Vitest ESM test environment
+  it("isValidIdentifier rejects pg_ prefix", async () => {
     const { isValidIdentifier } = await import("../../src/utils/identifier.js");
     expect(isValidIdentifier("pg_stat_activity")).toBe(false);
     expect(isValidIdentifier("pg_class")).toBe(false);
     expect(isValidIdentifier("pg_catalog")).toBe(false);
   });
 
-  it("isValidIdentifier _postgrify_ prefix'i reddediyor", async () => {
+  it("isValidIdentifier rejects _postgrify_ prefix", async () => {
     const { isValidIdentifier } = await import("../../src/utils/identifier.js");
     expect(isValidIdentifier("_postgrify_auth")).toBe(false);
     expect(isValidIdentifier("_postgrify_settings")).toBe(false);
   });
 
-  it("isValidIdentifier geçerli identifier'ları kabul ediyor", async () => {
+  it("isValidIdentifier accepts valid identifiers", async () => {
     const { isValidIdentifier } = await import("../../src/utils/identifier.js");
     expect(isValidIdentifier("users")).toBe(true);
     expect(isValidIdentifier("my_table_2")).toBe(true);
@@ -78,14 +78,14 @@ describe("NEW-6: identifier.ts sistem prefix koruması", () => {
     expect(isValidIdentifier("CamelCase")).toBe(true);
   });
 
-  it("isValidIdentifier SQL keyword'leri reddediyor", async () => {
+  it("isValidIdentifier rejects SQL keywords", async () => {
     const { isValidIdentifier } = await import("../../src/utils/identifier.js");
     expect(isValidIdentifier("select")).toBe(false);
     expect(isValidIdentifier("DROP")).toBe(false);
     expect(isValidIdentifier("information_schema")).toBe(false);
   });
 
-  it("identifier.ts RESERVED_PREFIXES listesi pg_ içeriyor", () => {
+  it("identifier.ts RESERVED_PREFIXES list contains pg_", () => {
     const src = readFileSync(
       join(__dirname, "../../src/utils/identifier.ts"),
       "utf-8"
@@ -95,7 +95,7 @@ describe("NEW-6: identifier.ts sistem prefix koruması", () => {
     expect(src).toContain("_postgrify_");
   });
 
-  it("identifier.ts prefix kontrolü startsWith ile yapılıyor", () => {
+  it("identifier.ts prefix check uses startsWith", () => {
     const src = readFileSync(
       join(__dirname, "../../src/utils/identifier.ts"),
       "utf-8"
@@ -105,27 +105,27 @@ describe("NEW-6: identifier.ts sistem prefix koruması", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW-3/4: Token expiry NULL ve Invalid Date koruması
+// NEW-3/4: Token expiry NULL and Invalid Date protection
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-3/4: Token expiry NULL/Invalid Date koruması", () => {
-  it("new Date(undefined) güvensiz davranışını anlar (Invalid Date)", () => {
-    // Bu test neden korumanın gerekli olduğunu belgeler
+describe("NEW-3/4: Token expiry NULL/Invalid Date protection", () => {
+  it("understands unsafe behavior of new Date(undefined) (Invalid Date)", () => {
+    // This test documents why the protection is necessary
     const d = new Date(undefined as unknown as string);
     expect(isNaN(d.getTime())).toBe(true);
-    // Invalid Date < new Date() → false döner → token geçerli sayılabilir!
+    // Invalid Date < new Date() → returns false → token could be considered valid!
     expect(d < new Date()).toBe(false);
   });
 
-  it("new Date(null) epoch döndürür (her zaman expired)", () => {
+  it("new Date(null) returns epoch (always expired)", () => {
     const d = new Date(null as unknown as string);
     expect(isNaN(d.getTime())).toBe(false);
-    // null → epoch (1970) → her zaman expired → bu güvenli ama null'ı
-    // açıkça reddetmek daha iyi pratik
+    // null → epoch (1970) → always expired → this is safe but explicitly
+    // rejecting null is better practice
     expect(d < new Date()).toBe(true);
   });
 
-  it("passwordReset.ts rawExp null check içeriyor", () => {
+  it("passwordReset.ts contains rawExp null check", () => {
     const src = readFileSync(
       join(__dirname, "../../src/routes/db/auth/passwordReset.ts"),
       "utf-8"
@@ -136,7 +136,7 @@ describe("NEW-3/4: Token expiry NULL/Invalid Date koruması", () => {
     expect(src).toContain("exp.getTime()");
   });
 
-  it("magicLink.ts rawExp null check içeriyor", () => {
+  it("magicLink.ts contains rawExp null check", () => {
     const src = readFileSync(
       join(__dirname, "../../src/routes/db/auth/magicLink.ts"),
       "utf-8"
@@ -147,29 +147,29 @@ describe("NEW-3/4: Token expiry NULL/Invalid Date koruması", () => {
     expect(src).toContain("exp.getTime()");
   });
 
-  it("passwordReset güvenli expiry check — NULL input token'ı reddeder", () => {
-    // İzole test: null expiry ile token kabul edilmemeli
+  it("passwordReset safe expiry check — rejects token with NULL input", () => {
+    // Isolated test: token with null expiry must not be accepted
     function safeExpCheck(rawExp: string | null | undefined): boolean {
-      if (!rawExp) return false; // null/undefined → geçersiz
+      if (!rawExp) return false; // null/undefined → invalid
       const exp = new Date(rawExp);
-      if (isNaN(exp.getTime())) return false; // parse hatası → geçersiz
-      return exp >= new Date(); // geçmişte ise süresi dolmuş → false
+      if (isNaN(exp.getTime())) return false; // parse error → invalid
+      return exp >= new Date(); // past date means expired → false
     }
     expect(safeExpCheck(null)).toBe(false);
     expect(safeExpCheck(undefined)).toBe(false);
     expect(safeExpCheck("not-a-date")).toBe(false);
-    expect(safeExpCheck("2020-01-01T00:00:00Z")).toBe(false); // geçmiş
-    // Gelecek tarih → geçerli
+    expect(safeExpCheck("2020-01-01T00:00:00Z")).toBe(false); // past date
+    // Future date → valid
     expect(safeExpCheck(new Date(Date.now() + 60_000).toISOString())).toBe(true);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW-5: Failed login audit log kaydı
+// NEW-5: Failed login audit log record
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("NEW-5: Failed login audit log", () => {
-  it("tokens.ts login_failed event'i audit log'a yazıyor", () => {
+  it("tokens.ts writes login_failed event to audit log", () => {
     const src = readFileSync(
       join(__dirname, "../../src/routes/db/auth/tokens.ts"),
       "utf-8"
@@ -178,7 +178,7 @@ describe("NEW-5: Failed login audit log", () => {
     expect(src).toContain("insertAuditLog");
   });
 
-  it("provision.ts AuditEvent tipinde login_failed tanımlı", () => {
+  it("provision.ts has login_failed defined in AuditEvent type", () => {
     const src = readFileSync(
       join(__dirname, "../../src/routes/db/auth/provision.ts"),
       "utf-8"
@@ -188,28 +188,28 @@ describe("NEW-5: Failed login audit log", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW-8: Toplu PATCH/DELETE — WHERE zorunluluğu
+// NEW-8: Bulk PATCH/DELETE — WHERE requirement
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("NEW-8: Toplu PATCH/DELETE WHERE zorunluluğu", () => {
+describe("NEW-8: Bulk PATCH/DELETE WHERE requirement", () => {
   const rowsSrc = readFileSync(
     join(__dirname, "../../src/routes/db/rows.ts"),
     "utf-8"
   );
 
-  it("rows.ts PATCH endpoint'i WHERE koşulu gerektiriyor", () => {
-    // where parametresi zorunlu olarak kontrol edilmeli
+  it("rows.ts PATCH endpoint requires a WHERE condition", () => {
+    // where parameter must be checked as mandatory
     expect(rowsSrc).toContain("where");
-    // WHERE olmadan güncelleme reddedilmeli
+    // Update without WHERE must be rejected
     const hasBulkUpdateGuard =
       rowsSrc.includes("No WHERE") ||
-      rowsSrc.includes("where koşulu") ||
+      rowsSrc.includes("where condition") ||
       rowsSrc.includes("conditions.length") ||
       rowsSrc.includes("parseWhereConditions");
     expect(hasBulkUpdateGuard).toBe(true);
   });
 
-  it("rows.ts DELETE endpoint'i WHERE koşulu gerektiriyor", () => {
+  it("rows.ts DELETE endpoint requires a WHERE condition", () => {
     expect(rowsSrc).toContain("parseWhereConditions");
     const hasDeleteGuard =
       rowsSrc.includes("No WHERE") ||
@@ -218,12 +218,12 @@ describe("NEW-8: Toplu PATCH/DELETE WHERE zorunluluğu", () => {
     expect(hasDeleteGuard).toBe(true);
   });
 
-  it("queryBuilder.ts parseWhereConditions identifier doğrulaması yapıyor", () => {
+  it("queryBuilder.ts parseWhereConditions performs identifier validation", () => {
     const src = readFileSync(
       join(__dirname, "../../src/services/queryBuilder.ts"),
       "utf-8"
     );
-    // queryBuilder isValidIdentifier veya assertIdentifier kullanıyor olabilir
+    // queryBuilder may use isValidIdentifier or assertIdentifier
     const hasIdentifierCheck =
       src.includes("isValidIdentifier") || src.includes("assertIdentifier");
     expect(hasIdentifierCheck).toBe(true);

@@ -1,7 +1,7 @@
 /**
- * Sorgu loglama yardımcısı.
- * QUERY_LOG_ENABLED=true olduğunda her sorguyu loglar.
- * SLOW_QUERY_THRESHOLD_MS'i aşan sorgular her zaman uyarı olarak loglanır.
+ * Query logging helper.
+ * Logs every query when QUERY_LOG_ENABLED=true.
+ * Queries exceeding SLOW_QUERY_THRESHOLD_MS are always logged as warnings.
  */
 
 import { config } from "../config/env.js";

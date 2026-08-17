@@ -1,8 +1,8 @@
 /**
- * SEC-4: JWT JTI Blacklist (token revocation) testleri.
+ * SEC-4: JWT JTI Blacklist (token revocation) tests.
  *
- * Admin token'lar JTI (JWT ID) ile imzalanır.
- * Logout sonrası JTI kara listeye eklenerek token geçersiz kılınır.
+ * Admin tokens are signed with a JTI (JWT ID).
+ * After logout, the JTI is added to the blacklist, invalidating the token.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,21 +22,21 @@ describe("SEC-4: JtiBlacklist in-memory", () => {
     blacklist = new JtiBlacklist();
   });
 
-  it("boş blacklist has() false döner", async () => {
+  it("empty blacklist has() returns false", async () => {
     expect(await blacklist.has("some-jti")).toBe(false);
   });
 
-  it("eklenen JTI has() ile bulunur", async () => {
+  it("added JTI is found via has()", async () => {
     await blacklist.add("jti-123", 3600);
     expect(await blacklist.has("jti-123")).toBe(true);
   });
 
-  it("farklı JTI has() ile bulunamaz", async () => {
+  it("different JTI is not found via has()", async () => {
     await blacklist.add("jti-abc", 3600);
     expect(await blacklist.has("jti-xyz")).toBe(false);
   });
 
-  it("birden fazla JTI eklenebilir", async () => {
+  it("multiple JTIs can be added", async () => {
     await blacklist.add("jti-1", 3600);
     await blacklist.add("jti-2", 3600);
     await blacklist.add("jti-3", 3600);
@@ -47,7 +47,7 @@ describe("SEC-4: JtiBlacklist in-memory", () => {
 });
 
 describe("SEC-4: JtiBlacklist Redis backend", () => {
-  it("Redis client bağlandığında Redis üzerinden kontrol yapar", async () => {
+  it("checks via Redis when Redis client is connected", async () => {
     const store = new Map<string, string>();
     const mockRedis = {
       set: vi.fn().mockImplementation(async (key: string, _val: string, _opt: unknown) => {
@@ -67,7 +67,7 @@ describe("SEC-4: JtiBlacklist Redis backend", () => {
     expect(mockRedis.get).toHaveBeenCalledWith("jti:redis-jti");
   });
 
-  it("Redis'te olmayan JTI has() false döner", async () => {
+  it("JTI not in Redis returns false from has()", async () => {
     const mockRedis = {
       set: vi.fn(),
       get: vi.fn().mockResolvedValue(null),
@@ -80,8 +80,8 @@ describe("SEC-4: JtiBlacklist Redis backend", () => {
   });
 });
 
-describe("SEC-4: JwtService JTI entegrasyonu", () => {
-  it("signAdminToken JTI içerir", async () => {
+describe("SEC-4: JwtService JTI integration", () => {
+  it("signAdminToken includes JTI", async () => {
     const svc = new JwtService(TEST_JWT_SECRET);
     const token = await svc.signAdminToken("1h", "admin@example.com");
 
@@ -93,7 +93,7 @@ describe("SEC-4: JwtService JTI entegrasyonu", () => {
     expect(payload.jti.length).toBeGreaterThan(10);
   });
 
-  it("farklı admin token'lar farklı JTI içerir", async () => {
+  it("different admin tokens have different JTIs", async () => {
     const svc = new JwtService(TEST_JWT_SECRET);
     const t1 = await svc.signAdminToken("1h");
     const t2 = await svc.signAdminToken("1h");
@@ -104,7 +104,7 @@ describe("SEC-4: JwtService JTI entegrasyonu", () => {
     expect(jti1).not.toBe(jti2);
   });
 
-  it("blacklist'e eklenmiş JTI olan token verifyAdminOrDb null döner", async () => {
+  it("verifyAdminOrDb returns null for token whose JTI is in the blacklist", async () => {
     const svc = new JwtService(TEST_JWT_SECRET);
 
     const token = await svc.signAdminToken("1h");
@@ -112,26 +112,26 @@ describe("SEC-4: JwtService JTI entegrasyonu", () => {
     const jti = payload.jti as string;
     expect(jti).toBeDefined();
 
-    // Global blacklist'e ekle
+    // Add to global blacklist
     await jtiBlacklist.add(jti, 3600);
 
-    // Blacklist'e alındıktan sonra verify null döner
+    // verify returns null after blacklisting
     const result = await svc.verifyAdminOrDb(token);
     expect(result).toBeNull();
   });
 
-  it("JTI olmayan token (DB token) blacklist kontrolünü atlar", async () => {
+  it("token without JTI (DB token) skips blacklist check", async () => {
     const svc = new JwtService(TEST_JWT_SECRET);
-    // signDbToken JTI içermez
+    // signDbToken does not include JTI
     const token = await svc.signDbToken("mydb", ["read"], "1h");
     const result = await svc.verifyAdminOrDb(token);
-    // JTI yoksa blacklist'e bakmaz, token geçerli
+    // Without JTI, blacklist is not consulted — token is valid
     expect(result).not.toBeNull();
   });
 });
 
-describe("SEC-4: jwtService.ts kod kontrolü", () => {
-  it("signAdminToken'da setJti() çağrılıyor", async () => {
+describe("SEC-4: jwtService.ts code check", () => {
+  it("setJti() is called in signAdminToken", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");
@@ -144,7 +144,7 @@ describe("SEC-4: jwtService.ts kod kontrolü", () => {
     expect(content).toMatch(/randomUUID/);
   });
 
-  it("verifyAdminOrDb JTI blacklist kontrolü içeriyor", async () => {
+  it("verifyAdminOrDb contains JTI blacklist check", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");
@@ -157,7 +157,7 @@ describe("SEC-4: jwtService.ts kod kontrolü", () => {
     expect(content).toMatch(/jtiBlacklist\.has/);
   });
 
-  it("JtiBlacklist export edilmiş", async () => {
+  it("JtiBlacklist is exported", async () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const { dirname, join } = await import("node:path");

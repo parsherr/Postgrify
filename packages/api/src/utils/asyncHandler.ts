@@ -1,7 +1,7 @@
 /**
- * Async hata yakalama yardımcısı.
- * Route handler'larında try/catch yazmak yerine bu wrapper kullanılır.
- * Bilinmeyen hatalar 500 olarak döner; Error instance'ları mesajlarıyla birlikte.
+ * Async error-catching helper.
+ * Use this wrapper instead of writing try/catch in every route handler.
+ * Unknown errors return 500; Error instances are forwarded with their message.
  */
 
 import type { FastifyRequest, FastifyReply, RouteHandlerMethod } from "fastify";

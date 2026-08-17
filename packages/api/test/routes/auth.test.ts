@@ -1,5 +1,5 @@
 /**
- * Auth endpoint testleri.
+ * Auth endpoint tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -10,7 +10,7 @@ import { JwtService } from "../../src/services/jwtService.js";
 const TEST_JWT_SECRET = "test-secret-must-be-at-least-32-characters";
 const TEST_ADMIN_SECRET = "test-admin-secret-16ch";
 
-// env değerlerini set et
+// Set env values
 vi.stubEnv("JWT_SECRET", TEST_JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", TEST_ADMIN_SECRET);
 
@@ -19,11 +19,11 @@ let server: FastifyInstance;
 beforeAll(async () => {
   server = Fastify({ logger: false });
 
-  // authPlugin: server.jwtService + authenticate + authenticateAdmin decorator'larını sağlar
+  // authPlugin: provides server.jwtService + authenticate + authenticateAdmin decorators
   const { authPlugin } = await import("../../src/plugins/auth.js");
   await server.register(authPlugin);
 
-  // sessionService mock: logout/refresh endpoint'leri için
+  // sessionService mock: for logout/refresh endpoints
   server.decorate("sessionService", {
     isAvailable: false,
     create: async () => null,
@@ -46,7 +46,7 @@ afterAll(async () => {
 });
 
 describe("POST /auth/token/admin", () => {
-  it("doğru secret ile admin JWT döner", async () => {
+  it("returns admin JWT with correct secret", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -57,13 +57,13 @@ describe("POST /auth/token/admin", () => {
     expect(typeof body.token).toBe("string");
     expect(body.role).toBe("admin");
 
-    // Token doğrula
+    // Verify token
     const jwtSvc = new JwtService(TEST_JWT_SECRET);
     const payload = await jwtSvc.verify(body.token);
     expect(payload?.role).toBe("admin");
   });
 
-  it("yanlış secret ile 401 döner", async () => {
+  it("returns 401 with wrong secret", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -72,7 +72,7 @@ describe("POST /auth/token/admin", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("body eksikken 400 döner", async () => {
+  it("returns 400 when body is missing", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -83,7 +83,7 @@ describe("POST /auth/token/admin", () => {
 });
 
 describe("POST /auth/token", () => {
-  it("geçerli DB token döner (ADMIN_SECRET fallback)", async () => {
+  it("returns valid DB token (ADMIN_SECRET fallback)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -104,7 +104,7 @@ describe("POST /auth/token", () => {
     expect(payload?.role).toBe("db");
   });
 
-  it("geçersiz DB adı ile 400 döner", async () => {
+  it("returns 400 with invalid DB name", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -113,7 +113,7 @@ describe("POST /auth/token", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("yanlış secret ile 401 döner", async () => {
+  it("returns 401 with wrong secret", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -122,7 +122,7 @@ describe("POST /auth/token", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("expiresIn '169h' ile 400 döner (max 168h aşıldı)", async () => {
+  it("returns 400 with expiresIn '169h' (max 168h exceeded)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -132,7 +132,7 @@ describe("POST /auth/token", () => {
     expect(res.json().error).toMatch(/168h/);
   });
 
-  it("expiresIn '168h' ile 200 döner (sınırda geçmeli)", async () => {
+  it("returns 200 with expiresIn '168h' (exactly at the limit)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -141,7 +141,7 @@ describe("POST /auth/token", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("expiresIn '2d' ile 200 döner (48h, sınır dahilinde)", async () => {
+  it("returns 200 with expiresIn '2d' (48h, within the limit)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -150,7 +150,7 @@ describe("POST /auth/token", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("expiresIn 'geçersiz' format ile 400 döner", async () => {
+  it("returns 400 with expiresIn in an invalid format", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token",
@@ -161,8 +161,8 @@ describe("POST /auth/token", () => {
   });
 });
 
-describe("POST /auth/token/admin — expiresIn sınırları", () => {
-  it("expiresIn '25h' ile 400 döner (max 24h aşıldı)", async () => {
+describe("POST /auth/token/admin — expiresIn limits", () => {
+  it("returns 400 with expiresIn '25h' (max 24h exceeded)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -172,7 +172,7 @@ describe("POST /auth/token/admin — expiresIn sınırları", () => {
     expect(res.json().error).toMatch(/24h/);
   });
 
-  it("expiresIn '24h' ile 200 döner (sınırda geçmeli)", async () => {
+  it("returns 200 with expiresIn '24h' (exactly at the limit)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -181,7 +181,7 @@ describe("POST /auth/token/admin — expiresIn sınırları", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("expiresIn 'abc' geçersiz format ile 400 döner", async () => {
+  it("returns 400 with expiresIn 'abc' (invalid format)", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",
@@ -191,7 +191,7 @@ describe("POST /auth/token/admin — expiresIn sınırları", () => {
     expect(res.json().error).toMatch(/Invalid expiresIn/);
   });
 
-  it("yanlış admin secret timing-safe şekilde 401 döner", async () => {
+  it("returns 401 in a timing-safe manner for wrong admin secret", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/auth/token/admin",

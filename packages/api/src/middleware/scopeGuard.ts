@@ -1,33 +1,34 @@
 /**
- * Scope Guard Middleware — JWT token'ın istenen scope'a sahip olup olmadığını kontrol eder.
- * Admin token tüm scope'ları otomatik geçer.
+ * Scope Guard Middleware — checks whether the JWT token has the required scope.
+ * Admin tokens always pass all scope checks automatically.
  *
- * DB-user token'ları (iss: "postgrify/db-auth") da desteklenir:
- *   - "admin" rolü → schema dahil tüm scope'lar
- *   - "editor" rolü → read, write, delete
- *   - "viewer" rolü → yalnızca read
+ * DB-user tokens (iss: "postgrify/db-auth") are also supported:
+ *   - "admin" role  → all scopes including schema
+ *   - "editor" role → read, write, delete
+ *   - "viewer" role → read only
  *
- * Kullanım:
+ * Usage:
  *   preHandler: [server.authenticate, scopeGuard("write")]
- *   preHandler: [server.authenticateAny, scopeGuard("write")]  ← DB-user token için
+ *   preHandler: [server.authenticateAny, scopeGuard("write")]  ← for DB-user tokens
  */
 
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { TokenScope } from "../types/auth.js";
 
 /**
- * Per-DB kullanıcı rolünü izin verilen scope listesine eşler.
+ * Maps each per-DB user role to its list of allowed scopes.
  *
- * Rol açıklamaları:
- *   admin  — tam erişim (DDL dahil)
- *   editor — veri okuma/yazma/silme + ham SELECT sorgusu (JOIN, aggregation, vb.)
- *   viewer — sadece okuma (SELECT, basit filtreler)
+ * Role descriptions:
+ *   admin  — full access (including DDL)
+ *   editor — read/write/delete data + raw SELECT queries (JOINs, aggregations, etc.)
+ *   viewer — read only (SELECT, simple filters)
  *
- * NOT: "query" scope editor'a da verildi (SORUN #11 düzeltmesi).
- * Gerekçe: JOIN içeren sorguları /query endpoint'i üzerinden çalıştırmak zorunlu
- * (rows endpoint JOIN desteklemiyor). SELECT-only /query için "query" scope'u
- * sadece admin'de tutmak, editor kullanıcıların timeline gibi temel özellikleri
- * kullanamamasına neden oluyordu. Admin token ile "schema" ve tam DDL ayrımı korunuyor.
+ * NOTE: the "query" scope was also granted to editor (fix for ISSUE #11).
+ * Rationale: queries involving JOINs must run through the /query endpoint
+ * (the rows endpoint does not support JOINs). Keeping "query" scope admin-only
+ * for SELECT-only /query was preventing editor users from using basic features
+ * such as timeline views. The "schema" scope and full DDL separation via admin
+ * tokens is preserved.
  */
 const DB_USER_ROLE_SCOPES: Record<string, TokenScope[]> = {
   admin:  ["read", "write", "delete", "schema", "query"],
@@ -38,11 +39,11 @@ const DB_USER_ROLE_SCOPES: Record<string, TokenScope[]> = {
 export function scopeGuard(required: TokenScope) {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     // ── DB-user token path ─────────────────────────────────────────────────
-    // authenticateAny ile gelmiş per-DB kullanıcı token'ı
+    // Per-DB user token arriving via authenticateAny
     if (req.dbUser) {
       const dbUser = req.dbUser;
 
-      // Token hangi DB için verilmiş?
+      // Which database was this token issued for?
       if (dbUser.db !== req.dbName) {
         return reply.status(403).send({
           error: "Access denied",
@@ -67,10 +68,10 @@ export function scopeGuard(required: TokenScope) {
       return reply.status(401).send({ error: "Not authenticated" });
     }
 
-    // Admin token her scope'u geçer
+    // Admin token passes all scopes
     if (user.role === "admin") return;
 
-    // DB token kendi DB'sine erişebilir
+    // DB token may only access its own database
     if (user.sub !== req.dbName) {
       return reply.status(403).send({
         error: "Access denied",
@@ -78,7 +79,7 @@ export function scopeGuard(required: TokenScope) {
       });
     }
 
-    // İstenen scope'u kontrol et
+    // Check for the required scope
     if (!user.scope?.includes(required)) {
       return reply.status(403).send({
         error: "Insufficient permissions",

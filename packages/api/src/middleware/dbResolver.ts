@@ -1,14 +1,14 @@
 /**
- * DB Resolver Middleware — Her request'te hangi veritabanının kullanılacağını belirler.
+ * DB Resolver Middleware — Determines which database to use for each request.
  *
- * Öncelik sırası:
- *   1. URL parametresi  →  /db/:database/...
+ * Priority order:
+ *   1. URL parameter    →  /db/:database/...
  *   2. HTTP header      →  X-Database: project1
- *   3. Query parametresi →  ?database=project1
+ *   3. Query parameter  →  ?database=project1
  *
- * Bulunan değer `request.dbName`'e atanır.
- * DB adı geçersiz karakter içeriyorsa 400 döner.
- * Hiçbir yöntemle DB bulunamazsa 400 döner.
+ * The resolved value is assigned to `request.dbName`.
+ * Returns 400 if the DB name contains invalid characters.
+ * Returns 400 if no database can be resolved by any method.
  */
 
 import type { FastifyRequest, FastifyReply } from "fastify";
@@ -18,14 +18,14 @@ export async function dbResolverHook(
   req: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  // URL parametresinden al (/db/:database/...)
+  // Resolve from URL parameter (/db/:database/...)
   const params = req.params as Record<string, string>;
   const fromUrl = params?.database;
 
-  // Header'dan al
+  // Resolve from header
   const fromHeader = req.headers["x-database"] as string | undefined;
 
-  // Query param'dan al
+  // Resolve from query parameter
   const query = req.query as Record<string, string>;
   const fromQuery = query?.database;
 

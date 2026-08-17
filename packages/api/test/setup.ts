@@ -1,6 +1,6 @@
 /**
- * Vitest global test setup — her test dosyasından önce çalışır.
- * Ortam değişkenlerini test değerleriyle override eder.
+ * Vitest global test setup — runs before every test file.
+ * Overrides environment variables with test values.
  */
 
 process.env.PG_HOST = "localhost";

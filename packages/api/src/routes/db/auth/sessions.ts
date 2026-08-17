@@ -1,11 +1,11 @@
 /**
- * Per-DB Session yönetimi:
+ * Per-DB session management:
  *
- *   GET    /:database/auth/sessions           — aktif session listesi
- *   DELETE /:database/auth/sessions/:id       — belirli session'ı revoke et
- *   DELETE /:database/auth/sessions?user_id=  — kullanıcının tüm session'larını revoke et
+ *   GET    /:database/auth/sessions           — list active sessions
+ *   DELETE /:database/auth/sessions/:id       — revoke a specific session
+ *   DELETE /:database/auth/sessions?user_id=  — revoke all sessions for a user
  *
- * Admin scope gerektirir.
+ * Requires admin scope.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -88,9 +88,9 @@ export async function authSessionsRoute(server: FastifyInstance) {
     asyncHandler(async (req, reply) => {
       const { id } = req.params as { id: string };
 
-      // UUID format doğrulaması — PostgreSQL'e geçersiz UUID gönderilmesini önle.
-      // Saldırı örneği: id="'; DROP TABLE sessions; --" → parametre zaten güvenli ama
-      // UUID validation hatalı input için açıklayıcı 400 döndürür.
+      // UUID format validation — prevents sending an invalid UUID to PostgreSQL.
+      // Attack example: id="'; DROP TABLE sessions; --" → the parameter is already safe,
+      // but UUID validation returns a descriptive 400 for bad input.
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!UUID_REGEX.test(id)) {
         return reply.status(400).send({ error: "Invalid session ID format" });

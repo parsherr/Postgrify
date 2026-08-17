@@ -4,14 +4,14 @@ import { GrainGradient } from "@paper-design/shaders-react";
 import { AuthContext } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
-// ── Floating-label input (referans tasarımdan birebir) ────────────────────────
-// Odaklanmadan önce: sol taraf gri placeholder değer, sağ taraf beyaz label.
-// Odaklanınca: label kaybolur, input temizlenir ve kullanıcı yazmaya başlar.
+// ── Floating-label input (from reference design) ────────────────────────
+// Before focus: left side shows grey placeholder, right side shows white label.
+// On focus: label disappears, input clears, user starts typing.
 
-// Floating-label input — UX kuralları:
-// • Boş + odaklanmamış: label orta hizalı büyük placeholder gibi durur
-// • Odaklanınca veya değer varsa: label yukarı çıkar, küçülür
-// • Yazılan text her zaman beyaz
+// Floating-label input — UX rules:
+// • Empty + unfocused: label sits centered like a large placeholder
+// • On focus or when value exists: label rises and shrinks
+// • Typed text is always white
 
 function FieldBox({
   label,
@@ -44,7 +44,7 @@ function FieldBox({
         {label}
       </span>
 
-      {/* Input — paddingTop boşluğu label için */}
+      {/* Input — paddingTop reserved for the label */}
       <input
         type={type}
         name={autoComplete ?? label.toLowerCase()}
@@ -63,7 +63,7 @@ function FieldBox({
   );
 }
 
-// ── Disabled sosyal giriş butonu ──────────────────────────────────────────────
+// ── Disabled social login button ──────────────────────────────────────────────
 
 function SocialButton({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
@@ -78,7 +78,7 @@ function SocialButton({ icon, label }: { icon: React.ReactNode; label: string })
   );
 }
 
-// ── İkonlar ───────────────────────────────────────────────────────────────────
+// ── Icons ───────────────────────────────────────────────────────────────────
 
 function GoogleIcon() {
   return (
@@ -93,7 +93,7 @@ function GoogleIcon() {
 
 
 
-// ── Ana bileşen ───────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -105,7 +105,7 @@ export default function LoginPage() {
   const [error,    setError]    = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
-  // İlk kurulum akışı — admin hesabı yoksa API 404/setup döner
+  // First-run setup flow — API returns 404/setup when no admin account exists
   const [needsSetup, setNeedsSetup] = useState(false);
   const [setupEmail, setSetupEmail] = useState("");
   const [setupPw,    setSetupPw]    = useState("");
@@ -119,7 +119,7 @@ export default function LoginPage() {
       await login(email, password);
       navigate("/", { replace: true });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Giriş başarısız";
+      const msg = err instanceof Error ? err.message : "Login failed";
       if (msg.includes("setup") || msg.includes("404")) {
         setNeedsSetup(true);
       } else {
@@ -133,14 +133,14 @@ export default function LoginPage() {
   async function handleSetup(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (setupPw !== setupPw2) { setError("Şifreler eşleşmiyor"); return; }
+    if (setupPw !== setupPw2) { setError("Passwords do not match"); return; }
     setIsPending(true);
     try {
       await api.post("/setup", { email: setupEmail, password: setupPw });
       await login(setupEmail, setupPw);
       navigate("/", { replace: true });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Kurulum başarısız");
+      setError(err instanceof Error ? err.message : "Setup failed");
     } finally {
       setIsPending(false);
     }
@@ -148,35 +148,35 @@ export default function LoginPage() {
 
   return (
     <section className="min-h-screen bg-black p-3 text-white antialiased [font-synthesis:none]">
-      {/* %50 / %50 iki sütun */}
+      {/* 50% / 50% two-column layout */}
       <div className="grid min-h-[calc(100vh-1.5rem)] gap-6 lg:grid-cols-2">
 
         {/* ── Sol panel — form ──────────────────────────────────────────── */}
         <div className="flex min-h-[760px] items-start rounded-md border border-white/10 bg-[#101014] px-6 py-12 sm:px-10 lg:min-h-0 lg:px-14 lg:py-28 xl:px-20">
           <div className="mx-auto w-full max-w-[520px]">
 
-            {/* Başlık */}
+            {/* Header */}
             <div>
               <h1 className="text-3xl font-medium tracking-[-0.04em] text-white sm:text-4xl lg:text-[42px] lg:leading-[1.05] xl:text-[50px]">
-                {needsSetup ? "İlk kurulum" : "Tekrar hoş geldiniz"}
+                {needsSetup ? "First-time setup" : "Welcome back"}
               </h1>
               <p className="mt-3 text-lg leading-snug text-white/55 sm:text-xl lg:text-2xl xl:text-3xl">
-                {needsSetup ? "Admin hesabı oluştur" : "PostgreSQL Gateway"}
+                {needsSetup ? "Create admin account" : "PostgreSQL Gateway"}
               </p>
             </div>
 
             {!needsSetup ? (
               <>
-                {/* Sosyal giriş butonu (disabled — OAuth entegrasyonu yok) */}
+                {/* Social login button (disabled — no OAuth integration) */}
                 <div className="mt-10">
-                  <SocialButton icon={<GoogleIcon />} label="Google ile giriş" />
+                  <SocialButton icon={<GoogleIcon />} label="Sign in with Google" />
                 </div>
 
                 <div className="my-10 text-center text-xl font-medium text-white/50">
                   veya
                 </div>
 
-                {/* Giriş formu */}
+                {/* Login form */}
                 <form onSubmit={handleLogin} className="space-y-5">
                   <FieldBox
                     label="E-posta"
@@ -187,7 +187,7 @@ export default function LoginPage() {
                     autoComplete="email"
                   />
                   <FieldBox
-                    label="Şifre"
+                    label="Password"
                     value={password}
                     type="password"
                     onChange={e => setPassword(e.target.value)}
@@ -212,7 +212,7 @@ export default function LoginPage() {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                       </svg>
                     ) : null}
-                    Giriş Yap
+                    Log In
                   </button>
                 </form>
               </>
@@ -227,14 +227,14 @@ export default function LoginPage() {
                   required
                 />
                 <FieldBox
-                  label="Şifre"
+                  label="Password"
                   value={setupPw}
                   type="password"
                   onChange={e => setSetupPw(e.target.value)}
                   required
                 />
                 <FieldBox
-                  label="Şifre tekrar"
+                  label="Confirm password"
                   value={setupPw2}
                   type="password"
                   onChange={e => setSetupPw2(e.target.value)}
@@ -250,7 +250,7 @@ export default function LoginPage() {
                   disabled={isPending}
                   className="mt-9 flex h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-white/40 bg-white text-xl font-medium text-black transition-colors hover:bg-white/85 disabled:opacity-50"
                 >
-                  Hesabı Oluştur
+                  Create Account
                 </button>
               </form>
             )}
@@ -261,9 +261,9 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* ── Sağ panel — GrainGradient (referans tasarım) ──────────────── */}
+        {/* ── Right panel — GrainGradient (reference design) ──────────────── */}
         <div className="relative hidden overflow-hidden rounded-md bg-black text-white lg:block">
-          {/* Sarı grain gradient — köşelerden akan efekt */}
+          {/* Yellow grain gradient — flowing from corners effect */}
           <GrainGradient
             speed={0.3}
             scale={1}
@@ -280,9 +280,9 @@ export default function LoginPage() {
             className="absolute inset-0 bg-black"
           />
 
-          {/* İçerik — üst başlık + alt bant */}
+          {/* Content — top heading + bottom band */}
           <div className="relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-12">
-            {/* Üst: büyük slogan */}
+            {/* Top: large slogan */}
             <h2 className="max-w-[520px] pt-0 text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:pt-16 lg:text-[64px] lg:leading-[0.98] xl:text-[70px]">
               Query fast,
               <br />

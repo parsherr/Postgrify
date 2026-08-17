@@ -1,8 +1,8 @@
 /**
- * apiKeyGuard middleware testleri.
+ * apiKeyGuard middleware tests.
  *
- * Bearer token varsa guard atlanır.
- * X-API-Key ile doğrulanır — eksik/yanlış/geçersiz durumlar test edilir.
+ * Guard is skipped when a Bearer token is present.
+ * Validated via X-API-Key — missing/wrong/invalid cases are tested.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -11,7 +11,7 @@ import { JwtService } from "../../../src/services/jwtService.js";
 
 const JWT_SECRET = "test-secret-must-be-at-least-32-characters";
 
-// provision.ts mock — getApiKey kontrolü için
+// provision.ts mock — for getApiKey checks
 const mockGetApiKey = vi.fn();
 
 vi.mock("../../../src/routes/db/auth/provision.js", () => ({
@@ -59,7 +59,7 @@ beforeAll(async () => {
   server.decorate("authenticate", async (_req: FastifyRequest, _reply: FastifyReply) => {});
   server.decorate("authenticateAdmin", async () => {});
 
-  // apiKeyGuard'ı doğrudan test etmek için minimal bir route kur
+  // Set up a minimal route to test apiKeyGuard directly
   const { apiKeyGuard } = await import("../../../src/middleware/apiKeyGuard.js");
   const { dbResolverHook } = await import("../../../src/middleware/dbResolver.js");
 
@@ -80,7 +80,7 @@ afterAll(async () => {
 
 describe("apiKeyGuard", () => {
   describe("Bearer token bypass", () => {
-    it("Bearer token varsa guard atlanır ve 200 döner", async () => {
+    it("guard is skipped and returns 200 when a Bearer token is present", async () => {
       mockGetApiKey.mockResolvedValue("valid-key-abc123");
 
       const res = await server.inject({
@@ -93,35 +93,35 @@ describe("apiKeyGuard", () => {
       expect(res.json()).toEqual({ ok: true });
     });
 
-    it("Bearer token varken X-API-Key eksik olsa bile geçer", async () => {
+    it("passes even if X-API-Key is missing when a Bearer token is present", async () => {
       mockGetApiKey.mockResolvedValue("valid-key-abc123");
 
       const res = await server.inject({
         method: "GET",
         url: "/testdb/probe",
         headers: { authorization: `Bearer ${adminToken}` },
-        // X-API-Key header YOK
+        // X-API-Key header is absent
       });
 
       expect(res.statusCode).toBe(200);
     });
   });
 
-  describe("X-API-Key zorunluluğu", () => {
-    it("Ne Bearer ne X-API-Key varsa 401 döner", async () => {
+  describe("X-API-Key requirement", () => {
+    it("returns 401 when neither Bearer nor X-API-Key is present", async () => {
       mockGetApiKey.mockResolvedValue("valid-key-abc123");
 
       const res = await server.inject({
         method: "GET",
         url: "/testdb/probe",
-        // Hiç header yok
+        // No headers at all
       });
 
       expect(res.statusCode).toBe(401);
       expect(res.json().error).toContain("Missing X-API-Key");
     });
 
-    it("Yanlış X-API-Key ile 401 döner", async () => {
+    it("returns 401 with an incorrect X-API-Key", async () => {
       mockGetApiKey.mockResolvedValue("correct-key-abc123");
 
       const res = await server.inject({
@@ -134,7 +134,7 @@ describe("apiKeyGuard", () => {
       expect(res.json().error).toContain("Invalid API key");
     });
 
-    it("Doğru X-API-Key ile 200 döner", async () => {
+    it("returns 200 with the correct X-API-Key", async () => {
       const correctKey = "correct-key-abc123456789";
       mockGetApiKey.mockResolvedValue(correctKey);
 
@@ -149,8 +149,8 @@ describe("apiKeyGuard", () => {
     });
   });
 
-  describe("Schema provision edilmemiş durum", () => {
-    it("getApiKey null döndürürse 503 döner", async () => {
+  describe("Schema not yet provisioned", () => {
+    it("returns 503 when getApiKey returns null", async () => {
       mockGetApiKey.mockResolvedValue(null);
 
       const res = await server.inject({

@@ -1,9 +1,9 @@
 /**
- * Pool Manager — Her PostgreSQL veritabanı için bağımsız connection pool yönetir.
+ * Pool Manager — manages independent connection pools for each PostgreSQL database.
  *
- * - Lazy initialization: pool, ilk `getPool(dbName)` çağrısında oluşturulur
- * - Idle timeout: kullanılmayan pool'lar otomatik kapatılır
- * - `closeAll()`: graceful shutdown için tüm pool'ları kapatır
+ * - Lazy initialization: pool is created on the first `getPool(dbName)` call
+ * - Idle timeout: unused pools are automatically closed
+ * - `closeAll()`: closes all pools for graceful shutdown
  */
 
 import postgres from "postgres";
@@ -22,7 +22,7 @@ interface PoolManagerConfig {
 interface PoolEntry {
   sql: postgres.Sql;
   lastUsed: number;
-  startedAt: number; // pool açılma zamanı (ms)
+  startedAt: number; // time the pool was opened (ms)
 }
 
 export class PoolManager {
@@ -30,12 +30,12 @@ export class PoolManager {
   private idleTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly cfg: PoolManagerConfig) {
-    // Her dakika idle pool'ları kontrol et
+    // Check idle pools every minute
     this.idleTimer = setInterval(() => this.evictIdlePools(), 60_000);
   }
 
   /**
-   * Verilen DB adı için pool döner. Yoksa oluşturur.
+   * Returns the pool for the given DB name, creating it if it does not exist.
    */
   getPool(dbName: string): postgres.Sql {
     const entry = this.pools.get(dbName);
@@ -55,9 +55,9 @@ export class PoolManager {
       idle_timeout: Math.floor(this.cfg.idleTimeout / 1000),
       max_lifetime: Math.floor(this.cfg.maxLifetime / 1000),
       connect_timeout: 10,
-      keep_alive: 10,          // TCP keepalive: host PG bağlantıyı idle'da kesmez
-      prepare: false,           // PgBouncer uyumluluğu + reconnect kolaylığı
-      onnotice: () => {}, // gürültüyü bastır
+      keep_alive: 10,          // TCP keepalive: prevents the host PG from dropping idle connections
+      prepare: false,           // PgBouncer compatibility + easier reconnect
+      onnotice: () => {}, // suppress notice noise
     });
 
     const now = Date.now();
@@ -66,7 +66,7 @@ export class PoolManager {
   }
 
   /**
-   * Belirli bir DB için pool'u manuel kapatır.
+   * Manually closes the pool for a specific DB.
    */
   async releasePool(dbName: string): Promise<void> {
     const entry = this.pools.get(dbName);
@@ -77,7 +77,7 @@ export class PoolManager {
   }
 
   /**
-   * Tüm pool'ları kapatır. Graceful shutdown'da çağrılır.
+   * Closes all pools. Called during graceful shutdown.
    */
   async closeAll(): Promise<void> {
     if (this.idleTimer) {
@@ -90,43 +90,43 @@ export class PoolManager {
   }
 
   /**
-   * IDLE_TIMEOUT süresini aşan pool'ları graceful olarak kapatır.
+   * Gracefully closes pools that have exceeded the IDLE_TIMEOUT.
    *
-   * Graceful drain: `end({ timeout: 30 })` ile aktif sorguların 30 saniyeye kadar
-   * bitmesini bekler. Bu süre aşılırsa bağlantı zorla kapatılır; in-flight sorgu
-   * kaybolabilir ama minimum kaybı hedefler. Timeout'u 5 yerine 30 saniye olarak
-   * ayarlamak kısa transaction'ların tamamlanmasını sağlar.
+   * Graceful drain: `end({ timeout: 30 })` waits up to 30 seconds for active queries
+   * to finish. If the timeout is exceeded the connection is force-closed; in-flight
+   * queries may be lost, but the goal is to minimize loss. Setting the timeout to
+   * 30 seconds instead of 5 ensures short transactions complete.
    *
-   * Not: postgres.js bağlantı başına aktif transaction sayısını programatik
-   * olarak sorgulamaya izin vermiyor. Güvenli eviction için önerilen pattern:
-   *   - İdleTimeout'u yüksek tutun (varsayılan 10 dakika)
-   *   - closeAll() graceful shutdown'da zaten tüm bağlantıları drainer
+   * Note: postgres.js does not allow programmatically querying the number of active
+   * transactions per connection. The recommended pattern for safe eviction:
+   *   - Keep idleTimeout high (default 10 minutes)
+   *   - closeAll() already drains all connections during graceful shutdown
    */
   private async evictIdlePools(): Promise<void> {
     const now = Date.now();
     for (const [dbName, entry] of this.pools.entries()) {
       if (now - entry.lastUsed > this.cfg.idleTimeout) {
-        // Önce map'ten çıkar — yeni gelen istekler yeni pool alır, race condition olmaz
+        // Remove from map first — new incoming requests will get a new pool, no race condition
         this.pools.delete(dbName);
-        // Graceful drain: 30 saniye timeout ile aktif sorguların bitmesini bekle
+        // Graceful drain: wait up to 30 seconds for active queries to finish
         entry.sql.end({ timeout: 30 }).catch(() => {
-          // Zorla kapatma sessizce başarısız olabilir — bu beklenen durum
+          // Force-close may silently fail — this is expected
         });
       }
     }
   }
 
-  /** Kaç aktif pool olduğunu döner (monitoring için). */
+  /** Returns the number of active pools (for monitoring). */
   get activePoolCount(): number {
     return this.pools.size;
   }
 
-  /** Aktif pool isimlerini döner. */
+  /** Returns the names of active pools. */
   get activePoolNames(): string[] {
     return Array.from(this.pools.keys());
   }
 
-  /** Belirtilen DB'nin pool başlangıç zamanını döner (ms). Yoksa null. */
+  /** Returns the pool start time (ms) for the given DB. Returns null if not found. */
   getPoolStartedAt(dbName: string): number | null {
     return this.pools.get(dbName)?.startedAt ?? null;
   }

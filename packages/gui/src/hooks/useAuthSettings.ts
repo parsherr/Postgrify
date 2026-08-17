@@ -1,5 +1,5 @@
 /**
- * Per-DB auth settings hook'ları.
+ * Per-DB auth settings hooks.
  *
  * GET/PUT /db/:database/auth/settings
  * GET/POST/DELETE /db/:database/auth/settings/oauth

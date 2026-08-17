@@ -1,15 +1,15 @@
 /**
- * apiKeyGuard — Per-database public auth endpoint'lerini korur.
+ * apiKeyGuard — Guards public per-database auth endpoints.
  *
- * Her managed database'in _postgrify_auth.auth_settings tablosunda
- * bir 'api_key' kaydı bulunur. SDK istemcileri bu key'i
- * X-API-Key header'ı ile gönderir.
+ * Each managed database stores an 'api_key' record in its
+ * _postgrify_auth.auth_settings table. SDK clients send this key
+ * via the X-API-Key header.
  *
- * İstisnalar:
- *   - Geçerli bir Bearer token varsa (admin veya DB token) guard atlanır.
- *     Bu, Postgrify GUI ve backend servislerin key gerektirmeden
- *     auth endpoint'lerine erişmesini sağlar.
- *   - Key henüz provision edilmemişse (schema yok) 503 döner.
+ * Exceptions:
+ *   - If a valid Bearer token is present (admin or DB token) the guard is skipped.
+ *     This allows the Postgrify GUI and backend services to reach auth endpoints
+ *     without an API key.
+ *   - If the key has not yet been provisioned (no schema) a 503 is returned.
  */
 
 import type { FastifyRequest, FastifyReply, FastifyInstance } from "fastify";
@@ -20,7 +20,7 @@ export async function apiKeyGuard(
   req: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  // Admin veya DB Bearer token varsa bu guard'ı atla.
+  // Skip this guard if an admin or DB Bearer token is present.
   const authorization = req.headers.authorization;
   if (authorization?.startsWith("Bearer ")) {
     return;
@@ -41,14 +41,14 @@ export async function apiKeyGuard(
 
   const storedKey = await getApiKey(sql);
   if (!storedKey) {
-    // Auth schema henüz provision edilmemiş
+    // Auth schema has not been provisioned yet
     return reply.status(503).send({
       error: "Auth system not yet initialized for this database",
     });
   }
 
-  // timingSafeEqual ile karşılaştır — zamanlama saldırısını engeller.
-  // Buffer uzunlukları eşit olmalı; değilse zaten geçersiz.
+  // Compare with timingSafeEqual — prevents timing attacks.
+  // Buffers must be the same length; if not, the key is already invalid.
   const a = Buffer.from(providedKey, "utf8");
   const b = Buffer.from(storedKey,   "utf8");
   const valid = a.length === b.length && crypto.timingSafeEqual(a, b);

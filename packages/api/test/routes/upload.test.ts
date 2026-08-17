@@ -1,25 +1,25 @@
 /**
- * Image upload endpoint testleri.
+ * Image upload endpoint tests.
  *
- * Test senaryoları:
+ * Test scenarios:
  *   POST /:database/:table/:column/upload
- *     - Geçerli image → 200
- *     - Geçersiz MIME type → 415
- *     - Eksik ?id param → 400
- *     - Geçersiz table adı → 400
- *     - Satır bulunamadı → 404
- *     - Auth olmadan → 401
- *     - write scope olmayan token → 403
+ *     - Valid image → 200
+ *     - Invalid MIME type → 415
+ *     - Missing ?id param → 400
+ *     - Invalid table name → 400
+ *     - Row not found → 404
+ *     - Without auth → 401
+ *     - Token without write scope → 403
  *
  *   GET /:database/:table/:id/:column/raw
- *     - Var olan satır + mime kolonu ile → 200, doğru Content-Type
- *     - Var olan satır + ?mime fallback → 200, fallback Content-Type
- *     - mime yok → application/octet-stream
- *     - Satır bulunamadı → 404
- *     - Null bytea kolonu → 404
- *     - Geçersiz table adı → 400
- *     - Auth olmadan → 401
- *     - Cache-Control header var
+ *     - Existing row with mime column → 200, correct Content-Type
+ *     - Existing row with ?mime fallback → 200, fallback Content-Type
+ *     - No mime → application/octet-stream
+ *     - Row not found → 404
+ *     - Null bytea column → 404
+ *     - Invalid table name → 400
+ *     - Without auth → 401
+ *     - Cache-Control header is present
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -34,8 +34,8 @@ vi.stubEnv("JWT_SECRET", JWT_SECRET);
 vi.stubEnv("ADMIN_SECRET", ADMIN_SECRET);
 
 // ── @fastify/multipart mock ───────────────────────────────────────────────────
-// Gerçek plugin'i tamamen bypass ediyoruz — no-op.
-// addContentTypeParser ve req.file() decorator'ı beforeAll'da manuel ekleniyor.
+// Completely bypassing the real plugin — no-op.
+// addContentTypeParser and the req.file() decorator are added manually in beforeAll.
 vi.mock("@fastify/multipart", () => {
   const noopPlugin = async () => { /* intentional no-op */ };
   noopPlugin[Symbol.for("skip-override")] = true;
@@ -76,8 +76,8 @@ vi.mock("../../src/services/cacheService.js", () => ({
 }));
 
 // ── Test state for req.file() simulation ─────────────────────────────────────
-// Gerçek JPEG magic bytes — upload.ts magic bytes kontrolünü geçmek için zorunlu.
-// Buffer.from("fake-image-data") 0xFF ile başlamaz, magic check 415 döndürür.
+// Real JPEG magic bytes — required to pass the magic bytes check in upload.ts.
+// Buffer.from("fake-image-data") does not start with 0xFF, causing the magic check to return 415.
 const fakeBuffer = Buffer.concat([
   Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]), // JPEG magic
   Buffer.from("fake-image-data"),
@@ -104,8 +104,8 @@ let readOnlyToken: string;
 beforeAll(async () => {
   server = Fastify({ logger: false });
 
-  // multipart/form-data body parser — Fastify varsayılan olarak tanımaz, 415 fırlatır.
-  // @fastify/multipart mock'u no-op olduğu için bunu manuel ekliyoruz.
+  // multipart/form-data body parser — Fastify does not recognize it by default and throws 415.
+  // Because the @fastify/multipart mock is a no-op, we add this manually.
   server.addContentTypeParser(
     "multipart/form-data",
     { parseAs: "buffer" },
@@ -118,7 +118,7 @@ beforeAll(async () => {
   server.decorateRequest("user", null);
   server.decorateRequest("dbName", null);
 
-  // req.file() — mock factory'yi çağıran decorator
+  // req.file() — decorator that calls the mock factory
   server.decorateRequest("file", function (this: FastifyRequest) {
     void this;
     return mockFileFactory();
@@ -169,7 +169,7 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-/** MIME tipine göre doğru magic bytes başlangıcı içeren buffer üretir. */
+/** Produces a buffer with the correct magic bytes prefix for a given MIME type. */
 function makeMagicBuffer(mime: string): Buffer {
   const magicMap: Record<string, number[]> = {
     "image/jpeg": [0xFF, 0xD8, 0xFF, 0xE0],
@@ -188,7 +188,7 @@ function resetMocks(opts?: { fileMimetype?: string; noFile?: boolean }) {
     mockFileFactory = () => Promise.resolve(null);
   } else {
     const mime = opts?.fileMimetype ?? "image/jpeg";
-    // magic bytes mime ile eşleşmeli — yoksa upload.ts magic check 415 döndürür
+    // magic bytes must match the MIME type — otherwise upload.ts magic check returns 415
     const buf = makeMagicBuffer(mime);
     mockFileFactory = () =>
       Promise.resolve({
@@ -203,15 +203,15 @@ function resetMocks(opts?: { fileMimetype?: string; noFile?: boolean }) {
 // POST /upload testleri
 // ─────────────────────────────────────────────────────────────────────────────
 describe("POST /db/:database/:table/:column/upload", () => {
-  it("geçerli image → 200 ve metadata döner", async () => {
+  it("valid image → 200 and returns metadata", async () => {
     resetMocks();
-    // kolon kontrol: photo_mime kolonu YOK
+    // column check: photo_mime column does NOT exist
     mockTaggedResults = [[]];
     // UPDATE RETURNING id
     mockUnsafeResults = [[{ id: "42" }]];
 
     const boundary = "----TestBoundary";
-    // Gerçek JPEG magic bytes (FF D8 FF E0 ...) — magic bytes kontrolünü geçmek için zorunlu
+    // Real JPEG magic bytes (FF D8 FF E0 ...) — required to pass the magic bytes check
     const jpegMagic = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]);
     const partHeader = Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`
@@ -239,15 +239,15 @@ describe("POST /db/:database/:table/:column/upload", () => {
     expect(typeof body.size).toBe("number");
   });
 
-  it("mime kolonu varsa MIME de güncellenir → 200", async () => {
+  it("if a mime column exists, MIME is also updated → 200", async () => {
     resetMocks({ fileMimetype: "image/png" });
-    // photo_mime kolonu MEVCUT
+    // photo_mime column EXISTS
     mockTaggedResults = [[{ column_name: "photo_mime" }]];
     // UPDATE SET col=$1, col_mime=$2 RETURNING id
     mockUnsafeResults = [[{ id: "7" }]];
 
     const boundary = "----MimeBoundary";
-    // Gerçek PNG magic bytes (89 50 4E 47 0D 0A 1A 0A) — magic bytes kontrolünü geçmek için zorunlu
+    // Real PNG magic bytes (89 50 4E 47 0D 0A 1A 0A) — required to pass the magic bytes check
     const pngMagic = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00]);
     const partHeader = Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="img.png"\r\nContent-Type: image/png\r\n\r\n`
@@ -269,7 +269,7 @@ describe("POST /db/:database/:table/:column/upload", () => {
     expect(res.json().mime).toBe("image/png");
   });
 
-  it("eksik ?id param → 400", async () => {
+  it("missing ?id param → 400", async () => {
     resetMocks();
 
     const boundary = "----NoBoundary";
@@ -289,12 +289,12 @@ describe("POST /db/:database/:table/:column/upload", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    // Fastify schema validation "querystring/id is required" veya kendi 400'ümüz
+    // Fastify schema validation "querystring/id is required" or our own 400
     const body = res.json();
     expect(body.error ?? body.message).toBeTruthy();
   });
 
-  it("geçersiz MIME type → 415", async () => {
+  it("invalid MIME type → 415", async () => {
     resetMocks({ fileMimetype: "text/plain" });
 
     const boundary = "----TextBoundary";
@@ -317,11 +317,11 @@ describe("POST /db/:database/:table/:column/upload", () => {
     expect(res.json().error).toMatch(/unsupported media type/i);
   });
 
-  it("satır bulunamadı → 404", async () => {
+  it("row not found → 404", async () => {
     resetMocks();
-    // mime kolonu yok
+    // no mime column
     mockTaggedResults = [[]];
-    // UPDATE RETURNING → boş
+    // UPDATE RETURNING → empty
     mockUnsafeResults = [[]];
 
     const boundary = "----NotFoundBoundary";
@@ -365,7 +365,7 @@ describe("POST /db/:database/:table/:column/upload", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("write scope olmayan token → 403", async () => {
+  it("token without write scope → 403", async () => {
     resetMocks();
 
     const boundary = "----ReadBoundary";
@@ -387,7 +387,7 @@ describe("POST /db/:database/:table/:column/upload", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("geçersiz table adı → 400", async () => {
+  it("invalid table name → 400", async () => {
     resetMocks();
 
     const boundary = "----BadTableBoundary";
@@ -414,9 +414,9 @@ describe("POST /db/:database/:table/:column/upload", () => {
 // GET /raw testleri
 // ─────────────────────────────────────────────────────────────────────────────
 describe("GET /db/:database/:table/:id/:column/raw", () => {
-  it("mime kolonu varsa → 200, doğru Content-Type", async () => {
+  it("mime column exists → 200, correct Content-Type", async () => {
     resetMocks();
-    // photo_mime MEVCUT
+    // photo_mime EXISTS
     mockTaggedResults = [[{ column_name: "photo_mime" }]];
     mockUnsafeResults = [[{ photo: fakeBuffer, photo_mime: "image/png" }]];
 
@@ -432,7 +432,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.rawPayload.length).toBeGreaterThan(0);
   });
 
-  it("mime kolonu yok + ?mime fallback → 200, fallback Content-Type", async () => {
+  it("no mime column + ?mime fallback → 200, fallback Content-Type", async () => {
     resetMocks();
     mockTaggedResults = [[]];
     mockUnsafeResults = [[{ photo: fakeBuffer }]];
@@ -447,7 +447,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.headers["content-type"]).toContain("image/jpeg");
   });
 
-  it("mime kolonu yok + ?mime yok → application/octet-stream", async () => {
+  it("no mime column + no ?mime → application/octet-stream", async () => {
     resetMocks();
     mockTaggedResults = [[]];
     mockUnsafeResults = [[{ photo: fakeBuffer }]];
@@ -462,7 +462,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.headers["content-type"]).toContain("application/octet-stream");
   });
 
-  it("satır bulunamadı → 404", async () => {
+  it("row not found → 404", async () => {
     resetMocks();
     mockTaggedResults = [[]];
     mockUnsafeResults = [[]];
@@ -477,7 +477,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.json().error).toMatch(/row not found/i);
   });
 
-  it("bytea kolonu null → 404", async () => {
+  it("bytea column is null → 404", async () => {
     resetMocks();
     mockTaggedResults = [[]];
     mockUnsafeResults = [[{ photo: null }]];
@@ -492,7 +492,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.json().error).toMatch(/no image data/i);
   });
 
-  it("geçersiz table adı → 400", async () => {
+  it("invalid table name → 400", async () => {
     resetMocks();
 
     const res = await server.inject({
@@ -504,7 +504,7 @@ describe("GET /db/:database/:table/:id/:column/raw", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("auth olmadan → 401", async () => {
+  it("without auth → 401", async () => {
     resetMocks();
 
     const res = await server.inject({

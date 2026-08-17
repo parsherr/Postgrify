@@ -1,8 +1,8 @@
 /**
- * FeedPage — ana timeline
+ * FeedPage — main timeline
  *
- * Tüm tweetleri en yeniden eskiye listeler.
- * Profil bilgileri users_profile tablosundan JOIN yerine ayrı çekme (API kısıtı).
+ * Lists all tweets newest-first.
+ * Profile info is fetched separately from users_profile (no JOIN due to API constraint).
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -33,27 +33,27 @@ export function FeedPage() {
     try {
       const { rows } = await fetchTimeline(30, 0);
 
-      // Her tweet için profil bilgisi ekle (basit N+1 — küçük veri setleri için yeterli)
+      // Enrich each tweet with profile info (simple N+1 — sufficient for small data sets)
       const enriched = await Promise.all(
         rows.map(async (t) => {
           const p = await fetchProfile(t.user_id).catch(() => null);
           return {
             ...t,
             username:     p?.username     ?? t.user_id.slice(0, 8),
-            display_name: p?.display_name ?? "Kullanıcı",
+            display_name: p?.display_name ?? "User",
             avatar_url:   p?.avatar_url   ?? null,
           };
         })
       );
       setTweets(enriched);
 
-      // Kullanıcının beğenilerini çek
+      // Fetch the current user's likes
       if (user) {
         const likes = await fetchUserLikes(profile?.auth_id ?? user.id ?? "");
         setLikedIds(new Set(likes));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Tweet'ler yüklenemedi");
+      setError(err instanceof Error ? err.message : "Failed to load tweets");
     } finally {
       setLoading(false);
     }
@@ -72,36 +72,36 @@ export function FeedPage() {
         await unlikeTweet(userId, tweetId);
         setLikedIds((s) => { const n = new Set(s); n.delete(tweetId); return n; });
       }
-    } catch { /* sessizce geç */ }
+    } catch { /* silently ignore */ }
   }
 
   async function handleDelete(tweetId: string) {
     try {
       await deleteTweet(tweetId);
       setTweets((ts) => ts.filter((t) => t.id !== tweetId));
-    } catch { /* sessizce geç */ }
+    } catch { /* silently ignore */ }
   }
 
   const rightPanel = (
     <div className="space-y-4">
       <div className="bg-gray-900 rounded-2xl p-4">
-        <h2 className="text-xl font-bold text-white mb-4">Tweeter'a Hoş Geldin</h2>
-        <p className="text-gray-400 text-sm">Postgrify üzerinde çalışan Twitter klonu.</p>
+        <h2 className="text-xl font-bold text-white mb-4">Welcome to Tweeter</h2>
+        <p className="text-gray-400 text-sm">A Twitter clone running on Postgrify.</p>
       </div>
     </div>
   );
 
   return (
     <Layout rightPanel={rightPanel}>
-      {/* Başlık */}
+      {/* Header */}
       <header className="sticky top-0 bg-black/80 backdrop-blur-md border-b border-gray-800 px-4 py-3 z-10">
-        <h1 className="text-xl font-bold text-white">Ana Sayfa</h1>
+        <h1 className="text-xl font-bold text-white">Home</h1>
       </header>
 
-      {/* Compose — auth loading bitmeden gösterme */}
+      {/* Compose — don't show until auth loading is done */}
       {!authLoading && user && <ComposeBox onTweeted={loadTweets} />}
 
-      {/* Tweet listesi */}
+      {/* Tweet list */}
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="w-8 h-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
@@ -110,8 +110,8 @@ export function FeedPage() {
         <div className="p-8 text-center text-red-400">{error}</div>
       ) : tweets.length === 0 ? (
         <div className="p-8 text-center text-gray-500">
-          <p className="text-lg font-medium mb-2">Henüz tweet yok</p>
-          <p className="text-sm">İlk tweeti sen at!</p>
+          <p className="text-lg font-medium mb-2">No tweets yet</p>
+          <p className="text-sm">Be the first to tweet!</p>
         </div>
       ) : (
         <div>

@@ -1,6 +1,6 @@
 /**
- * TweetCard — tek bir tweet'i gösterir
- * Like, silme, profil link'i içerir.
+ * TweetCard — renders a single tweet
+ * Includes like, delete, and profile link.
  */
 
 import { useState } from "react";
@@ -20,9 +20,9 @@ interface TweetCardProps {
 function timeAgo(dateStr: string): string {
   const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
   if (diff < 60)   return `${Math.floor(diff)}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}d`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}s`;
-  return new Date(dateStr).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return new Date(dateStr).toLocaleDateString("en-US", { day: "numeric", month: "short" });
 }
 
 export function TweetCard({ tweet, likedByMe = false, onLike, onDelete }: TweetCardProps) {
@@ -31,7 +31,7 @@ export function TweetCard({ tweet, likedByMe = false, onLike, onDelete }: TweetC
   const [likeCount, setLikeCount] = useState(tweet.like_count ?? 0);
 
   const isOwner = user && tweet.user_id === profile?.auth_id;
-  const username = tweet.username ?? "kullanici";
+  const username = tweet.username ?? "user";
   const displayName = tweet.display_name ?? username;
 
   function handleLike() {
@@ -57,7 +57,7 @@ export function TweetCard({ tweet, likedByMe = false, onLike, onDelete }: TweetC
           </div>
         </Link>
 
-        {/* İçerik */}
+        {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Link
@@ -83,7 +83,7 @@ export function TweetCard({ tweet, likedByMe = false, onLike, onDelete }: TweetC
             />
           )}
 
-          {/* Aksiyonlar */}
+          {/* Actions */}
           <div className="flex items-center gap-6 mt-3 text-gray-500">
             <button className="flex items-center gap-1.5 hover:text-sky-400 transition-colors group">
               <MessageCircle className="w-4 h-4 group-hover:bg-sky-500/10 rounded-full" />

@@ -1,5 +1,5 @@
 /**
- * DB Resolver middleware testleri.
+ * DB Resolver middleware tests.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -14,7 +14,7 @@ beforeAll(async () => {
   server.decorateRequest("dbName", null);
   server.decorateRequest("user", null);
 
-  // Test route: resolver'ı çalıştır, dbName'i döndür
+  // Test route: run the resolver and return dbName
   server.get(
     "/db/:database/test",
     { preHandler: [dbResolverHook] },
@@ -39,7 +39,7 @@ afterAll(async () => {
 });
 
 describe("dbResolverHook", () => {
-  it("URL parametresinden DB adını okur", async () => {
+  it("reads the DB name from the URL parameter", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/project1/test",
@@ -48,7 +48,7 @@ describe("dbResolverHook", () => {
     expect(res.json().dbName).toBe("project1");
   });
 
-  it("X-Database header'ından okur", async () => {
+  it("reads from the X-Database header", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/header-test",
@@ -58,7 +58,7 @@ describe("dbResolverHook", () => {
     expect(res.json().dbName).toBe("project2");
   });
 
-  it("query parametresinden okur", async () => {
+  it("reads from the query parameter", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/query-test?database=project3",
@@ -67,7 +67,7 @@ describe("dbResolverHook", () => {
     expect(res.json().dbName).toBe("project3");
   });
 
-  it("DB belirtilmezse 400 döner", async () => {
+  it("returns 400 when no DB is specified", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/header-test",
@@ -76,7 +76,7 @@ describe("dbResolverHook", () => {
     expect(res.json().error).toMatch(/Database not specified/);
   });
 
-  it("geçersiz DB adı 400 döner", async () => {
+  it("returns 400 for an invalid DB name", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/header-test",
@@ -86,7 +86,7 @@ describe("dbResolverHook", () => {
     expect(res.json().error).toMatch(/Invalid database name/);
   });
 
-  it("URL parametresi header'a göre önceliklidir", async () => {
+  it("URL parameter takes priority over header", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/db/url_wins/test",

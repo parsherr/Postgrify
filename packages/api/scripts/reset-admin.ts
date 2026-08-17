@@ -1,23 +1,23 @@
 /**
- * Emergency admin sıfırlama aracı.
+ * Emergency admin reset tool.
  *
- * Kullanım:
- *   npx tsx scripts/reset-admin.ts --email admin@example.com --password "yeniŞifre123!"
+ * Usage:
+ *   npx tsx scripts/reset-admin.ts --email admin@example.com --password "newPassword123!"
  *
- * Ne yapar:
- *   1. Yeni şifrenin argon2id hash'ini üretir.
- *   2. .env dosyasındaki ADMIN_EMAIL ve ADMIN_PASSWORD_HASH satırlarını günceller.
- *   3. API yeniden başlatılana kadar değişiklik aktif olmaz (process.env yeniden yüklenir).
+ * What it does:
+ *   1. Generates an argon2id hash of the new password.
+ *   2. Updates the ADMIN_EMAIL and ADMIN_PASSWORD_HASH lines in the .env file.
+ *   3. The change does not take effect until the API is restarted (process.env is reloaded).
  *
- * Gereksinimler:
- *   - .env dosyası packages/ dizininde bulunmalı (Docker Compose standart konumu)
- *   - ADMIN_EMAIL ve ADMIN_PASSWORD_HASH satırları .env'de önceden var olmalı
- *     (yoksa dosya sonuna eklenir)
+ * Requirements:
+ *   - The .env file must exist in the packages/ directory (standard Docker Compose location)
+ *   - ADMIN_EMAIL and ADMIN_PASSWORD_HASH lines must already be present in .env
+ *     (they will be appended to the end of the file if absent)
  *
- * Güvenlik notu:
- *   Bu araç sadece yerel erişimde (sunucuya SSH ile bağlandıktan sonra) kullanılmalı.
- *   Şifreyi komut satırı argümanı olarak geçmek shell history'de görünür — bunu bilmeli.
- *   Üretimde kullandıktan hemen sonra `history -c` ile history temizleyin.
+ * Security note:
+ *   This tool should only be used with local access (after SSH-ing into the server).
+ *   Passing the password as a command-line argument makes it visible in shell history — be aware.
+ *   After using it in production, clear the history immediately with `history -c`.
  */
 
 import { hashPassword } from "../src/services/passwordService.js";
@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 
-// .env konumunu bul: script packages/api/scripts/'da, .env packages/'da
+// Locate the .env file: this script lives in packages/api/scripts/, .env lives in packages/
 const ENV_CANDIDATES = [
   path.resolve(process.cwd(), ".env"),
   path.resolve(process.cwd(), "../.env"),
@@ -59,7 +59,7 @@ function parseArgs(): { email?: string; password?: string; dryRun: boolean } {
 async function promptPassword(): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   return new Promise((resolve) => {
-    rl.question("Yeni admin şifresi: ", (answer) => {
+    rl.question("New admin password: ", (answer) => {
       rl.close();
       resolve(answer.trim());
     });
@@ -73,18 +73,18 @@ function updateEnvFile(envPath: string, updates: Record<string, string>, dryRun:
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");
     if (regex.test(updated)) {
-      // Mevcut satırı güncelle
+      // Update the existing line
       updated = updated.replace(regex, `${key}=${value}`);
     } else {
-      // Satır yoksa dosya sonuna ekle
+      // Append to end of file if the line does not exist
       updated = updated.trimEnd() + `\n${key}=${value}\n`;
     }
   }
 
   if (dryRun) {
-    console.log("\n[DRY RUN] .env güncellenecek içerik:");
+    console.log("\n[DRY RUN] Content that would be written to .env:");
     console.log("─".repeat(60));
-    // Sadece değişen satırları göster
+    // Show only the changed lines
     for (const key of Object.keys(updates)) {
       const match = updated.match(new RegExp(`^${key}=.*$`, "m"));
       if (match) console.log(match[0]);
@@ -93,12 +93,12 @@ function updateEnvFile(envPath: string, updates: Record<string, string>, dryRun:
     return;
   }
 
-  // Atomik write: önce tmp dosyasına yaz, sonra rename
+  // Atomic write: write to a tmp file first, then rename
   const tmpPath = envPath + ".tmp";
   try {
     fs.writeFileSync(tmpPath, updated, { mode: 0o600 });
     fs.renameSync(tmpPath, envPath);
-    console.log(`✅  .env güncellendi: ${envPath}`);
+    console.log(`✅  .env updated: ${envPath}`);
   } catch (err) {
     // Cleanup
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
@@ -111,20 +111,20 @@ async function main() {
 
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log(`
-Emergency Admin Sıfırlama
+Emergency Admin Reset
 
-Kullanım:
-  npx tsx scripts/reset-admin.ts --email admin@example.com --password "Şifre123!"
-  npx tsx scripts/reset-admin.ts --email admin@example.com  (şifre interaktif sorulur)
+Usage:
+  npx tsx scripts/reset-admin.ts --email admin@example.com --password "Password123!"
+  npx tsx scripts/reset-admin.ts --email admin@example.com  (password prompted interactively)
   npx tsx scripts/reset-admin.ts --dry-run --email ... --password ...
 
-Seçenekler:
-  --email     Yeni admin email adresi (zorunlu)
-  --password  Yeni şifre (verilmezse interaktif sorulur)
-  --dry-run   .env'i değiştirmez, sadece ne yapacağını gösterir
+Options:
+  --email     New admin email address (required)
+  --password  New password (prompted interactively if not provided)
+  --dry-run   Does not modify .env; only shows what would be changed
 
-Sonrası:
-  API container'ını yeniden başlatın: docker compose restart api
+Next step:
+  Restart the API container: docker compose restart api
 `);
     process.exit(0);
   }
@@ -132,31 +132,31 @@ Sonrası:
   // Email
   const email = args.email;
   if (!email || !email.includes("@")) {
-    console.error("❌  Geçerli bir email adresi gerekli: --email admin@example.com");
+    console.error("❌  A valid email address is required: --email admin@example.com");
     process.exit(1);
   }
 
-  // Şifre (argüman veya interaktif)
+  // Password (argument or interactive)
   const password = args.password ?? await promptPassword();
   if (!password || password.length < 8) {
-    console.error("❌  Şifre en az 8 karakter olmalı.");
+    console.error("❌  Password must be at least 8 characters.");
     process.exit(1);
   }
 
-  // .env bul
+  // Locate .env
   const envPath = findEnvFile();
   if (!envPath) {
-    console.error("❌  .env dosyası bulunamadı. Şu konumlara bakıldı:");
+    console.error("❌  .env file not found. Locations searched:");
     ENV_CANDIDATES.forEach((p) => console.error("   " + p));
     process.exit(1);
   }
 
   console.log(`📁  .env: ${envPath}`);
   console.log(`📧  Email: ${email}`);
-  console.log("🔐  Hash üretiliyor...");
+  console.log("🔐  Generating hash...");
 
   const hash = await hashPassword(password);
-  console.log("✅  Hash üretildi.");
+  console.log("✅  Hash generated.");
 
   updateEnvFile(envPath, {
     ADMIN_EMAIL: email,
@@ -164,14 +164,14 @@ Sonrası:
   }, args.dryRun);
 
   if (!args.dryRun) {
-    console.log("\n📢  API'yi yeniden başlatın:");
+    console.log("\n📢  Restart the API:");
     console.log("   docker compose restart api");
-    console.log("\n⚠️   Shell history'den şifreyi temizleyin:");
-    console.log("   history -c  (bash)  veya  fc -p  (zsh)");
+    console.log("\n⚠️   Clear the password from shell history:");
+    console.log("   history -c  (bash)  or  fc -p  (zsh)");
   }
 }
 
 main().catch((err) => {
-  console.error("❌  Hata:", err.message);
+  console.error("❌  Error:", err.message);
   process.exit(1);
 });

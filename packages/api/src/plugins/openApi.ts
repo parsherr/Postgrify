@@ -1,6 +1,6 @@
 /**
- * OpenAPI Plugin — @fastify/swagger ile OpenAPI 3.1 şeması üretir.
- * Scalar UI /api-docs üzerinden serve edilir.
+ * OpenAPI Plugin — generates an OpenAPI 3.1 schema with @fastify/swagger.
+ * Scalar UI is served at /api-docs.
  */
 
 import fp from "fastify-plugin";
@@ -11,13 +11,13 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { FastifyInstance } from "fastify";
 
-// ESM'de __dirname karşılığı
+// ESM equivalent of __dirname
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Derleme sonrası dist/ altından iki üst dizin → packages/api/public/
+// Two directories up from dist/ after compilation → packages/api/public/
 const FAVICON_PATH = join(__dirname, "../../public/favicon.png");
 
 export const openApiPlugin = fp(async (server: FastifyInstance) => {
-  // Brand favicon'u /favicon.png üzerinden serve et
+  // Serve the brand favicon at /favicon.png
   server.get("/favicon.png", async (_req, reply) => {
     reply.header("Content-Type", "image/png");
     reply.header("Cache-Control", "public, max-age=86400");

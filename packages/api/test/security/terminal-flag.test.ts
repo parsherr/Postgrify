@@ -1,9 +1,9 @@
 /**
- * KRIT-1: Terminal WebSocket güvenlik testleri.
+ * KRIT-1: Terminal WebSocket security tests.
  *
- * 1. TERMINAL_ENABLED=false (varsayılan) iken /terminal/ws 403 dönmeli.
- * 2. Güvenli env — shell TERMINAL_ENABLED=false iken spawn edilmemeli.
- * 3. buildSafeEnv — hassas env değişkenlerini dışarıda bırakmalı.
+ * 1. When TERMINAL_ENABLED=false (default), /terminal/ws must return 403.
+ * 2. Secure env — shell must not be spawned when TERMINAL_ENABLED=false.
+ * 3. buildSafeEnv — must exclude sensitive env variables.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -13,10 +13,10 @@ afterEach(() => {
   vi.resetModules();
 });
 
-// ── buildSafeEnv mantığını izole test et ─────────────────────────────────
+// ── Test buildSafeEnv logic in isolation ──────────────────────────────────
 
-// Modülden export edilmediği için mantığı burada tekrar tanımlıyoruz.
-// Bu aynı zamanda terminal.ts'deki mantığın doğruluğunu belgeliyor.
+// Logic is re-defined here because it is not exported from the module.
+// This also documents the correctness of the logic in terminal.ts.
 const SENSITIVE_ENV_KEYS = new Set([
   "JWT_SECRET",
   "ADMIN_SECRET",
@@ -40,38 +40,38 @@ function buildSafeEnv(env: Record<string, string | undefined>): Record<string, s
   return safe;
 }
 
-describe("KRIT-1: Terminal env sanitizasyonu", () => {
-  it("JWT_SECRET env'den çıkarılmalı", () => {
+describe("KRIT-1: Terminal env sanitization", () => {
+  it("JWT_SECRET must be removed from env", () => {
     const env = { PATH: "/usr/bin", JWT_SECRET: "super-secret-value" };
     const safe = buildSafeEnv(env);
     expect("JWT_SECRET" in safe).toBe(false);
   });
 
-  it("ADMIN_SECRET env'den çıkarılmalı", () => {
+  it("ADMIN_SECRET must be removed from env", () => {
     const env = { PATH: "/usr/bin", ADMIN_SECRET: "admin-secret-value" };
     const safe = buildSafeEnv(env);
     expect("ADMIN_SECRET" in safe).toBe(false);
   });
 
-  it("PG_PASSWORD env'den çıkarılmalı", () => {
+  it("PG_PASSWORD must be removed from env", () => {
     const env = { PATH: "/usr/bin", PG_PASSWORD: "db-password" };
     const safe = buildSafeEnv(env);
     expect("PG_PASSWORD" in safe).toBe(false);
   });
 
-  it("SMTP_PASS env'den çıkarılmalı", () => {
+  it("SMTP_PASS must be removed from env", () => {
     const env = { PATH: "/usr/bin", SMTP_PASS: "smtp-password" };
     const safe = buildSafeEnv(env);
     expect("SMTP_PASS" in safe).toBe(false);
   });
 
-  it("REDIS_URL env'den çıkarılmalı", () => {
+  it("REDIS_URL must be removed from env", () => {
     const env = { PATH: "/usr/bin", REDIS_URL: "redis://:password@host:6379" };
     const safe = buildSafeEnv(env);
     expect("REDIS_URL" in safe).toBe(false);
   });
 
-  it("DB_SECRET_ prefix'li değişkenler env'den çıkarılmalı", () => {
+  it("variables with DB_SECRET_ prefix must be removed from env", () => {
     const env = {
       PATH: "/usr/bin",
       DB_SECRET_MYDB: "per-db-secret-value",
@@ -82,28 +82,28 @@ describe("KRIT-1: Terminal env sanitizasyonu", () => {
     expect("DB_SECRET_OTHER" in safe).toBe(false);
   });
 
-  it("npm_ prefix'li değişkenler env'den çıkarılmalı", () => {
+  it("variables with npm_ prefix must be removed from env", () => {
     const env = { PATH: "/usr/bin", npm_lifecycle_event: "start", npm_package_name: "test" };
     const safe = buildSafeEnv(env);
     expect("npm_lifecycle_event" in safe).toBe(false);
     expect("npm_package_name" in safe).toBe(false);
   });
 
-  it("zararsız env değişkenleri geçirilmeli", () => {
+  it("harmless env variables must be passed through", () => {
     const env = { PATH: "/usr/bin:/usr/local/bin", HOME: "/root", LANG: "en_US.UTF-8" };
     const safe = buildSafeEnv(env);
     expect(safe.PATH).toBe(env.PATH);
     expect(safe.HOME).toBe(env.HOME);
   });
 
-  it("TERM ve COLORTERM her zaman set edilmeli", () => {
+  it("TERM and COLORTERM must always be set", () => {
     const env = {};
     const safe = buildSafeEnv(env);
     expect(safe.TERM).toBe("xterm-256color");
     expect(safe.COLORTERM).toBe("truecolor");
   });
 
-  it("tüm hassas değişkenlerin temizlendiğini tek geçişte doğrula", () => {
+  it("verifies all sensitive variables are cleared in a single pass", () => {
     const env = {
       JWT_SECRET: "jwt",
       ADMIN_SECRET: "admin",
@@ -127,22 +127,22 @@ describe("KRIT-1: Terminal env sanitizasyonu", () => {
 });
 
 describe("KRIT-1: Terminal TERMINAL_ENABLED flag", () => {
-  it("TERMINAL_ENABLED env string'i 'true' olduğunda aktif sayılır", () => {
+  it("terminal is considered active when TERMINAL_ENABLED env string is 'true'", () => {
     const enabled = (process.env.TERMINAL_ENABLED ?? "false") === "true";
-    expect(enabled).toBe(false); // test env'de false olmalı
+    expect(enabled).toBe(false); // must be false in test env
   });
 
-  it("TERMINAL_ENABLED='false' iken terminal devre dışı", () => {
+  it("terminal is disabled when TERMINAL_ENABLED='false'", () => {
     const val = "false";
     expect(val === "true").toBe(false);
   });
 
-  it("TERMINAL_ENABLED='true' iken terminal aktif", () => {
+  it("terminal is active when TERMINAL_ENABLED='true'", () => {
     const val = "true";
     expect(val === "true").toBe(true);
   });
 
-  it("TERMINAL_ENABLED eksik iken varsayılan false", () => {
+  it("terminal defaults to false when TERMINAL_ENABLED is missing", () => {
     const val = undefined;
     expect((val ?? "false") === "true").toBe(false);
   });

@@ -1,5 +1,5 @@
 /**
- * Auth route'larını gruplar.
+ * Groups auth routes.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -12,11 +12,11 @@ import { adminSessionsRoute } from "./sessions.js";
 import { adminMeRoute } from "./me.js";
 
 export async function authRoutes(server: FastifyInstance) {
-  // Programatik erişim (SDK, CI) — korunur
+  // Programmatic access (SDK, CI) — protected
   await server.register(tokenRoute);
   await server.register(adminTokenRoute);
 
-  // GUI login akışı
+  // GUI login flow
   await server.register(adminLoginRoute);
   await server.register(adminRefreshRoute);
   await server.register(adminLogoutRoute);

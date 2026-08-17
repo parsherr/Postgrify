@@ -1,5 +1,5 @@
 /**
- * Auth ile ilgili tip tanımları.
+ * Auth-related type definitions.
  */
 
 import type { JWTPayload } from "jose";
@@ -11,15 +11,15 @@ export type TokenScope =
   | "schema"
   | "query";
 
-/** Admin token veya scoped DB token payload'ı. */
+/** Admin token or scoped DB token payload. */
 export interface JwtPayload extends JWTPayload {
   role: "admin" | "db";
-  sub?: string;          // DB adı (DB token için)
-  scope?: TokenScope[];  // İzin verilen scope'lar (DB token için)
-  email?: string;        // Admin kullanıcı e-postası (admin token için)
+  sub?: string;          // DB name (for DB tokens)
+  scope?: TokenScope[];  // Allowed scopes (for DB tokens)
+  email?: string;        // Admin user email (for admin tokens)
 }
 
-/** Per-database kullanıcı token payload'ı (iss: "postgrify/db-auth"). */
+/** Per-database user token payload (iss: "postgrify/db-auth"). */
 export interface DbUserJwtPayload extends JWTPayload {
   sub: string;           // userId (UUID)
   db: string;            // hangi managed database

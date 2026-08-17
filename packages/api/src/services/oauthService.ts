@@ -1,8 +1,8 @@
 /**
- * OAuth Service — Google ve GitHub için authorization code flow.
+ * OAuth Service — authorization code flow for Google and GitHub.
  *
- * Her provider için:
- *   1. getAuthUrl(provider, config)  → kullanıcıyı yönlendireceğimiz URL
+ * For each provider:
+ *   1. getAuthUrl(provider, config)  → URL to redirect the user to
  *   2. exchangeCode(provider, code, config) → access token + user profile
  */
 
@@ -154,7 +154,7 @@ export async function exchangeGitHubCode(
     email?: string;
   };
 
-  // Primary email'i bul (bazı GitHub hesaplarında profile'da email olmaz)
+  // Find the primary email (some GitHub accounts have no email on their profile)
   let email = user.email ?? "";
   if (!email && emailsRes.ok) {
     const emails = await emailsRes.json() as Array<{ email: string; primary: boolean; verified: boolean }>;

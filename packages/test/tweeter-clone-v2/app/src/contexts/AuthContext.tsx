@@ -1,8 +1,8 @@
 /**
  * AuthContext — global auth state
  *
- * Postgrify auth-js SDK üzerinden kullanıcı durumunu yönetir.
- * useAuth() hook'u ile erişilir.
+ * Manages user state via the Postgrify auth-js SDK.
+ * Accessed via the useAuth() hook.
  */
 
 import {
@@ -37,7 +37,7 @@ interface AuthState {
   profile: UserProfile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  /** signUp: kayıt olur + otomatik signIn yapar. Dönen string = accessToken */
+  /** signUp: registers + automatically signs in. Returns the accessToken string. */
   signUp: (email: string, password: string) => Promise<string>;
   signOut: () => Promise<void>;
   setProfile: (p: UserProfile) => void;
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // SDK'dan mevcut session'ı al — { data, error } döner
+    // Get current session from the SDK — returns { data, error }
     auth.getSession().then(({ data: s }) => {
       if (s) {
         setSession(s);
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }).catch(() => setLoading(false));
 
-    // Auth state değişimlerini dinle
+    // Listen for auth state changes
     const unsubscribe = auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s) {
@@ -87,10 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error: signUpError } = await auth.signUp({ email, password });
     if (signUpError) throw new Error(signUpError.message);
 
-    // Signup sonrası hemen signIn yap — token'ı senkron olarak state'e yaz
+    // Immediately sign in after signup — write token to state synchronously
     const { data: s, error: signInError } = await auth.signIn({ email, password });
     if (signInError) throw new Error(signInError.message);
-    if (!s) throw new Error("Giriş sonrası session alınamadı");
+    if (!s) throw new Error("Could not retrieve session after sign in");
 
     setSession(s);
     setUser({ id: s.user.id, email: s.user.email });
@@ -116,6 +116,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth: AuthProvider gerekli");
+  if (!ctx) throw new Error("useAuth: AuthProvider is required");
   return ctx;
 }

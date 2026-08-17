@@ -1,19 +1,18 @@
 /**
- * Pool Plugin — postgres.js connection pool'larını yönetir.
- * Her DB için lazy pool: ilk istek geldiğinde açılır, idle'da kapatılır.
- * PoolManager singleton'ı Fastify decorator olarak `server.poolManager` üzerinden erişilir.
+ * Pool Plugin — manages postgres.js connection pools.
+ * Lazy pool per DB: opened on first request, closed after idle timeout.
+ * The PoolManager singleton is exposed as a Fastify decorator via `server.poolManager`.
  *
- * Ayrıca SettingsService, BackupService ve BackupScheduler'ı başlatır ve
- * sırasıyla `server.settings`, `server.backupService`, `server.backupScheduler`
- * olarak expose eder.
+ * Also initialises SettingsService, BackupService, and BackupScheduler, exposed
+ * as `server.settings`, `server.backupService`, and `server.backupScheduler`.
  *
  * onReady:
- *   1. DB'den admin credentials yüklenir → config'e inject edilir (Docker restart sonrası
- *      process.env'de kaybolmuş ADMIN_EMAIL/ADMIN_PASSWORD_HASH yeniden elde edilir)
- *   2. auto_start DB'leri açılır
- *   3. backup schedule'ları yüklenir
+ *   1. Admin credentials are loaded from the DB → injected into config (recovers
+ *      ADMIN_EMAIL/ADMIN_PASSWORD_HASH lost from process.env after a Docker restart)
+ *   2. Auto-start DBs are opened
+ *   3. Backup schedules are loaded
  *
- * onClose: tüm pool'lar + backup scheduler düzgünce kapatılır.
+ * onClose: all pools + backup scheduler are closed gracefully.
  */
 
 import fp from "fastify-plugin";
@@ -47,12 +46,12 @@ export const poolPlugin = fp(async (server: FastifyInstance) => {
 
   server.decorate("poolManager", manager);
 
-  // SettingsService: postgres DB'sini meta-veri deposu olarak kullan
+  // SettingsService: use the postgres DB as the metadata store
   const metaSql = manager.getPool("postgres");
   const settingsSvc = new SettingsService(metaSql);
   server.decorate("settings", settingsSvc);
 
-  // BackupService: aynı postgres meta-veri DB'si, BACKUP_DIR'den okur
+  // BackupService: same postgres metadata DB, reads from BACKUP_DIR
   const backupSvc = new BackupService(metaSql, config.BACKUP_DIR);
   server.decorate("backupService", backupSvc);
 
@@ -65,21 +64,21 @@ export const poolPlugin = fp(async (server: FastifyInstance) => {
   );
   server.decorate("backupScheduler", scheduler);
 
-  // Sunucu tamamen hazır olduğunda tüm başlangıç işlemlerini sırayla yap
+  // Perform all startup tasks in order once the server is fully ready
   server.addHook("onReady", async () => {
-    // ── Adım 1: Admin credentials'ı DB'den yükle ─────────────────────────────
-    // Docker container'da .env dosyasına yazma başarısız olduğunda process.env'e
-    // sadece runtime inject yapılır. Container restart'ta bu kaybolur.
-    // DB'deki kayıt volume'da kalıcıdır — buradan yeniden yüklenerek login'in
-    // çalışmaya devam etmesi sağlanır.
+    // ── Step 1: Load admin credentials from DB ────────────────────────────────
+    // When writing to .env fails inside a Docker container, credentials are only
+    // injected into process.env at runtime. They are lost after a container restart.
+    // The record in the DB persists in the volume — reloading from here ensures
+    // login continues to work.
     if (!config.ADMIN_EMAIL || !config.ADMIN_PASSWORD_HASH) {
       try {
         const creds = await settingsSvc.getAdminCredentials();
         if (creds) {
-          // config nesnesi Zod tarafından dondurulmuş değil; runtime inject güvenli
+          // The config object is not frozen by Zod; runtime injection is safe
           (config as Record<string, unknown>).ADMIN_EMAIL = creds.email;
           (config as Record<string, unknown>).ADMIN_PASSWORD_HASH = creds.passwordHash;
-          // process.env'i de güncelle: adminLogin.ts doğrudan process.env okur
+          // Also update process.env: adminLogin.ts reads from process.env directly
           process.env.ADMIN_EMAIL = creds.email;
           process.env.ADMIN_PASSWORD_HASH = creds.passwordHash;
           server.log.info("Admin credentials loaded from DB (container restart recovery)");
@@ -89,7 +88,7 @@ export const poolPlugin = fp(async (server: FastifyInstance) => {
       }
     }
 
-    // ── Adım 2: Auto-start pools ──────────────────────────────────────────────
+    // ── Step 2: Auto-start pools ──────────────────────────────────────────────
     try {
       const autoStartDbs = await settingsSvc.getAutoStartDatabases();
       for (const dbName of autoStartDbs) {
@@ -105,7 +104,7 @@ export const poolPlugin = fp(async (server: FastifyInstance) => {
       server.log.warn({ err }, "Could not read auto-start settings");
     }
 
-    // ── Adım 3: Backup schedules ──────────────────────────────────────────────
+    // ── Step 3: Backup schedules ──────────────────────────────────────────────
     try {
       await scheduler.load();
     } catch (err) {
@@ -113,7 +112,7 @@ export const poolPlugin = fp(async (server: FastifyInstance) => {
     }
   });
 
-  // Sunucu kapanırken tüm pool'ları ve scheduler'ı düzgünce kapat
+  // Close all pools and the scheduler gracefully when the server shuts down
   server.addHook("onClose", async () => {
     scheduler.stop();
     await manager.closeAll();

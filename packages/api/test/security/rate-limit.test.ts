@@ -1,8 +1,8 @@
 /**
- * KRIT-2: Rate-limit testleri.
+ * KRIT-2: Rate-limit tests.
  *
- * Rate-limit plugin'inin Redis varsa ioredis kullandığını,
- * yoksa in-memory fallback devreye girdiğini doğrular.
+ * Verifies that the rate-limit plugin uses ioredis when Redis is available,
+ * and falls back to in-memory when it is not.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -13,19 +13,19 @@ afterEach(() => {
 });
 
 describe("KRIT-2: Rate-limit Redis backend", () => {
-  it("REDIS_URL yoksa in-memory fallback kullanılır (uyarı log atılır)", async () => {
+  it("in-memory fallback is used when REDIS_URL is absent (warning log is emitted)", async () => {
     vi.stubEnv("REDIS_URL", "");
     vi.stubEnv("JWT_SECRET", "test-secret-must-be-at-least-32-characters");
     vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 
-    // rateLimit.ts'deki lojik: REDIS_URL yoksa redisClient undefined kalır
+    // Logic in rateLimit.ts: when REDIS_URL is absent, redisClient stays undefined
     const redisUrl = process.env.REDIS_URL;
-    expect(!redisUrl).toBe(true); // URL yok
-    // In-memory kullanımı: redisClient undefined, uyarı log'u beklenir
-    // Bu test plug'in başlatma davranışını dolaylı doğrular
+    expect(!redisUrl).toBe(true); // no URL
+    // In-memory usage: redisClient undefined, warning log expected
+    // This test indirectly verifies plugin startup behavior
   });
 
-  it("REDIS_URL varsa ioredis client oluşturulur", async () => {
+  it("ioredis client is created when REDIS_URL is present", async () => {
     // ioredis mock
     const mockRedis = vi.fn().mockImplementation(() => ({
       on: vi.fn(),
@@ -39,14 +39,14 @@ describe("KRIT-2: Rate-limit Redis backend", () => {
     const redisUrl = process.env.REDIS_URL;
     expect(redisUrl).toBeTruthy();
 
-    // Redis client oluşturma simülasyonu
+    // Redis client creation simulation
     const { Redis } = await import("ioredis");
     const client = new Redis(redisUrl!);
     expect(mockRedis).toHaveBeenCalledWith(redisUrl);
     expect(client).toBeDefined();
   });
 
-  it("global rate-limit config'i RATE_LIMIT_GLOBAL env'den okunur", async () => {
+  it("global rate-limit config is read from RATE_LIMIT_GLOBAL env", async () => {
     vi.stubEnv("RATE_LIMIT_GLOBAL", "500");
     vi.stubEnv("JWT_SECRET", "test-secret-must-be-at-least-32-characters");
     vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
@@ -55,7 +55,7 @@ describe("KRIT-2: Rate-limit Redis backend", () => {
     expect(config.RATE_LIMIT_GLOBAL).toBe(500);
   });
 
-  it("rate-limit varsayılan 1000 req/dk", async () => {
+  it("rate-limit default is 1000 req/min", async () => {
     vi.stubEnv("JWT_SECRET", "test-secret-must-be-at-least-32-characters");
     vi.stubEnv("ADMIN_SECRET", "test-admin-secret-16ch");
 

@@ -1,6 +1,6 @@
 /**
- * DashboardPage — stat tiles, DB listesi, quick actions.
- * Design: tam siyah zemin, solid zinc renkler, büyük font'lar, opacity yok.
+ * DashboardPage — stat tiles, database list, quick actions.
+ * Design: fully black background, solid zinc colors, large fonts, no opacity.
  */
 
 import { Link, useNavigate } from "react-router-dom";
@@ -49,12 +49,12 @@ export default function DashboardPage() {
   return (
     <div className="flex h-full flex-col gap-8 overflow-y-auto p-8">
 
-      {/* Başlık + Quick actions */}
+      {/* Header + Quick actions */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-medium tracking-[-0.03em] text-white">Dashboard</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Postgrify Gateway — genel bakış
+            Postgrify Gateway — overview
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -63,14 +63,14 @@ export default function DashboardPage() {
             className="flex items-center gap-2 rounded-[10px] border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
           >
             <Code2 className="h-3.5 w-3.5" />
-            SQL Editörü
+            SQL Editor
           </button>
           <button
             onClick={() => navigate("/databases")}
             className="flex items-center gap-2 rounded-[10px] border border-zinc-600 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-zinc-100"
           >
             <Plus className="h-3.5 w-3.5" />
-            Yeni DB
+            New DB
           </button>
         </div>
       </div>
@@ -83,11 +83,11 @@ export default function DashboardPage() {
           ))
         ) : (
           <>
-            <StatTile label="Veritabanı" value={databases?.length ?? 0} icon={Database} />
-            <StatTile label="Toplam Tablo" value={totalTables} icon={Table2} />
-            <StatTile label="Toplam Boyut" value={formatBytes(totalSize)} icon={HardDrive} />
+            <StatTile label="Databases" value={databases?.length ?? 0} icon={Database} />
+            <StatTile label="Total Tables" value={totalTables} icon={Table2} />
+            <StatTile label="Total Size" value={formatBytes(totalSize)} icon={HardDrive} />
             <StatTile
-              label="Ortalama Boyut"
+              label="Average Size"
               value={databases?.length ? formatBytes(totalSize / databases.length) : "—"}
               icon={Cpu}
             />
@@ -95,15 +95,15 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* DB listesi */}
+      {/* Database list */}
       <div className="rounded border border-zinc-800">
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
-          <span className="text-sm font-medium text-white">Veritabanları</span>
+          <span className="text-sm font-medium text-white">Databases</span>
           <Link
             to="/databases"
             className="text-xs text-zinc-500 transition-colors hover:text-white"
           >
-            Tümünü gör →
+            View all →
           </Link>
         </div>
 
@@ -130,7 +130,7 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-6 text-xs text-zinc-500">
                   <span className="flex items-center gap-1.5">
                     <Table2 className="h-3 w-3" />
-                    {Number(db.table_count)} tablo
+                    {Number(db.table_count)} tables
                   </span>
                   <span className="flex items-center gap-1.5">
                     <HardDrive className="h-3 w-3" />
@@ -143,13 +143,13 @@ export default function DashboardPage() {
             {databases?.length === 0 && (
               <div className="flex flex-col items-center gap-4 py-16 text-center">
                 <Database className="h-8 w-8 text-zinc-700" />
-                <p className="text-sm text-zinc-500">Henüz veritabanı yok</p>
+                <p className="text-sm text-zinc-500">No databases yet</p>
                 <button
                   onClick={() => navigate("/databases")}
                   className="flex items-center gap-2 rounded-[10px] border border-zinc-600 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-zinc-100"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Veritabanı Ekle
+                  Add Database
                 </button>
               </div>
             )}
@@ -157,7 +157,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Alt bilgi */}
+      {/* Footer info */}
       {stats && (
         <div className="flex items-center gap-4 text-xs text-zinc-600">
           <span className="flex items-center gap-1.5">
@@ -165,7 +165,7 @@ export default function DashboardPage() {
             Node {stats.nodeVersion}
           </span>
           <span>
-            Uptime: {Math.floor(stats.uptime / 3600)}sa {Math.floor((stats.uptime % 3600) / 60)}dk
+            Uptime: {Math.floor(stats.uptime / 3600)}h {Math.floor((stats.uptime % 3600) / 60)}m
           </span>
         </div>
       )}

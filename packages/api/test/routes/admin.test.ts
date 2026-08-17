@@ -1,5 +1,5 @@
 /**
- * Admin route testleri — DB listesi, oluşturma, silme, schema-cache reload.
+ * Admin route tests — DB list, creation, deletion, schema-cache reload.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -87,7 +87,7 @@ afterAll(async () => {
 });
 
 describe("GET /admin/databases", () => {
-  it("admin token ile liste döner", async () => {
+  it("returns the list with an admin token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/databases",
@@ -96,7 +96,7 @@ describe("GET /admin/databases", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("token olmadan 401 döner", async () => {
+  it("returns 401 without a token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/databases",
@@ -104,7 +104,7 @@ describe("GET /admin/databases", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("DB token ile 403 döner", async () => {
+  it("returns 403 with a DB token", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/databases",
@@ -115,7 +115,7 @@ describe("GET /admin/databases", () => {
 });
 
 describe("POST /admin/databases", () => {
-  it("geçersiz DB adı 400 döner", async () => {
+  it("returns 400 for an invalid DB name", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/admin/databases",
@@ -125,7 +125,7 @@ describe("POST /admin/databases", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("geçerli isimle 201 döner", async () => {
+  it("returns 201 with a valid name", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/admin/databases",

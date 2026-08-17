@@ -1,5 +1,5 @@
 /**
- * Tüm route gruplarını tek noktadan kayıt eder.
+ * Registers all route groups from a single entry point.
  */
 
 import type { FastifyInstance } from "fastify";

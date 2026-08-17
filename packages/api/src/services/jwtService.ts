@@ -1,16 +1,16 @@
 /**
- * JWT Service — token üretimi ve doğrulaması.
- * jose kütüphanesi kullanılır (Web Crypto API tabanlı, zero-dep).
+ * JWT Service — token generation and verification.
+ * Uses the jose library (Web Crypto API based, zero-dep).
  *
- * İki token türü farklı metotlarla doğrulanır:
+ * Two token types are verified with different methods:
  *   - verifyAdminOrDb : admin token + scoped DB token (iss: "postgrify")
- *   - verifyDbUser    : per-DB kullanıcı token (iss: "postgrify/db-auth" zorunlu)
+ *   - verifyDbUser    : per-DB user token (iss: "postgrify/db-auth" required)
  *
  * JTI Blacklist (token revocation):
- *   Admin token'ların doğrudan revoke edilmesi için JTI (JWT ID) bazlı
- *   kara liste kullanılır. Her admin token'a benzersiz JTI atanır.
- *   Logout/revoke sırasında JTI Redis'te (veya in-memory) kara listeye eklenir.
- *   verifyAdminOrDb kara listeye düşmüş token'ları reddeder.
+ *   A JTI (JWT ID)-based blocklist is used for direct admin token revocation.
+ *   Each admin token is assigned a unique JTI.
+ *   On logout/revoke the JTI is added to the blocklist in Redis (or in-memory).
+ *   verifyAdminOrDb rejects blocklisted tokens.
  */
 
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
@@ -18,34 +18,34 @@ import type { JwtPayload, DbUserJwtPayload, TokenScope } from "../types/auth.js"
 import crypto from "node:crypto";
 
 const ADMIN_ISSUER = "postgrify";
-const DB_ISSUER = "postgrify/db";       // scoped DB access token'ları için
-const DB_USER_ISSUER = "postgrify/db-auth"; // per-DB end-user token'ları için
+const DB_ISSUER = "postgrify/db";       // for scoped DB access tokens
+const DB_USER_ISSUER = "postgrify/db-auth"; // for per-DB end-user tokens
 
 /**
- * JTI Blacklist — revoke edilmiş admin JWT token'larını izler.
+ * JTI Blacklist — tracks revoked admin JWT tokens.
  *
- * Redis varsa JTI'ler token'ın TTL'i kadar Redis'te saklanır.
- * Redis yoksa in-memory Set kullanılır (process restart'ta sıfırlanır).
+ * With Redis, JTIs are stored in Redis for the token's remaining TTL.
+ * Without Redis, an in-memory Set is used (resets on process restart).
  *
- * Kullanım: logout, force-revoke, şifre değişikliği sonrası tüm token'ları geçersiz kıl.
+ * Use cases: logout, force-revoke, invalidate all tokens after a password change.
  */
 export class JtiBlacklist {
   private readonly memory = new Set<string>();
   private redis: { set(k: string, v: string, opt: { EX: number }): Promise<unknown>; get(k: string): Promise<string | null> } | null = null;
 
-  /** Redis client bağla (opsiyonel). Redis yoksa in-memory fallback. */
+  /** Connect a Redis client (optional). Falls back to in-memory when Redis is unavailable. */
   setRedis(client: { set(k: string, v: string, opt: { EX: number }): Promise<unknown>; get(k: string): Promise<string | null> }): void {
     this.redis = client;
   }
 
-  /** JTI'yi kara listeye ekle. ttlSeconds: token'ın kalan geçerlilik süresi. */
+  /** Add a JTI to the blocklist. ttlSeconds: remaining validity of the token. */
   async add(jti: string, ttlSeconds: number): Promise<void> {
     if (this.redis) {
       await this.redis.set(`jti:${jti}`, "1", { EX: ttlSeconds });
     } else {
       this.memory.add(jti);
-      // In-memory'de otomatik TTL yok; hafıza sızıntısını önlemek için
-      // process'in restart olmadan uzun süre çalıştığı durumlarda timeout ile temizle.
+      // No automatic TTL in-memory; use a timeout to clean up for long-running
+      // processes to prevent memory leaks.
       setTimeout(() => this.memory.delete(jti), ttlSeconds * 1000).unref();
     }
   }
@@ -59,15 +59,15 @@ export class JtiBlacklist {
   }
 }
 
-/** Global singleton — server startup'ta Redis ile bağlanır. */
+/** Global singleton — connected to Redis at server startup. */
 export const jtiBlacklist = new JtiBlacklist();
 
 export class JwtService {
   /**
-   * Secret kaynağı: sabit string veya runtime'da okunacak getter.
-   * Getter kullanımı setup-sonrası config güncellemelerini yakalar —
-   * route registration sırasında placeholder secret ile yaratılmış
-   * instance'lar bile sonraki isteklerde güncel değeri okur.
+   * Secret source: a fixed string or a getter read at runtime.
+   * Using a getter captures post-setup config updates —
+   * even instances created with a placeholder secret during route
+   * registration will read the current value on subsequent requests.
    */
   private readonly secretSource: string | (() => string);
 
@@ -81,9 +81,9 @@ export class JwtService {
   }
 
   /**
-   * DB bazlı scoped access token üretir.
-   * iss: "postgrify/db" ile admin ve end-user token'lardan ayrılır.
-   * Savunma derinliği: issuer eksikliği "unknown origin" token sorununu önler.
+   * Produces a DB-scoped access token.
+   * Distinguished from admin and end-user tokens by iss: "postgrify/db".
+   * Defense in depth: missing issuer prevents "unknown origin" token issues.
    */
   async signDbToken(
     database: string,
@@ -99,9 +99,9 @@ export class JwtService {
   }
 
   /**
-   * Admin token üretir. Tüm DB'lere ve tüm scope'lara tam erişim.
-   * email verilirse payload'a eklenir (GUI login akışı).
-   * JTI (JWT ID) eklenir — token revocation için gerekli.
+   * Produces an admin token. Full access to all DBs and all scopes.
+   * If email is provided, it is added to the payload (GUI login flow).
+   * JTI (JWT ID) is added — required for token revocation.
    */
   async signAdminToken(expiresIn: string = "24h", email?: string): Promise<string> {
     const payload: Record<string, unknown> = { role: "admin" };
@@ -111,14 +111,14 @@ export class JwtService {
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setIssuer(ADMIN_ISSUER)
-      .setJti(crypto.randomUUID())   // revocation için benzersiz ID
+      .setJti(crypto.randomUUID())   // unique ID for revocation
       .setExpirationTime(expiresIn)
       .sign(this.secret);
   }
 
   /**
-   * Per-database kullanıcı token üretir.
-   * iss: "postgrify/db-auth" ile admin token'lardan kesin ayrılır.
+   * Produces a per-database user token.
+   * Unambiguously distinguished from admin tokens by iss: "postgrify/db-auth".
    */
   async signDbUserToken(
     database: string,
@@ -137,22 +137,22 @@ export class JwtService {
   }
 
   /**
-   * Admin token veya scoped DB token doğrular.
-   * iss: "postgrify/db-auth" olan per-DB user token'larını reddeder.
-   * Revoke edilmiş token'ları (JTI blacklist) reddeder.
-   * Geçersiz/süresi dolmuşsa null döner.
+   * Verifies an admin token or a scoped DB token.
+   * Rejects per-DB user tokens with iss: "postgrify/db-auth".
+   * Rejects revoked tokens (JTI blocklist).
+   * Returns null if invalid or expired.
    */
   async verifyAdminOrDb(token: string): Promise<JwtPayload | null> {
     try {
       const { payload } = await jwtVerify(token, this.secret);
       const iss = (payload as JWTPayload).iss;
-      // per-DB end-user token'ını bu path'e girmeyi engelle
+      // Prevent per-DB end-user tokens from entering this path
       if (iss === DB_USER_ISSUER) return null;
-      // Geçerli issuer'lar: ADMIN_ISSUER, DB_ISSUER, veya eski token'lar için iss=undefined
-      // (geriye dönük uyumluluk: eski DB token'ları iss içermez)
+      // Valid issuers: ADMIN_ISSUER, DB_ISSUER, or iss=undefined for legacy tokens
+      // (backward compat: older DB tokens do not include iss)
       if (iss !== undefined && iss !== ADMIN_ISSUER && iss !== DB_ISSUER) return null;
 
-      // JTI blacklist kontrolü — revoke edilmiş token'ları reddet
+      // JTI blocklist check — reject revoked tokens
       const jti = (payload as JWTPayload).jti;
       if (jti && await jtiBlacklist.has(jti)) {
         return null;
@@ -165,9 +165,9 @@ export class JwtService {
   }
 
   /**
-   * Per-database kullanıcı token doğrular.
+   * Verifies a per-database user token.
    * iss: "postgrify/db-auth" zorunludur — admin token'lar reddedilir.
-   * Geçersiz/süresi dolmuşsa null döner.
+   * Returns null if invalid or expired.
    */
   async verifyDbUser(token: string): Promise<DbUserJwtPayload | null> {
     try {
@@ -181,8 +181,8 @@ export class JwtService {
   }
 
   /**
-   * @deprecated verifyAdminOrDb() kullanın.
-   * Geriye dönük uyumluluk için — mevcut çağrıların patlamasını önler.
+   * @deprecated Use verifyAdminOrDb().
+   * Kept for backward compatibility — prevents existing call sites from breaking.
    */
   async verify(token: string): Promise<JwtPayload | null> {
     return this.verifyAdminOrDb(token);

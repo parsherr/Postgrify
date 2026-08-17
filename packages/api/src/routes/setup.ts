@@ -1,21 +1,22 @@
 /**
- * Setup Route — ilk çalıştırma sihirbazı endpoint'leri.
+ * Setup Route — first-run wizard endpoints.
  *
  * GET  /setup/status → { configured: boolean }
- * POST /setup        → admin hesabı + PostgreSQL bağlantısı oluştur
+ * POST /setup        → create admin account + PostgreSQL connection
  *
- * Docker davranışı:
- *   Container'da .env dosyasına yazma genellikle başarısız olur (EACCES veya
- *   volume dışı dosya). Bu durumda admin credentials process.env'e inject edilir
- *   (runtime'da çalışır) ve aynı zamanda PostgreSQL DB'ye kalıcı olarak yazılır.
- *   Container restart'ta DB'den yeniden yüklenir — pool plugin onReady hook'u bunu yapar.
+ * Docker behaviour:
+ *   Writing to .env inside a container usually fails (EACCES or file outside
+ *   a mounted volume). In that case admin credentials are injected into
+ *   process.env (works for the current runtime) and also persisted to PostgreSQL.
+ *   On container restart they are reloaded from the DB — the pool plugin
+ *   onReady hook handles this.
  *
- * Güvenlik:
- *   - POST /setup yalnızca bir kez çalışır; sonraki çağrılar 403 döner
- *   - Şifre argon2id ile hash'lenir (memoryCost=64MB, timeCost=3, parallelism=4)
- *   - .env atomik yazma: tmp → rename (yarım yazma önlenir)
- *   - JWT token setup response'unda döner: container'da login endpoint'i
- *     yeni env var'ları görmeyebileceğinden direkt oturum açılır
+ * Security:
+ *   - POST /setup runs only once; subsequent calls return 403
+ *   - Password is hashed with argon2id (memoryCost=64MB, timeCost=3, parallelism=4)
+ *   - .env is written atomically: tmp → rename (prevents partial writes)
+ *   - A JWT token is returned in the setup response so the GUI can log in
+ *     immediately — the login endpoint may not see new env vars in a container
  */
 
 import fs from "node:fs";
@@ -26,28 +27,28 @@ import { config } from "../config/env.js";
 import { JwtService } from "../services/jwtService.js";
 
 // ── In-memory setup flag ──────────────────────────────────────────────────────
-// null   = henüz kontrol edilmedi
-// false  = kurulum tamamlanmamış
-// true   = kurulum tamamlandı (env var veya DB'den doğrulandı)
+// null   = not yet checked
+// false  = setup not completed
+// true   = setup completed (confirmed from env var or DB)
 let _setupCompleted: boolean | null = null;
 
 /**
- * /setup/status ve POST /setup guard'ı için async kontrol.
+ * Async check used by /setup/status and the POST /setup guard.
  *
- * Doğrulama sırası:
- *   1. In-memory flag → hızlı yol (aynı process içinde setup yapıldıysa)
- *   2. DB'de admin credentials var mı? → güvenilir kaynak.
- *      Bu kontrol env var'ı atlar çünkü `docker compose down -v` volume'ı
- *      siler ama host .env'i silmez — env var'da hash var ama DB'de admin
- *      yoksa setup sayfasının açılması gerekir.
- *   3. DB erişilemiyorsa (decorator yok veya bağlantı hatası) → env var'a bak.
- *      Bu sayede DB olmadan local geliştirme de çalışır.
+ * Validation order:
+ *   1. In-memory flag → fast path (setup was completed in the same process)
+ *   2. Admin credentials present in DB? → authoritative source.
+ *      This check intentionally bypasses env vars because `docker compose down -v`
+ *      wipes the volume but leaves the host .env intact — if the env var holds a
+ *      hash but the DB has no admin, the setup page must be shown.
+ *   3. DB unreachable (no decorator or connection error) → fall back to env var.
+ *      This keeps local development working without a DB.
  */
 async function isConfiguredAsync(server?: FastifyInstance): Promise<boolean> {
-  // Hızlı yol: aynı process'te setup tamamlandıysa DB'ye gitme
+  // Fast path: setup was completed in this process, skip the DB call
   if (_setupCompleted === true) return true;
 
-  // Güvenilir kaynak: DB'de gerçek admin kaydı var mı?
+  // Authoritative source: does a real admin record exist in the DB?
   if (server?.hasDecorator("settings")) {
     try {
       const creds = await server.settings.getAdminCredentials();
@@ -55,29 +56,29 @@ async function isConfiguredAsync(server?: FastifyInstance): Promise<boolean> {
         _setupCompleted = true;
         return true;
       }
-      // DB erişilebilir ama admin yok → kesinlikle kurulum gerekli
+      // DB reachable but no admin found — setup is definitely required
       return false;
     } catch {
-      // DB bağlantısı yoksa env var'a fallback (local dev / DB henüz hazır değil)
+      // DB unreachable — fall back to env var (local dev / DB not ready yet)
     }
   }
 
-  // Fallback: env var kontrolü (DB decorator yok veya bağlantı hatası)
+  // Fallback: check env var (no DB decorator or connection error)
   const configured = Boolean(config.ADMIN_EMAIL && config.ADMIN_PASSWORD_HASH);
   if (configured) _setupCompleted = true;
   return configured;
 }
 
-/** Setup tamamlandıktan sonra in-memory flag'i günceller. */
+/** Updates the in-memory flag after setup has completed. */
 function markSetupComplete(): void {
   _setupCompleted = true;
 }
 
 /**
- * In-memory _setupCompleted flag'ini null'a sıfırlar.
+ * Resets the in-memory _setupCompleted flag to null.
  *
- * Yalnızca test ortamında kullanılmalıdır.
- * Her test kendi izole server örneği oluşturduğunda state kirlenmesini önler.
+ * Must only be used in the test environment.
+ * Prevents state pollution when each test creates its own isolated server instance.
  *
  * @internal — test-only
  */
@@ -86,8 +87,8 @@ export function _resetSetupFlag(): void {
 }
 
 /**
- * .env dosyasına atomik yazma: önce tmp dosyasına yaz, ardından rename.
- * Bu şekilde eş zamanlı isteklerde yarım yazma olmaz.
+ * Atomically writes the .env file: first write to a tmp file, then rename.
+ * Prevents partial writes under concurrent requests.
  */
 function writeEnvFileAtomic(envPath: string, content: string): void {
   const tmpPath = path.join(path.dirname(envPath), `.postgrify-env-${process.pid}-${Date.now()}.tmp`);
@@ -102,7 +103,7 @@ function writeEnvFileAtomic(envPath: string, content: string): void {
 }
 
 function resolveEnvPath(): string {
-  // API çalışma dizininden üst klasöre çık (packages/api → packages)
+  // Walk up from the API working directory (packages/api → packages)
   const candidates = [
     path.resolve(process.cwd(), ".env"),
     path.resolve(process.cwd(), "..", ".env"),
@@ -113,11 +114,11 @@ function resolveEnvPath(): string {
     if (fs.existsSync(p)) return p;
   }
 
-  // Bulunamazsa packages/ yanına oluştur
+  // Not found — create alongside packages/
   return path.resolve(process.cwd(), "..", ".env");
 }
 
-/** .env dosyasını satır satır parse eder → Map<key, raw-line-index> */
+/** Parses the .env file line by line → Map<key, raw-line-index> */
 function parseEnvFile(content: string): Map<string, number> {
   const map = new Map<string, number>();
   const lines = content.split("\n");
@@ -132,8 +133,8 @@ function parseEnvFile(content: string): Map<string, number> {
 }
 
 /**
- * .env dosyasındaki key'leri günceller veya sonuna ekler.
- * Mevcut satırların sırası ve yorumlar korunur.
+ * Updates keys in the .env file or appends them at the end.
+ * Preserves the order of existing lines and comments.
  */
 function updateEnvContent(existing: string, updates: Record<string, string>): string {
   const lines = existing.split("\n");
@@ -144,7 +145,7 @@ function updateEnvContent(existing: string, updates: Record<string, string>): st
     if (idx !== undefined) {
       lines[idx] = `${key}=${value}`;
     } else {
-      // Sona ekle (boş satır varsa ondan önce)
+      // Append at the end (before any trailing blank line)
       lines.push(`${key}=${value}`);
     }
   }
@@ -174,7 +175,7 @@ export async function setupRoutes(server: FastifyInstance) {
       },
     },
     async (_req, reply) => {
-      // DB'yi de kontrol et — container restart sonrası env var kaybolmuş olabilir
+      // Also check the DB — env var may have been lost after a container restart
       const configured = await isConfiguredAsync(server);
       return reply.send({ configured });
     }
@@ -198,12 +199,12 @@ export async function setupRoutes(server: FastifyInstance) {
             adminEmail: {
               type: "string",
               format: "email",
-              description: "Admin e-posta adresi",
+              description: "Admin email address",
             },
             adminPassword: {
               type: "string",
               minLength: 8,
-              description: "Admin şifre (min 8 karakter)",
+              description: "Admin password (min 8 characters)",
             },
             pgHost: { type: "string", minLength: 1 },
             pgPort: { type: "integer", minimum: 1, maximum: 65535 },
@@ -226,7 +227,7 @@ export async function setupRoutes(server: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      // Zaten kurulumlu → kilitli (DB de dahil kontrol et)
+      // Already configured — locked (check includes DB)
       if (await isConfiguredAsync(server)) {
         return reply.status(403).send({ error: "Setup already completed" });
       }
@@ -241,12 +242,12 @@ export async function setupRoutes(server: FastifyInstance) {
           pgPassword: string;
         };
 
-      // Şifreyi hash'le
+      // Hash the password
       const passwordHash = await hashPassword(adminPassword);
 
       // ── 1. Runtime inject: process.env + config ─────────────────────────────
-      // Bu sayede aynı container instance'ında anında login çalışır.
-      // Container restart'ta kaybolur; kalıcı kayıt için DB ve .env kullanılır.
+      // Makes login work immediately within the same container instance.
+      // Lost on container restart; DB and .env are used for permanent storage.
       process.env.ADMIN_EMAIL = adminEmail;
       process.env.ADMIN_PASSWORD_HASH = passwordHash;
       process.env.PG_HOST = pgHost;
@@ -254,8 +255,8 @@ export async function setupRoutes(server: FastifyInstance) {
       process.env.PG_USER = pgUser;
       process.env.PG_PASSWORD = pgPassword;
 
-      // config nesnesi de güncellenir — diğer modüller config üzerinden okursa
-      // yeniden başlatmaya gerek kalmaz
+      // Also update the config object so other modules reading via config
+      // do not require a restart
       (config as Record<string, unknown>).ADMIN_EMAIL = adminEmail;
       (config as Record<string, unknown>).ADMIN_PASSWORD_HASH = passwordHash;
       (config as Record<string, unknown>).PG_HOST = pgHost;
@@ -263,7 +264,7 @@ export async function setupRoutes(server: FastifyInstance) {
       (config as Record<string, unknown>).PG_USER = pgUser;
       (config as Record<string, unknown>).PG_PASSWORD = pgPassword;
 
-      // ── 2. .env dosyasına yaz (kalıcı — yeniden build'de hayatta kalır) ─────
+      // ── 2. Write to .env (persistent — survives rebuilds) ────────────────────
       let envWritten = false;
       try {
         const envPath = resolveEnvPath();
@@ -282,17 +283,17 @@ export async function setupRoutes(server: FastifyInstance) {
         envWritten = true;
         server.log.info({ envPath }, "Setup: .env file updated");
       } catch (err) {
-        // Docker container'da .env genellikle yazılamaz — bu beklenen bir durum.
-        // Credentials DB'ye yazılır; restart recovery pool plugin'in onReady hook'u yapar.
+        // Writing .env inside a Docker container usually fails — this is expected.
+        // Credentials are written to the DB; restart recovery is handled by the pool plugin onReady hook.
         server.log.warn(
           { err },
           "Setup: .env write failed (expected in Docker) — credentials will be persisted to DB"
         );
       }
 
-      // ── 3. DB'ye credentials yaz (container restart'ta hayatta kalır) ───────
-      // Bu PostgreSQL volume'da kalıcıdır. docker compose down (volume silmeden)
-      // → up --build sonrasında pool plugin onReady'de yüklenir.
+      // ── 3. Persist credentials to DB (survives container restarts) ──────────
+      // Stored in the PostgreSQL volume. After docker compose down (without -v)
+      // → up --build, the pool plugin loads them in onReady.
       if (server.hasDecorator("settings")) {
         try {
           await server.settings.setAdminCredentials(adminEmail, passwordHash);
@@ -306,13 +307,13 @@ export async function setupRoutes(server: FastifyInstance) {
         }
       }
 
-      // ── 4. In-memory flag güncelle ────────────────────────────────────────
+      // ── 4. Update in-memory flag ─────────────────────────────────────────
       markSetupComplete();
 
-      // ── 5. JWT token döndür — GUI anında login olsun ─────────────────────
-      // Container'da yeni env var'lar /auth/admin/login'de görünmeyebilir
-      // (diğer route handler'lar config snapshot'ı alır). Direkt token ile
-      // GUI oturumu açar, login endpoint'ine istek atmaz.
+      // ── 5. Return JWT token — GUI can log in immediately ─────────────────
+      // New env vars may not be visible to /auth/admin/login inside a container
+      // (other route handlers hold a config snapshot). The token lets the GUI
+      // open a session directly without hitting the login endpoint.
       let accessToken: string | undefined;
       let refreshToken: string | null = null;
 
@@ -320,16 +321,16 @@ export async function setupRoutes(server: FastifyInstance) {
         const jwtService = new JwtService(() => config.JWT_SECRET);
         accessToken = await jwtService.signAdminToken(config.ACCESS_TOKEN_EXPIRY, adminEmail);
 
-        // Refresh token varsa (Redis bağlantısı kurulduysa)
+        // Issue refresh token if Redis is available
         if (server.hasDecorator("sessionService")) {
           try {
             refreshToken = await (server as unknown as { sessionService: { create(email: string): Promise<string | null> } }).sessionService.create(adminEmail);
           } catch {
-            // Redis yoksa refresh token olmadan devam et
+            // No Redis — continue without a refresh token
           }
         }
       } catch (tokenErr) {
-        // Token üretimi başarısız olsa da setup başarılı sayılır
+        // JWT generation failure does not fail the setup
         server.log.warn({ err: tokenErr }, "Setup: JWT generation failed");
       }
 

@@ -1,12 +1,12 @@
 /**
- * Health endpoint integration testi.
+ * Health endpoint integration test.
  *
- * GET /health → public, minimal { ok: true }
+ * GET /health       → public, minimal { ok: true }
  * GET /ready, GET /health/ready → Postgres ping (E-25)
- * GET /admin/health → admin token gerektirir, detaylı bilgi döner
+ * GET /admin/health → requires admin token, returns detailed info
  *
- * Güvenlik değişikliği: public /health artık uptime/activePools açıklamıyor.
- * Detaylar admin-only /admin/health endpoint'ine taşındı.
+ * Security change: public /health no longer exposes uptime/activePools.
+ * Details have been moved to the admin-only /admin/health endpoint.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -15,7 +15,7 @@ import type { FastifyInstance } from "fastify";
 
 const sqlMock = vi.fn().mockResolvedValue([{ ok: 1 }]);
 
-// DB ve cache bağlantılarını mock'la
+// Mock DB and cache connections
 vi.mock("../../src/services/poolManager.js", () => ({
   PoolManager: vi.fn().mockImplementation(() => ({
     getPool: vi.fn().mockReturnValue(sqlMock),
@@ -47,7 +47,7 @@ beforeAll(async () => {
   const { CacheService } = await import("../../src/services/cacheService.js");
   server.decorate("poolManager", new PoolManager({} as never));
   server.decorate("cache", new CacheService());
-  // authenticateAdmin kasıtlı eklenmedi — healthRoute bu durumu graceful handle etmeli
+  // authenticateAdmin intentionally omitted — healthRoute must handle this gracefully
 
   const { healthRoute } = await import("../../src/routes/health.js");
   await server.register(healthRoute);
@@ -59,23 +59,23 @@ afterAll(async () => {
 });
 
 describe("GET /health", () => {
-  it("200 ve ok:true döner", async () => {
+  it("returns 200 and ok:true", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.ok).toBe(true);
   });
 
-  it("uptime veya activePools bilgisi açıklanmaz (güvenlik)", async () => {
+  it("does not expose uptime or activePools (security)", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     const body = res.json();
-    // Public endpoint servis detaylarını sızdırmamalı
+    // Public endpoint must not leak service details
     expect(body.uptime).toBeUndefined();
     expect(body.activePools).toBeUndefined();
     expect(body.status).toBeUndefined();
   });
 
-  it("JSON Content-Type döner", async () => {
+  it("returns JSON Content-Type", async () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     expect(res.headers["content-type"]).toMatch(/application\/json/);
   });
@@ -89,14 +89,14 @@ describe("GET /ready (E-25)", () => {
     expect(res.json().ready).toBe(true);
   });
 
-  it("/health/ready → aynı davranış", async () => {
+  it("/health/ready → same behaviour", async () => {
     sqlMock.mockResolvedValue([{ ok: 1 }]);
     const res = await server.inject({ method: "GET", url: "/health/ready" });
     expect(res.statusCode).toBe(200);
     expect(res.json().ready).toBe(true);
   });
 
-  it("Postgres ping fail → 503", async () => {
+  it("Postgres ping failure → 503", async () => {
     sqlMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const res = await server.inject({ method: "GET", url: "/ready" });
     expect(res.statusCode).toBe(503);

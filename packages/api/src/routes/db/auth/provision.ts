@@ -1,46 +1,46 @@
 /**
- * Auth Schema Provisioner — her managed DB'ye _postgrify_auth schema'sını lazily oluşturur.
+ * Auth Schema Provisioner — lazily creates the _postgrify_auth schema for each managed DB.
  *
- * Idempotent: IF NOT EXISTS + ADD COLUMN IF NOT EXISTS kullanıldığından
- * defalarca çağrılabilir, mevcut veriye dokunmaz.
+ * Idempotent: uses IF NOT EXISTS + ADD COLUMN IF NOT EXISTS so it can be
+ * called multiple times without touching existing data.
  *
- * Tablolar:
- *   users          — kimlik doğrulama kullanıcıları
- *   sessions       — refresh token'lar (PostgreSQL-native, Redis'e gerek yok)
- *   audit_log      — tüm auth eventlarının kaydı
- *   oauth_providers — per-DB OAuth client_id/secret yapılandırması
- *   auth_settings  — per-DB feature flag'leri (signup açık mı, magic link var mı vb.)
+ * Tables:
+ *   users           — authentication users
+ *   sessions        — refresh tokens (PostgreSQL-native, no Redis required)
+ *   audit_log       — record of all auth events
+ *   oauth_providers — per-DB OAuth client_id/secret configuration
+ *   auth_settings   — per-DB feature flags (is signup open, is magic link enabled, etc.)
  */
 
 import type postgres from "postgres";
 
 export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Promise<void> {
-  // ── Temel tablolar ───────────────────────────────────────────────────────
+  // ── Base tables ──────────────────────────────────────────────────────────
   await sql.unsafe(`
     CREATE SCHEMA IF NOT EXISTS _postgrify_auth;
 
-    -- Ana kullanıcı tablosu
+    -- Primary user table
     CREATE TABLE IF NOT EXISTS _postgrify_auth.users (
       id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       email             TEXT        UNIQUE NOT NULL,
-      password_hash     TEXT,                          -- NULL: OAuth-only kullanıcılar için
+      password_hash     TEXT,                          -- NULL: for OAuth-only users
       role              TEXT        NOT NULL DEFAULT 'viewer'
                                       CHECK (role IN ('viewer', 'editor', 'admin')),
       is_active         BOOLEAN     NOT NULL DEFAULT true,
       created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_login        TIMESTAMPTZ,
       metadata          JSONB       NOT NULL DEFAULT '{}',
-      -- Email doğrulama
+      -- Email verification
       email_verified    BOOLEAN     NOT NULL DEFAULT false,
-      -- Profil (OAuth'dan da doldurulur)
+      -- Profile (also populated from OAuth)
       full_name         TEXT,
       avatar_url        TEXT,
-      -- Provider bilgisi
+      -- Provider information
       provider          TEXT        NOT NULL DEFAULT 'email',
-      provider_id       TEXT                            -- OAuth provider'dan gelen benzersiz ID
+      provider_id       TEXT                            -- Unique ID from the OAuth provider
     );
 
-    -- Session / refresh token tablosu
+    -- Session / refresh token table
     CREATE TABLE IF NOT EXISTS _postgrify_auth.sessions (
       id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id       UUID        NOT NULL
@@ -65,7 +65,7 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
-    -- Per-DB OAuth provider yapılandırması
+    -- Per-DB OAuth provider configuration
     CREATE TABLE IF NOT EXISTS _postgrify_auth.oauth_providers (
       id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       provider      TEXT        NOT NULL UNIQUE,
@@ -76,14 +76,14 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
-    -- Per-DB auth ayarları (key-value)
+    -- Per-DB auth settings (key-value)
     CREATE TABLE IF NOT EXISTS _postgrify_auth.auth_settings (
       key        TEXT PRIMARY KEY,
       value      TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
-    -- İndeksler
+    -- Indexes
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_refresh_token
       ON _postgrify_auth.sessions (refresh_token)
       WHERE revoked = false;
@@ -102,8 +102,8 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       WHERE provider_id IS NOT NULL;
   `);
 
-  // ── Mevcut DB'lere yeni kolonları ekle (idempotent ALTER) ────────────────
-  // Eski kurulumlar IF NOT EXISTS'li ALTER'larla güncellenir.
+  // ── Add new columns to existing DBs (idempotent ALTER) ──────────────────
+  // Older installations are updated via IF NOT EXISTS ALTER statements.
   await sql.unsafe(`
     ALTER TABLE _postgrify_auth.users
       ADD COLUMN IF NOT EXISTS email_verified   BOOLEAN     NOT NULL DEFAULT false,
@@ -117,14 +117,14 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
     ALTER TABLE _postgrify_auth.sessions
       ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
 
-    -- password_hash NOT NULL kısıtını kaldır (OAuth kullanıcıları için)
-    -- Bu sadece mevcut kısıt varsa çalışır; IF NOT EXISTS olmadığı için
-    -- hata fırlatabilir — try/catch ile sarıyoruz (provision.ts caller'da).
+    -- Remove the NOT NULL constraint on password_hash (for OAuth users)
+    -- This only runs when the constraint exists; since there is no IF NOT EXISTS,
+    -- it may throw — we wrap it with try/catch (in the provision.ts caller).
   `).catch(() => {
-    // ALTER TABLE hatalarını yoksay — kolon zaten var ya da kısıt değişmedi
+    // Ignore ALTER TABLE errors — the column already exists or the constraint did not change
   });
 
-  // Varsayılan auth ayarlarını yükle (INSERT OR IGNORE)
+  // Load default auth settings (INSERT OR IGNORE)
   await sql.unsafe(`
     INSERT INTO _postgrify_auth.auth_settings (key, value) VALUES
       ('email_signup_enabled',       'true'),
@@ -140,17 +140,17 @@ export async function ensureAuthSchema(sql: postgres.Sql, _dbName?: string): Pro
       ('password_require_special',   'false'),
       ('account_lockout_attempts',   '5'),
       ('account_lockout_minutes',    '15'),
-      -- Yeni kullanıcıların varsayılan rolü.
-      -- Değerler: 'viewer' (sadece okuma), 'editor' (okuma+yazma+silme+sorgu), 'admin' (tam erişim)
-      -- Uygulama geliştiricisi bunu 'editor' yaparak yeni kullanıcıların
-      -- tweet atabilmesini, profil oluşturabilmesini sağlayabilir. (SORUN #7 düzeltmesi)
+      -- Default role for new users.
+      -- Values: 'viewer' (read-only), 'editor' (read+write+delete+query), 'admin' (full access)
+      -- App developers can set this to 'editor' so new users can
+      -- post tweets, create profiles, etc. (Issue #7 fix)
       ('default_user_role',          'viewer')
     ON CONFLICT (key) DO NOTHING;
   `);
 }
 
 /**
- * Audit log kaydı ekler. Hatada sessizce devam eder (auth flow'u kesmesin).
+ * Inserts an audit log entry. Silently continues on error (must not interrupt auth flow).
  */
 export async function insertAuditLog(
   sql: postgres.Sql,
@@ -170,7 +170,7 @@ export async function insertAuditLog(
       )
     `;
   } catch {
-    // Audit log hatası auth flow'u kesmemeli
+    // An audit log error must not interrupt the auth flow
   }
 }
 
@@ -195,14 +195,11 @@ export type AuditEvent =
   | "user_ban";
 
 /**
- * Per-DB auth ayarını okur. Yoksa default değeri döner.
- */
-/**
- * Per-DB auth ayarını okur. Yoksa default değeri döner.
+ * Reads a per-DB auth setting. Returns the default value if not found.
  *
- * Dönen değer küçük harfe normalize edilir — karşılaştırmalar case-insensitive çalışır.
- * Örn: DB'de "TRUE", "True", "true" değerleri aynı şekilde değerlendirilir.
- * Bu normalizasyon boolean flag karşılaştırmalarında bypass riskini ortadan kaldırır.
+ * The returned value is normalized to lowercase — comparisons are case-insensitive.
+ * e.g. "TRUE", "True", and "true" stored in the DB are all treated the same way.
+ * This normalization eliminates the risk of bypass in boolean flag comparisons.
  */
 export async function getAuthSetting(
   sql: postgres.Sql,
@@ -217,8 +214,8 @@ export async function getAuthSetting(
 }
 
 /**
- * Database'in API key'ini döner.
- * Schema henüz provision edilmemişse null döner.
+ * Returns the database's API key.
+ * Returns null if the schema has not been provisioned yet.
  */
 export async function getApiKey(sql: postgres.Sql): Promise<string | null> {
   try {
@@ -228,15 +225,15 @@ export async function getApiKey(sql: postgres.Sql): Promise<string | null> {
     const key = rows[0]?.value as string | undefined;
     return key ?? null;
   } catch {
-    // Tablo henüz oluşturulmamış
+    // Table not yet created
     return null;
   }
 }
 
 /**
- * İlk provision sırasında api_key oluşturur ve kaydeder.
- * Zaten varsa mevcut key'i döner (idempotent).
- * ensureAuthSchema çağırır — provision edilmemiş olsa bile çalışır.
+ * Creates and saves the api_key during the first provision.
+ * Returns the existing key if already present (idempotent).
+ * Calls ensureAuthSchema — works even if not yet provisioned.
  */
 export async function provisionApiKey(sql: postgres.Sql): Promise<string> {
   await ensureAuthSchema(sql);

@@ -1,2 +1,2 @@
-// Terminal bottom panel kaldırıldı.
+// Terminal bottom panel removed.
 export {};

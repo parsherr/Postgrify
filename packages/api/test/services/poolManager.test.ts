@@ -1,12 +1,12 @@
 /**
- * PoolManager unit testleri — gerçek DB bağlantısı olmadan.
- * postgres.js mock'lanır; pool lifecycle test edilir.
+ * PoolManager unit tests — no real DB connection required.
+ * postgres.js is mocked; pool lifecycle is tested.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PoolManager } from "../../src/services/poolManager.js";
 
-// postgres modülünü mock'la
+// Mock the postgres module
 vi.mock("postgres", () => {
   const endMock = vi.fn().mockResolvedValue(undefined);
   const sqlMock = vi.fn(() => ({ end: endMock, _endMock: endMock }));
@@ -36,28 +36,28 @@ afterEach(async () => {
 });
 
 describe("PoolManager", () => {
-  it("ilk getPool çağrısında yeni pool oluşturur", () => {
+  it("creates a new pool on the first getPool() call", () => {
     const pool = manager.getPool("project1");
     expect(pool).toBeDefined();
     expect(manager.activePoolCount).toBe(1);
     expect(manager.activePoolNames).toContain("project1");
   });
 
-  it("aynı DB için aynı pool nesnesini döner", () => {
+  it("returns the same pool object for the same database", () => {
     const p1 = manager.getPool("project1");
     const p2 = manager.getPool("project1");
     expect(p1).toBe(p2);
     expect(manager.activePoolCount).toBe(1);
   });
 
-  it("farklı DB'ler için farklı pool'lar oluşturur", () => {
+  it("creates separate pools for different databases", () => {
     const p1 = manager.getPool("db1");
     const p2 = manager.getPool("db2");
     expect(p1).not.toBe(p2);
     expect(manager.activePoolCount).toBe(2);
   });
 
-  it("releasePool belirtilen DB'yi kaldırır", async () => {
+  it("releasePool removes the specified database pool", async () => {
     manager.getPool("project1");
     expect(manager.activePoolCount).toBe(1);
 
@@ -66,7 +66,7 @@ describe("PoolManager", () => {
     expect(manager.activePoolNames).not.toContain("project1");
   });
 
-  it("closeAll tüm pool'ları kapatır", async () => {
+  it("closeAll closes all active pools", async () => {
     manager.getPool("db1");
     manager.getPool("db2");
     manager.getPool("db3");
@@ -76,7 +76,7 @@ describe("PoolManager", () => {
     expect(manager.activePoolCount).toBe(0);
   });
 
-  it("var olmayan DB için releasePool hata fırlatmaz", async () => {
+  it("releasePool does not throw when database does not exist", async () => {
     await expect(manager.releasePool("nonexistent")).resolves.toBeUndefined();
   });
 });

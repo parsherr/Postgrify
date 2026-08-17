@@ -1,7 +1,7 @@
 /**
  * DatabasesPage — Managed database'lerin listesi.
  *
- * Veritabanı oluşturulduğunda API key tek seferlik bir modal'da gösterilir.
+ * The API key is shown once in a modal when a database is created.
  */
 
 import React, { useState } from "react";
@@ -36,7 +36,7 @@ import {
 } from "@/hooks/useDatabases";
 import type { Database } from "@/types";
 
-// ── Yardımcı: kopyalama butonu ───────────────────────────────────────────────
+// ── Helper: copy button ───────────────────────────────────────────────
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -59,7 +59,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       ) : (
         <Copy className="h-3.5 w-3.5" />
       )}
-      {copied ? "Kopyalandı" : "Kopyala"}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -81,12 +81,12 @@ function ApiKeyModal({ dbName, apiKey, onClose }: ApiKeyModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-amber-500" />
-            API Key oluşturuldu
+            API Key Created
           </DialogTitle>
           <DialogDescription>
-            <strong>{dbName}</strong> veritabanı için API key aşağıda
-            gösterilmektedir. Bu key bir daha tam olarak gösterilmeyecektir —
-            şimdi kopyalayın.
+            The API key for <strong>{dbName}</strong> is shown below.
+            This key will not be shown again —
+            copy it now.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,7 +98,7 @@ function ApiKeyModal({ dbName, apiKey, onClose }: ApiKeyModalProps) {
             <button
               onClick={() => setRevealed((v) => !v)}
               className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title={revealed ? "Gizle" : "Göster"}
+              title={revealed ? "Hide" : "Show"}
             >
               {revealed ? (
                 <EyeOff className="h-4 w-4" />
@@ -113,7 +113,7 @@ function ApiKeyModal({ dbName, apiKey, onClose }: ApiKeyModalProps) {
         </div>
 
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-300 space-y-1.5">
-          <p className="font-medium">SDK Kullanımı</p>
+          <p className="font-medium">SDK Usage</p>
           <pre className="text-xs whitespace-pre-wrap break-all font-mono">
 {`import { createClient } from '@postgrify/auth-js'
 
@@ -126,7 +126,7 @@ const auth = createClient({
         </div>
 
         <DialogFooter>
-          <Button onClick={onClose}>Anladım, kapattım</Button>
+          <Button onClick={onClose}>Got it, close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -164,15 +164,15 @@ export default function DatabasesPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Başlık */}
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Veritabanları</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Databases</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Her veritabanı izole bir PostgreSQL şeması ve auth sistemine sahiptir.
+          Each database has an isolated PostgreSQL schema and auth system.
         </p>
       </div>
 
-      {/* Yeni DB oluştur */}
+      {/* Create new DB */}
       <form
         onSubmit={handleCreate}
         className="flex gap-2 items-center"
@@ -180,10 +180,10 @@ export default function DatabasesPage() {
         <Input
           value={newDbName}
           onChange={(e) => setNewDbName(e.target.value)}
-          placeholder="Veritabanı adı (örn: myapp)"
+          placeholder="Database name (e.g. myapp)"
           className="max-w-xs font-mono"
           pattern="[a-zA-Z_][a-zA-Z0-9_]*"
-          title="Harf/alt çizgi ile başlamalı, yalnızca harf/rakam/alt çizgi içerebilir"
+          title="Must start with a letter/underscore, may only contain letters/digits/underscores"
         />
         <Button type="submit" disabled={createDb.isPending || !newDbName.trim()}>
           {createDb.isPending ? (
@@ -191,12 +191,12 @@ export default function DatabasesPage() {
           ) : (
             <Plus className="h-4 w-4" />
           )}
-          Oluştur
+          Create
         </Button>
       </form>
       {createDb.isError && (
         <p className="text-sm text-destructive">
-          {(createDb.error as Error)?.message ?? "Veritabanı oluşturulamadı"}
+          {(createDb.error as Error)?.message ?? "Failed to create database"}
         </p>
       )}
 
@@ -204,12 +204,12 @@ export default function DatabasesPage() {
       {isLoading ? (
         <div className="flex items-center gap-2 text-muted-foreground text-sm py-8">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Yükleniyor…
+          Loading…
         </div>
       ) : databases.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
           <DatabaseIcon className="h-8 w-8 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">Henüz veritabanı yok.</p>
+          <p className="text-sm">No databases yet.</p>
         </div>
       ) : (
         <div className="divide-y rounded-lg border">
@@ -249,20 +249,20 @@ export default function DatabasesPage() {
         </div>
       )}
 
-      {/* Silme onayı */}
+      {/* Delete confirmation */}
       {confirmDelete && (
         <Dialog open onOpenChange={() => setConfirmDelete(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Veritabanını sil</DialogTitle>
+              <DialogTitle>Delete Database</DialogTitle>
               <DialogDescription>
-                <strong>{confirmDelete}</strong> veritabanı kalıcı olarak
-                silinecek. Bu işlem geri alınamaz.
+                The database <strong>{confirmDelete}</strong> will be permanently
+                deleted. This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmDelete(null)}>
-                İptal
+                Cancel
               </Button>
               <Button
                 variant="destructive"
@@ -285,7 +285,7 @@ export default function DatabasesPage() {
         </Dialog>
       )}
 
-      {/* API Key Modal — DB oluşturulunca açılır */}
+      {/* API Key Modal — opens when a DB is created */}
       {createdApiKey && (
         <ApiKeyModal
           dbName={createdApiKey.dbName}

@@ -1,5 +1,5 @@
 /**
- * Tablo yönetim hook'ları.
+ * Table management hooks.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";

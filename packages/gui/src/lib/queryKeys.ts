@@ -1,5 +1,5 @@
 /**
- * TanStack Query anahtar fabrikası — cache geçersizleştirme için merkezi kaynak.
+ * TanStack Query key factory — central source for cache invalidation.
  */
 
 export const queryKeys = {

@@ -1,6 +1,6 @@
 /**
- * Entry point — Fastify sunucusunu başlatır.
- * Tüm plugin'ler ve route'lar buradan kayıt edilir.
+ * Entry point — creates and starts the Fastify server.
+ * All plugins and routes are registered from here.
  */
 
 import Fastify from "fastify";
@@ -12,13 +12,13 @@ const server = Fastify({
   logger: {
     level: config.LOG_LEVEL,
   },
-  // nginx veya diğer reverse proxy arkasındaysa gerçek istemci IP'sini al.
-  // trustProxy: true olmadan req.ip proxy'nin iç IP'si (172.x.x.x) olur;
-  // rate-limit tüm requestleri aynı "IP"den görür ve brute-force koruması devre dışı kalır.
+  // When running behind nginx or another reverse proxy, obtain the real client IP.
+  // Without trustProxy: true, req.ip is the proxy's internal IP (172.x.x.x);
+  // rate-limiting sees all requests as coming from the same "IP", disabling brute-force protection.
   //
-  // Güvenlik: "true" yerine Docker internal network aralığı belirtilir.
-  // Bu sayede dışarıdan gelen X-Forwarded-For header'ı ile IP spoofing önlenir.
-  // Yalnızca 172.16.0.0/12 (Docker bridge) ve 127.0.0.1 (loopback) güvenilir proxy sayılır.
+  // Security: specify the Docker internal network range instead of "true".
+  // This prevents IP spoofing via a forged X-Forwarded-For header from external clients.
+  // Only 172.16.0.0/12 (Docker bridge) and 127.0.0.1 (loopback) are trusted proxies.
   trustProxy: "127.0.0.1, 172.16.0.0/12",
 });
 
@@ -30,7 +30,7 @@ async function start() {
   server.log.info(`Postgrify API listening on port ${config.PORT}`);
 }
 
-// Graceful shutdown: açık pool bağlantılarını kapat
+// Graceful shutdown: close open pool connections
 const shutdown = async (signal: string) => {
   server.log.info(`${signal} received — shutting down`);
   await server.close();

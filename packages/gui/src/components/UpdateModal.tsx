@@ -1,132 +1,128 @@
-/**
- * UpdateModal — yeni sürüm çıktığında giriş sonrası bir kez gösterilir.
- *
- * Görünüm koşulu: localStorage'daki "postgrify_seen_version" mevcut
- * VERSION'dan farklıysa modal açılır. "Got it" veya "View Changes" tıklayınca
- * versiyon kaydedilir, modal tekrar çıkmaz.
- */
-
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Sparkles, ArrowRight, X } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
-import { parseChangelog, latestEntry, SEEN_VERSION_KEY } from "@/lib/changelog";
-import changelogRaw from "../../../../CHANGELOG.md?raw";
-
-const VERSION =
-  (import.meta as unknown as { env: { VITE_APP_VERSION?: string } }).env
-    .VITE_APP_VERSION ?? "0.0.0";
-
-const ENTRIES = parseChangelog(changelogRaw);
-const LATEST = latestEntry(ENTRIES);
-
-function shouldShow(): boolean {
-  if (!LATEST) return false;
-  const seen = localStorage.getItem(SEEN_VERSION_KEY);
-  return seen !== VERSION;
-}
-
-function markSeen() {
-  localStorage.setItem(SEEN_VERSION_KEY, VERSION);
-}
+import { X, ArrowUpCircle, ExternalLink } from "lucide-react";
 
 interface UpdateModalProps {
-  /** Modal'ın parent'tan kontrol edilmesini sağlar (opsiyonel) */
-  onClose?: () => void;
+  isOpen: boolean;
+  onClose: () => void;
+  currentVersion: string;
+  latestVersion: string;
+  releaseUrl?: string;
+  changelog?: string;
 }
 
-export function UpdateModal({ onClose }: UpdateModalProps) {
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (shouldShow()) setOpen(true);
-  }, []);
-
-  function handleClose() {
-    markSeen();
-    setOpen(false);
-    onClose?.();
-  }
-
-  function handleViewChanges() {
-    markSeen();
-    setOpen(false);
-    onClose?.();
-    navigate("/changelog");
-  }
-
-  if (!LATEST) return null;
-
-  // Son sürümün maddeleri — en fazla 5 madde göster
-  const allItems = LATEST.sections.flatMap((s) => s.items).slice(0, 5);
+/**
+ * Modal displayed when a newer version of Postgrify is available.
+ */
+export function UpdateModal({
+  isOpen,
+  onClose,
+  currentVersion,
+  latestVersion,
+  releaseUrl,
+  changelog,
+}: UpdateModalProps) {
+  if (!isOpen) return null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent
-        className="max-w-sm border border-zinc-800 bg-zinc-950 p-0 shadow-2xl [&>button]:hidden"
-      >
-        {/* Kapat butonu */}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="update-modal-title"
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Dialog */}
+      <div className="relative w-full max-w-md bg-slate-800 border border-slate-700 rounded-xl shadow-2xl">
+        {/* Close button */}
         <button
-          onClick={handleClose}
-          className="absolute right-3 top-3 rounded p-1 text-zinc-600 transition-colors hover:text-zinc-300"
-          aria-label="Kapat"
+          onClick={onClose}
+          className="absolute top-3 right-3 p-1 text-slate-500 hover:text-slate-300 rounded transition-colors"
+          aria-label="Close"
         >
-          <X className="h-4 w-4" />
+          <X className="w-4 h-4" />
         </button>
 
-        <div className="flex flex-col gap-5 p-6">
-          {/* Badge */}
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs font-medium text-zinc-300">
-              <Sparkles className="h-3 w-3 text-amber-400" />
-              New update
-            </span>
+        <div className="p-5">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <ArrowUpCircle className="w-5 h-5 text-blue-400" />
+            </div>
+            <div>
+              <h2
+                id="update-modal-title"
+                className="text-base font-semibold text-slate-100"
+              >
+                Update Available
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                A new version of Postgrify is ready.
+              </p>
+            </div>
           </div>
 
-          {/* Başlık */}
-          <div>
-            <p className="font-mono text-3xl font-semibold tracking-tight text-white">
-              v{LATEST.version}
-            </p>
-            <p className="mt-1 text-sm text-zinc-400">
-              {LATEST.date} · What's new
-            </p>
+          {/* Version info */}
+          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg mb-4">
+            <div className="text-center">
+              <p className="text-xs text-slate-500 mb-1">Current</p>
+              <p className="text-sm font-mono text-slate-300">
+                v{currentVersion}
+              </p>
+            </div>
+            <div className="text-slate-600">→</div>
+            <div className="text-center">
+              <p className="text-xs text-slate-500 mb-1">New</p>
+              <p className="text-sm font-mono text-green-400 font-semibold">
+                v{latestVersion}
+              </p>
+            </div>
           </div>
 
-          {/* Değişiklik maddeleri */}
-          {allItems.length > 0 && (
-            <ul className="space-y-2">
-              {allItems.map((item, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
-                  <span className="leading-snug">{item}</span>
-                </li>
-              ))}
-            </ul>
+          {/* Changelog */}
+          {changelog && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-400 mb-1.5">
+                What's new
+              </p>
+              <div className="p-3 bg-slate-900/50 rounded-lg max-h-40 overflow-y-auto">
+                <p className="text-xs text-slate-400 whitespace-pre-wrap font-mono">
+                  {changelog}
+                </p>
+              </div>
+            </div>
           )}
 
-          {/* Aksiyonlar */}
-          <div className="flex items-center gap-2 pt-1">
+          {/* Actions */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleViewChanges}
-              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors"
             >
-              View changelog
+              Later
             </button>
-            <button
-              onClick={handleClose}
-              className="flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-zinc-100"
-            >
-              Got it
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+            {releaseUrl && (
+              <a
+                href={releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                View Release
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
           </div>
+
+          {/* Dismiss hint */}
+          <p className="text-center text-xs text-slate-600 mt-3">
+            You can also update via Docker — see the docs.
+          </p>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

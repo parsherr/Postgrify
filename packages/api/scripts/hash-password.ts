@@ -1,8 +1,8 @@
 /**
- * Kullanım: npx tsx scripts/hash-password.ts "şifreniz"
+ * Usage: npx tsx scripts/hash-password.ts "yourpassword"
  *
- * Çıktıyı .env dosyasına ADMIN_PASSWORD_HASH olarak ekleyin.
- * Örnek: ADMIN_PASSWORD_HASH=$argon2id$v=19$...
+ * Add the output to your .env file as ADMIN_PASSWORD_HASH.
+ * Example: ADMIN_PASSWORD_HASH=$argon2id$v=19$...
  */
 
 import { hashPassword } from "../src/services/passwordService.js";
@@ -10,7 +10,7 @@ import { hashPassword } from "../src/services/passwordService.js";
 const password = process.argv[2];
 
 if (!password) {
-  console.error("Kullanım: npx tsx scripts/hash-password.ts \"şifreniz\"");
+  console.error("Usage: npx tsx scripts/hash-password.ts \"yourpassword\"");
   process.exit(1);
 }
 

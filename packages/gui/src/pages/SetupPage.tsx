@@ -1,13 +1,13 @@
 /**
- * SetupPage — ilk çalıştırma sihirbazı.
+ * SetupPage — first-run setup wizard.
  *
- * Görsel dil LoginPage ile aynı: siyah zemin, GrainGradient sağ panel,
- * floating-label input'lar. 3 adım arası slide+fade animasyonu.
+ * Visual language matches LoginPage: black background, GrainGradient right panel,
+ * floating-label inputs. Slide+fade animation between 3 steps.
  *
- * Adımlar:
- *  1 — Admin hesabı (e-posta + şifre + tekrar)
- *  2 — PostgreSQL bağlantısı (host + port + kullanıcı + şifre)
- *  3 — Özet + tamamla
+ * Steps:
+ *  1 — Admin account (email + password + confirm)
+ *  2 — PostgreSQL connection (host + port + user + password)
+ *  3 — Summary + finish
  */
 
 import { useState } from "react";
@@ -57,7 +57,7 @@ function FieldBox({ label, value, onChange, type = "text", required, placeholder
 
 // ── Step indicator ────────────────────────────────────────────────────────────
 
-const STEP_LABELS = ["Admin Hesabı", "Veritabanı", "Özet"];
+const STEP_LABELS = ["Admin Account", "Database", "Summary"];
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -94,7 +94,7 @@ function StepIndicator({ current }: { current: number }) {
               </span>
             </div>
 
-            {/* Bağlantı çizgisi */}
+            {/* Connection line */}
             {i < STEP_LABELS.length - 1 && (
               <div className={`mb-5 h-px w-12 transition-colors duration-300 ${done ? "bg-zinc-600" : "bg-zinc-800"}`} />
             )}
@@ -105,31 +105,31 @@ function StepIndicator({ current }: { current: number }) {
   );
 }
 
-// ── Adım başlıkları ────────────────────────────────────────────────────────────
+// ── Step headings ────────────────────────────────────────────────────────────
 
 const STEP_HEADINGS: Record<number, { title: string; sub: string }> = {
-  1: { title: "Admin hesabını\noluştur", sub: "Sisteme giriş için kullanacağın hesap." },
-  2: { title: "Veritabanını\nbağla", sub: "PostgreSQL bağlantı bilgilerini gir." },
-  3: { title: "Her şey\nhazır", sub: "Ayarları gözden geçir ve tamamla." },
+  1: { title: "Create admin\naccount", sub: "The account you will use to log in to the system." },
+  2: { title: "Connect your\ndatabase", sub: "Enter your PostgreSQL connection details." },
+  3: { title: "Everything\nis ready", sub: "Review your settings and finish." },
 };
 
-// ── Ana bileşen ────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────────
 
 export default function SetupPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { login, loginWithTokens } = useAuthContext();
 
-  // Adım durumu
+  // Step state
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState<"forward" | "back">("forward");
 
-  // Adım 1 — Admin hesabı
+  // Step 1 — Admin account
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
 
-  // Adım 2 — PostgreSQL
+  // Step 2 — PostgreSQL
   const [pgHost, setPgHost] = useState("localhost");
   const [pgPort, setPgPort] = useState("5432");
   const [pgUser, setPgUser] = useState("postgres");
@@ -142,22 +142,22 @@ export default function SetupPage() {
   // ── Validasyon ──────────────────────────────────────────────────────────────
 
   function validateStep1(): string {
-    if (!email.includes("@")) return "Geçerli bir e-posta gir.";
-    if (password.length < 8) return "Şifre en az 8 karakter olmalı.";
-    if (password !== passwordConfirm) return "Şifreler eşleşmiyor.";
+    if (!email.includes("@")) return "Enter a valid email address.";
+    if (password.length < 8) return "Password must be at least 8 characters.";
+    if (password !== passwordConfirm) return "Passwords do not match.";
     return "";
   }
 
   function validateStep2(): string {
     const port = Number(pgPort);
-    if (!pgHost.trim()) return "Host alanı boş olamaz.";
-    if (!pgUser.trim()) return "Kullanıcı adı boş olamaz.";
-    if (!pgPassword.trim()) return "Şifre boş olamaz.";
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return "Port 1–65535 arasında olmalı.";
+    if (!pgHost.trim()) return "Host cannot be empty.";
+    if (!pgUser.trim()) return "Username cannot be empty.";
+    if (!pgPassword.trim()) return "Password cannot be empty.";
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return "Port must be between 1–65535.";
     return "";
   }
 
-  // ── Adım geçişleri ──────────────────────────────────────────────────────────
+  // ── Step transitions ──────────────────────────────────────────────────────────
 
   function goNext() {
     setError("");
@@ -188,11 +188,11 @@ export default function SetupPage() {
         pgPassword,
       });
 
-      // Cache'i güncelle — SetupGuard artık configured=true görecek
+      // Update cache — SetupGuard will now see configured=true
       queryClient.setQueryData(["setup-status"], { configured: true });
 
       // API setup response'unda token varsa direkt kullan (container modunda
-      // /auth/admin/login env var'ları henüz güncellenmediğinden 503 verir).
+      // /auth/admin/login returns 503 because env vars are not yet updated).
       // Token yoksa klasik login dene.
       if (result.accessToken) {
         loginWithTokens(result.accessToken, result.refreshToken ?? null, result.email ?? email);
@@ -200,17 +200,17 @@ export default function SetupPage() {
         await login(email, password);
       }
 
-      // Dashboard'a yönlendir
+      // Redirect to dashboard
       navigate("/", { replace: true });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Kurulum başarısız.";
+      const msg = e instanceof Error ? e.message : "Setup failed.";
       setError(msg);
     } finally {
       setIsPending(false);
     }
   }
 
-  // ── Sağ panel sloganı ───────────────────────────────────────────────────────
+  // ── Right panel slogan ───────────────────────────────────────────────────────
 
   const heading = STEP_HEADINGS[step];
   const slideClass = direction === "forward"
@@ -237,7 +237,7 @@ export default function SetupPage() {
                 <StepIndicator current={step} />
               </div>
 
-              {/* Adım başlığı */}
+              {/* Step heading */}
               <div key={`heading-${step}`} className={slideClass}>
                 <h1 className="whitespace-pre-line text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:text-[64px] lg:leading-[0.98]">
                   {heading.title}
@@ -245,14 +245,14 @@ export default function SetupPage() {
                 <p className="mt-2 text-sm text-zinc-400">{heading.sub}</p>
               </div>
 
-              {/* Form alanları */}
+              {/* Form fields */}
               <div key={`form-${step}`} className={`mt-8 space-y-5 ${slideClass}`}>
 
                 {step === 1 && (
                   <>
                     <FieldBox label="E-posta" value={email} onChange={e => setEmail(e.target.value)} type="email" required />
-                    <FieldBox label="Şifre" value={password} onChange={e => setPassword(e.target.value)} type="password" required />
-                    <FieldBox label="Şifre tekrar" value={passwordConfirm} onChange={e => setPasswordConfirm(e.target.value)} type="password" required />
+                    <FieldBox label="Password" value={password} onChange={e => setPassword(e.target.value)} type="password" required />
+                    <FieldBox label="Confirm password" value={passwordConfirm} onChange={e => setPasswordConfirm(e.target.value)} type="password" required />
                   </>
                 )}
 
@@ -264,28 +264,28 @@ export default function SetupPage() {
                         <FieldBox label="Port" value={pgPort} onChange={e => setPgPort(e.target.value)} required />
                       </div>
                       <div className="col-span-2">
-                        <FieldBox label="Kullanıcı" value={pgUser} onChange={e => setPgUser(e.target.value)} required />
+                        <FieldBox label="Username" value={pgUser} onChange={e => setPgUser(e.target.value)} required />
                       </div>
                     </div>
-                    <FieldBox label="Şifre" value={pgPassword} onChange={e => setPgPassword(e.target.value)} type="password" required />
+                    <FieldBox label="Password" value={pgPassword} onChange={e => setPgPassword(e.target.value)} type="password" required />
                   </>
                 )}
 
                 {step === 3 && (
                   <div className="space-y-2 rounded-[10px] border border-zinc-800 bg-zinc-900 p-5 text-sm">
                     <SummaryRow label="E-posta" value={email} />
-                    <SummaryRow label="Şifre" value="••••••••" />
+                    <SummaryRow label="Password" value="••••••••" />
                     <div className="my-3 h-px bg-zinc-800" />
                     <SummaryRow label="Host" value={pgHost} />
                     <SummaryRow label="Port" value={pgPort} />
-                    <SummaryRow label="Kullanıcı" value={pgUser} />
-                    <SummaryRow label="DB Şifresi" value="••••••••" />
+                    <SummaryRow label="Username" value={pgUser} />
+                    <SummaryRow label="DB Password" value="••••••••" />
                   </div>
                 )}
 
               </div>
 
-              {/* Hata mesajı */}
+              {/* Error message */}
               {error && (
                 <p className="mt-3 text-sm text-red-400">{error}</p>
               )}
@@ -334,9 +334,9 @@ export default function SetupPage() {
             </>
         </div>
 
-        {/* ── Sağ panel — GrainGradient ─────────────────────────────────── */}
+        {/* ── Right panel — GrainGradient ─────────────────────────────────── */}
         <div className="relative hidden overflow-hidden rounded-md bg-black text-white lg:block">
-          {/* Sarı grain gradient — köşelerden akan efekt */}
+          {/* Yellow grain gradient — flowing from corners effect */}
           <GrainGradient
             speed={0.3}
             scale={1}
@@ -353,7 +353,7 @@ export default function SetupPage() {
             className="absolute inset-0 bg-black"
           />
 
-          {/* İçerik */}
+          {/* Content */}
           <div className="relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-12">
             <h2 className="max-w-[520px] pt-0 text-5xl font-medium tracking-[-0.05em] text-white sm:text-6xl lg:pt-16 lg:text-[64px] lg:leading-[0.98] xl:text-[70px]">
               Setup fast,
@@ -368,7 +368,7 @@ export default function SetupPage() {
   );
 }
 
-// ── Yardımcı: özet satırı ─────────────────────────────────────────────────────
+// ── Helper: summary row ─────────────────────────────────────────────────────
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (

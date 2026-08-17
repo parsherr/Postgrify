@@ -1,8 +1,8 @@
 /**
- * Auth tokens route testleri — login / logout / refresh.
+ * Auth tokens route tests — login / logout / refresh.
  *
- * POST /:database/auth/login   → kimlik doğrula
- * POST /:database/auth/refresh → yeni access token
+ * POST /:database/auth/login   → authenticate
+ * POST /:database/auth/refresh → new access token
  * POST /:database/auth/logout  → session revoke
  */
 
@@ -54,7 +54,7 @@ vi.mock("../../../src/services/emailService.js", () => ({
 }));
 
 let server: FastifyInstance;
-// sql mock'unu her test başında yeniden configure etmek için
+// To reconfigure the sql mock at the start of each test
 let sqlFnRef: ReturnType<typeof vi.fn>;
 
 beforeAll(async () => {
@@ -64,7 +64,7 @@ beforeAll(async () => {
   const { CacheService } = await import("../../../src/services/cacheService.js");
   const jwtSvc = new JwtService(JWT_SECRET);
 
-  // sql mock'una referans al
+  // Get a reference to the sql mock
   const { default: postgres } = await import("postgres");
   sqlFnRef = (postgres as unknown as ReturnType<typeof vi.fn>)();
 
@@ -92,7 +92,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: her zaman en az bir call için boş dizi döner
+  // Default: always returns an empty array for at least one call
   sqlFnRef.mockResolvedValue([]);
   mockVerifyPassword.mockResolvedValue(true);
   mockGetAuthSetting.mockResolvedValue("false"); // email_verify_required = false
@@ -101,8 +101,8 @@ beforeEach(() => {
 // ─── Login ────────────────────────────────────────────────────────────────────
 
 describe("POST /:database/auth/login", () => {
-  it("Başarılı login → 200, tokens ve user döner", async () => {
-    // Login SQL sırası: SELECT user, [verifyPassword], UPDATE last_login, INSERT session
+  it("Successful login → 200, returns tokens and user", async () => {
+    // Login SQL order: SELECT user, [verifyPassword], UPDATE last_login, INSERT session
     sqlFnRef
       // SELECT users WHERE email
       .mockResolvedValueOnce([{
@@ -142,7 +142,7 @@ describe("POST /:database/auth/login", () => {
   });
 
   it("Var olmayan email → 401 Invalid credentials", async () => {
-    sqlFnRef.mockResolvedValue([]); // kullanıcı bulunamadı
+    sqlFnRef.mockResolvedValue([]); // user not found
     mockVerifyPassword.mockResolvedValue(false);
 
     const res = await server.inject({
@@ -155,7 +155,7 @@ describe("POST /:database/auth/login", () => {
     expect(res.json().error).toContain("Invalid credentials");
   });
 
-  it("Yanlış şifre → 401 Invalid credentials", async () => {
+  it("Wrong password → 401 Invalid credentials", async () => {
     sqlFnRef.mockResolvedValueOnce([{
       id: "user-uuid-1",
       email: "test@example.com",
@@ -164,7 +164,7 @@ describe("POST /:database/auth/login", () => {
       is_active: true,
       email_verified: true,
     }]);
-    mockVerifyPassword.mockResolvedValue(false); // şifre yanlış
+    mockVerifyPassword.mockResolvedValue(false); // wrong password
 
     const res = await server.inject({
       method: "POST",
@@ -176,7 +176,7 @@ describe("POST /:database/auth/login", () => {
     expect(res.json().error).toContain("Invalid credentials");
   });
 
-  it("Disabled kullanıcı → 403 Account is disabled", async () => {
+  it("Disabled user → 403 Account is disabled", async () => {
     sqlFnRef.mockResolvedValueOnce([{
       id: "user-uuid-1",
       email: "test@example.com",
@@ -196,14 +196,14 @@ describe("POST /:database/auth/login", () => {
     expect(res.json().error).toContain("disabled");
   });
 
-  it("email_verify_required=true ve email doğrulanmamışsa → 403", async () => {
+  it("email_verify_required=true and email is not verified → 403", async () => {
     sqlFnRef.mockResolvedValueOnce([{
       id: "user-uuid-1",
       email: "test@example.com",
       password_hash: "$hashed$",
       role: "viewer",
       is_active: true,
-      email_verified: false, // doğrulanmamış
+      email_verified: false, // not verified
     }]);
     mockGetAuthSetting.mockResolvedValue("true"); // email_verify_required = true
 
@@ -217,7 +217,7 @@ describe("POST /:database/auth/login", () => {
     expect(res.json().error).toContain("Email not verified");
   });
 
-  it("Eksik email alanı → 400 validation error", async () => {
+  it("Missing email field → 400 validation error", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/auth/login",
@@ -231,7 +231,7 @@ describe("POST /:database/auth/login", () => {
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 
 describe("POST /:database/auth/refresh", () => {
-  it("Geçerli refresh token → 200, yeni tokens döner", async () => {
+  it("Valid refresh token → 200, returns new tokens", async () => {
     sqlFnRef
       // 1) SELECT sessions JOIN users (active)
       .mockResolvedValueOnce([{
@@ -294,7 +294,7 @@ describe("POST /:database/auth/refresh", () => {
     expect(res.json().access_token).toEqual(expect.any(String));
   });
 
-  it("Geçersiz/revoked refresh token → 401", async () => {
+  it("Invalid/revoked refresh token → 401", async () => {
     // active lookup empty, then revoked lookup empty
     sqlFnRef.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
@@ -308,7 +308,7 @@ describe("POST /:database/auth/refresh", () => {
     expect(res.json().error).toContain("Invalid or expired");
   });
 
-  it("Disabled kullanıcının refresh token'ı → 403", async () => {
+  it("Disabled user's refresh token → 403", async () => {
     sqlFnRef.mockResolvedValueOnce([{
       id: "session-uuid-1",
       user_id: "user-uuid-1",
@@ -332,11 +332,11 @@ describe("POST /:database/auth/refresh", () => {
     expect(res.json().error).toContain("disabled");
   });
 
-  it("Eksik refreshToken alanı → 400", async () => {
+  it("Missing refreshToken field → 400", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/auth/refresh",
-      payload: {}, // refreshToken yok
+      payload: {}, // no refreshToken
     });
 
     expect(res.statusCode).toBe(400);
@@ -346,7 +346,7 @@ describe("POST /:database/auth/refresh", () => {
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
 describe("POST /:database/auth/logout", () => {
-  it("Başarılı logout → 204", async () => {
+  it("Successful logout → 204", async () => {
     sqlFnRef.mockResolvedValue([{ user_id: "user-uuid-1" }]);
 
     const res = await server.inject({
@@ -359,8 +359,8 @@ describe("POST /:database/auth/logout", () => {
     expect(res.body).toBe("");
   });
 
-  it("Var olmayan token ile logout → 204 (idempotent)", async () => {
-    sqlFnRef.mockResolvedValue([]); // session bulunamadı — sorun değil
+  it("Logout with a non-existent token → 204 (idempotent)", async () => {
+    sqlFnRef.mockResolvedValue([]); // session not found — no problem
 
     const res = await server.inject({
       method: "POST",

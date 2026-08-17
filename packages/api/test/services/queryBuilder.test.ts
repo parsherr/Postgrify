@@ -1,5 +1,5 @@
 /**
- * QueryBuilder unit testleri — SQL üretimi ve validasyon.
+ * QueryBuilder unit tests — SQL generation and validation.
  */
 
 import { describe, it, expect } from "vitest";
@@ -12,26 +12,26 @@ import {
 } from "../../src/services/queryBuilder.js";
 
 describe("parseWhereConditions", () => {
-  it("eq operatörünü doğru çevirir", () => {
+  it("correctly translates the eq operator", () => {
     const { sql, values } = parseWhereConditions(["name.eq.alice"]);
     expect(sql).toBe('WHERE "name" = $1');
     expect(values).toEqual(["alice"]);
   });
 
-  it("gt operatörünü çevirir", () => {
+  it("translates the gt operator", () => {
     const { sql, values } = parseWhereConditions(["age.gt.18"]);
     expect(sql).toBe('WHERE "age" > $1');
     expect(values).toEqual(["18"]);
   });
 
-  it("gte, lte, lt, neq operatörlerini çevirir", () => {
+  it("translates gte, lte, lt, neq operators", () => {
     expect(parseWhereConditions(["score.gte.90"]).sql).toBe('WHERE "score" >= $1');
     expect(parseWhereConditions(["score.lte.100"]).sql).toBe('WHERE "score" <= $1');
     expect(parseWhereConditions(["score.lt.50"]).sql).toBe('WHERE "score" < $1');
     expect(parseWhereConditions(["status.neq.inactive"]).sql).toBe('WHERE "status" != $1');
   });
 
-  it("like ve ilike operatörlerini çevirir", () => {
+  it("translates the like and ilike operators", () => {
     const { sql, values } = parseWhereConditions(["name.like.Ali%"]);
     expect(sql).toBe('WHERE "name" LIKE $1');
     expect(values).toEqual(["Ali%"]);
@@ -40,37 +40,37 @@ describe("parseWhereConditions", () => {
     expect(sql2).toBe('WHERE "name" ILIKE $1');
   });
 
-  it("in operatörünü çevirir", () => {
+  it("translates the in operator", () => {
     const { sql, values } = parseWhereConditions(["status.in.a,b,c"]);
     expect(sql).toBe('WHERE "status" IN ($1, $2, $3)');
     expect(values).toEqual(["a", "b", "c"]);
   });
 
-  it("is.null → IS NULL üretir, değer parametrize edilmez", () => {
+  it("is.null → generates IS NULL without parameterizing the value", () => {
     const { sql, values } = parseWhereConditions(["deleted_at.is.null"]);
     expect(sql).toBe('WHERE "deleted_at" IS NULL');
     expect(values).toEqual([]);
   });
 
-  it("is.not_null → IS NOT NULL üretir", () => {
+  it("is.not_null → generates IS NOT NULL", () => {
     const { sql, values } = parseWhereConditions(["deleted_at.is.not_null"]);
     expect(sql).toBe('WHERE "deleted_at" IS NOT NULL');
     expect(values).toEqual([]);
   });
 
-  it("is.true → hata fırlatır (geçersiz is değeri)", () => {
+  it("is.true → throws (invalid is value)", () => {
     expect(() => parseWhereConditions(["flag.is.true"])).toThrow(
       /Invalid value for "is" operator/
     );
   });
 
-  it("is.false → hata fırlatır (geçersiz is değeri)", () => {
+  it("is.false → throws (invalid is value)", () => {
     expect(() => parseWhereConditions(["flag.is.false"])).toThrow(
       /Invalid value for "is" operator/
     );
   });
 
-  it("birden fazla koşulu AND ile birleştirir", () => {
+  it("joins multiple conditions with AND", () => {
     const { sql, values } = parseWhereConditions([
       "age.gt.18",
       "status.eq.active",
@@ -79,36 +79,36 @@ describe("parseWhereConditions", () => {
     expect(values).toEqual(["18", "active"]);
   });
 
-  it("boş dizi için boş string döner", () => {
+  it("returns empty string for an empty array", () => {
     const { sql, values } = parseWhereConditions([]);
     expect(sql).toBe("");
     expect(values).toEqual([]);
   });
 
-  it("geçersiz kolon adında hata fırlatır", () => {
+  it("throws on invalid column name", () => {
     expect(() => parseWhereConditions(["select.eq.x"])).toThrow();
   });
 
-  it("geçersiz operatörde hata fırlatır", () => {
+  it("throws on unknown operator", () => {
     expect(() => parseWhereConditions(["name.INVALID.x"])).toThrow(
       /Unknown operator/
     );
   });
 
-  it("eski `not` operatörü artık geçersiz — hata fırlatır", () => {
-    // `not` kaldırıldı; neq kullanılmalı
+  it("the legacy `not` operator is no longer valid — throws", () => {
+    // `not` was removed; use neq instead
     expect(() => parseWhereConditions(["field.not.value"])).toThrow(
       /Unknown operator/
     );
   });
 
-  it("in operatörü değerleri doğru placeholder sayısıyla eşleşir", () => {
+  it("in operator placeholder count matches value count", () => {
     const { sql, values } = parseWhereConditions(["id.in.1,2,3,4,5"]);
     expect(values).toHaveLength(5);
     expect(sql).toContain("$5");
   });
 
-  it("hatalı format (nokta yok) hata fırlatır", () => {
+  it("throws on malformed format (no dot separator)", () => {
     expect(() => parseWhereConditions(["badformat"])).toThrow();
   });
 });
@@ -230,14 +230,14 @@ describe("parseWhereConditions — JSONB (E-14)", () => {
   });
 });
 
-describe("parseWhereConditions — OR desteği", () => {
-  it("tek OR koşulunu parantez içinde üretir", () => {
+describe("parseWhereConditions — OR support", () => {
+  it("generates a single OR condition inside parentheses", () => {
     const { sql, values } = parseWhereConditions([], ["role.eq.admin"]);
     expect(sql).toBe('WHERE ("role" = $1)');
     expect(values).toEqual(["admin"]);
   });
 
-  it("birden fazla OR koşulunu OR ile birleştirir", () => {
+  it("joins multiple OR conditions with OR", () => {
     const { sql, values } = parseWhereConditions(
       [],
       ["role.eq.admin", "role.eq.mod"]
@@ -246,7 +246,7 @@ describe("parseWhereConditions — OR desteği", () => {
     expect(values).toEqual(["admin", "mod"]);
   });
 
-  it("AND + OR birlikte kullanılır — placeholder sıraları doğru", () => {
+  it("AND + OR used together — placeholder order is correct", () => {
     const { sql, values } = parseWhereConditions(
       ["status.eq.active"],
       ["role.eq.admin", "role.eq.mod"]
@@ -255,7 +255,7 @@ describe("parseWhereConditions — OR desteği", () => {
     expect(values).toEqual(["active", "admin", "mod"]);
   });
 
-  it("birden fazla AND + OR birlikte", () => {
+  it("multiple AND + OR together", () => {
     const { sql, values } = parseWhereConditions(
       ["age.gt.18", "active.eq.true"],
       ["dept.eq.eng", "dept.eq.design"]
@@ -266,19 +266,19 @@ describe("parseWhereConditions — OR desteği", () => {
     expect(values).toEqual(["18", "true", "eng", "design"]);
   });
 
-  it("boş OR listesi AND-only sonuç verir", () => {
+  it("empty OR list produces an AND-only result", () => {
     const { sql, values } = parseWhereConditions(["name.eq.alice"], []);
     expect(sql).toBe('WHERE "name" = $1');
     expect(values).toEqual(["alice"]);
   });
 
-  it("OR içinde geçersiz operatör hata fırlatır", () => {
+  it("invalid operator inside OR throws", () => {
     expect(() =>
       parseWhereConditions([], ["field.INVALID.x"])
     ).toThrow(/Unknown operator/);
   });
 
-  it("OR içinde geçersiz kolon adı hata fırlatır", () => {
+  it("invalid column name inside OR throws", () => {
     expect(() =>
       parseWhereConditions([], ["drop.eq.x"])
     ).toThrow();
@@ -286,31 +286,31 @@ describe("parseWhereConditions — OR desteği", () => {
 });
 
 describe("parseSelectColumns", () => {
-  it("* için * döner", () => {
+  it("returns * for *", () => {
     expect(parseSelectColumns("*")).toBe("*");
   });
 
-  it("boş string için * döner", () => {
+  it("returns * for empty string", () => {
     expect(parseSelectColumns("")).toBe("*");
   });
 
-  it("undefined için * döner", () => {
+  it("returns * for undefined", () => {
     expect(parseSelectColumns(undefined)).toBe("*");
   });
 
-  it("kolon listesini quote'lar", () => {
+  it("quotes a column list", () => {
     expect(parseSelectColumns("id,name,email")).toBe('"id", "name", "email"');
   });
 
-  it("tek kolon quote'lanır", () => {
+  it("quotes a single column", () => {
     expect(parseSelectColumns("id")).toBe('"id"');
   });
 
-  it("boşlukları trim eder", () => {
+  it("trims whitespace from column names", () => {
     expect(parseSelectColumns("id, name, email")).toBe('"id", "name", "email"');
   });
 
-  it("geçersiz kolon adında hata fırlatır", () => {
+  it("throws on invalid column name", () => {
     expect(() => parseSelectColumns("id,drop,name")).toThrow();
   });
 
@@ -363,7 +363,7 @@ describe("parseSelect — aggregates (E-20)", () => {
     expect(() => parseSelect("*,amount.sum()")).toThrow(/\*/);
   });
 
-  it("rejects invalid agg column", () => {
+  it("rejects invalid aggregate column", () => {
     expect(() => parseSelect("drop.sum()")).toThrow();
   });
 
@@ -409,24 +409,24 @@ describe("parseWhereConditions — cast (E-18)", () => {
 });
 
 describe("parseOrderBy", () => {
-  it("asc sıralamayı çevirir", () => {
+  it("translates asc ordering", () => {
     expect(parseOrderBy("name.asc")).toBe('ORDER BY "name" ASC');
   });
 
-  it("desc sıralamayı çevirir", () => {
+  it("translates desc ordering", () => {
     expect(parseOrderBy("created_at.desc")).toBe('ORDER BY "created_at" DESC');
   });
 
-  it("tanımsız için boş string döner", () => {
+  it("returns empty string for undefined", () => {
     expect(parseOrderBy()).toBe("");
     expect(parseOrderBy(undefined)).toBe("");
   });
 
-  it("geçersiz yön için hata fırlatır", () => {
+  it("throws on invalid order direction", () => {
     expect(() => parseOrderBy("name.RANDOM")).toThrow(/Invalid order direction/);
   });
 
-  it("geçersiz kolon adı için hata fırlatır", () => {
+  it("throws on invalid column name", () => {
     expect(() => parseOrderBy("drop.asc")).toThrow();
   });
 });

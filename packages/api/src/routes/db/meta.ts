@@ -1,7 +1,7 @@
 /**
- * DB metadata route'ları:
- *   GET /db/:database/size   — DB disk boyutu
- *   GET /db/:database/stats  — Tablo bazlı satır sayısı + boyut
+ * DB metadata routes:
+ *   GET /db/:database/size   — DB disk size
+ *   GET /db/:database/stats  — Per-table row count + size
  */
 
 import type { FastifyInstance } from "fastify";

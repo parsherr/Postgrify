@@ -5,7 +5,7 @@
  * email_verify_required=true  → 200 + empty tokens, same shape.
  * Request: full_name / metadata / data (Supabase SDK `data` object).
  *
- * Rate limit: 5 req/dk (spam kaydı önle).
+ * Rate limit: 5 req/min (prevent spam registrations).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -24,8 +24,8 @@ import crypto from "node:crypto";
 import { validatePassword, parsePolicyFromSettings } from "../../../utils/passwordPolicy.js";
 
 /**
- * Verification token'ı SHA-256 ile hash'ler — DB'de ham token saklanmaz.
- * Email bağlantısında plain token gönderilir; DB'de yalnızca hash tutulur.
+ * Hashes the verification token with SHA-256 — the raw token is never stored in the DB.
+ * The plain token is sent in the email link; only the hash is kept in the DB.
  */
 function hashVerificationToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");

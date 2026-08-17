@@ -1,6 +1,6 @@
 /**
- * GET /admin/stats — Servis geneli istatistik.
- * Aktif pool sayısı, toplam DB boyutu, uptime.
+ * GET /admin/stats — Service-wide statistics.
+ * Active pool count, total DB size, uptime.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -10,8 +10,8 @@ export async function statsRoute(server: FastifyInstance) {
   server.get(
     "/stats",
     {
-      // Güvenlik: admin istatistikleri (aktif DB listesi, uptime, Node versiyonu)
-      // kimlik doğrulaması gerektirmeli — bilgi sızıntısı riski.
+      // Security: admin statistics (active DB list, uptime, Node version)
+      // must require authentication — risk of information leakage.
       preHandler: [server.authenticateAdmin],
       schema: {
         description: "Service-wide statistics (requires admin token)",

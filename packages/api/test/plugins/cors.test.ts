@@ -1,7 +1,7 @@
 /**
- * CORS plugin testleri.
- * Development modunda tüm origin'lere izin verildiğini,
- * production modunda sadece CORS_ORIGINS listesine izin verildiğini doğrular.
+ * CORS plugin tests.
+ * Verifies that all origins are allowed in development mode,
+ * and that only the CORS_ORIGINS list is allowed in production mode.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -50,8 +50,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("CORS plugin — development modu", () => {
-  it("OPTIONS isteğine 204 döner", async () => {
+describe("CORS plugin — development mode", () => {
+  it("returns 204 for OPTIONS requests", async () => {
     const res = await server.inject({
       method: "OPTIONS",
       url: "/ping",
@@ -60,11 +60,11 @@ describe("CORS plugin — development modu", () => {
         "access-control-request-method": "GET",
       },
     });
-    // Fastify CORS preflight için 204 döner
+    // Fastify returns 204 for CORS preflight
     expect([200, 204]).toContain(res.statusCode);
   });
 
-  it("GET isteğine Access-Control-Allow-Origin header'ı ekler", async () => {
+  it("adds the Access-Control-Allow-Origin header to GET requests", async () => {
     const res = await server.inject({
       method: "GET",
       url: "/ping",
@@ -74,7 +74,7 @@ describe("CORS plugin — development modu", () => {
     expect(res.headers["access-control-allow-origin"]).toBeTruthy();
   });
 
-  it("X-Database header'ına izin verilir (allowedHeaders kontrolü)", async () => {
+  it("X-Database header is allowed (allowedHeaders check)", async () => {
     const res = await server.inject({
       method: "OPTIONS",
       url: "/ping",

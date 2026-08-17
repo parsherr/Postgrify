@@ -1,5 +1,5 @@
 /**
- * Satır CRUD hook'ları.
+ * Row CRUD hooks.
  * C-01: list body = array; total from Content-Range when Prefer: count=exact.
  */
 

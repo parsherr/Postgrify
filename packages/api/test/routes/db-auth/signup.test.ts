@@ -1,5 +1,5 @@
 /**
- * Signup route testleri.
+ * Signup route tests.
  *
  * POST /:database/auth/signup
  */
@@ -99,12 +99,12 @@ beforeEach(() => {
 });
 
 describe("POST /:database/auth/signup", () => {
-  it("Başarılı signup → 201, user objesi döner", async () => {
+  it("Successful signup → 201, returns user object", async () => {
     sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
       const q = strings[0] ?? "";
-      // Email unique kontrol → yok
+      // Email uniqueness check → none found
       if (q.includes("WHERE email =")) return Promise.resolve([]);
-      // INSERT user → döner
+      // INSERT user → returns
       if (q.includes("INSERT INTO _postgrify_auth.users")) {
         return Promise.resolve([{
           id: "new-uuid-1",
@@ -132,7 +132,7 @@ describe("POST /:database/auth/signup", () => {
     });
   });
 
-  it("Signup email_signup_enabled=false → 403", async () => {
+  it("Signup with email_signup_enabled=false → 403", async () => {
     mockGetAuthSetting.mockImplementation((_sql: unknown, key: string, def: string) => {
       if (key === "email_signup_enabled") return Promise.resolve("false");
       return Promise.resolve(def);
@@ -151,7 +151,7 @@ describe("POST /:database/auth/signup", () => {
   it("Duplicate email → 409 Email already registered", async () => {
     sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
       const q = strings[0] ?? "";
-      // Email zaten var
+      // Email already exists
       if (q.includes("WHERE email =")) {
         return Promise.resolve([{ id: "existing-uuid" }]);
       }
@@ -168,7 +168,7 @@ describe("POST /:database/auth/signup", () => {
     expect(res.json().error).toContain("already registered");
   });
 
-  it("Kısa şifre (< 8 karakter) → 400 validation", async () => {
+  it("Short password (< 8 characters) → 400 validation", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/auth/signup",
@@ -178,7 +178,7 @@ describe("POST /:database/auth/signup", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("Geçersiz email formatı → 400 validation", async () => {
+  it("Invalid email format → 400 validation", async () => {
     const res = await server.inject({
       method: "POST",
       url: "/testdb/auth/signup",
@@ -188,7 +188,7 @@ describe("POST /:database/auth/signup", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("email_verify_required=true → response'da email_verify_sent alanı var", async () => {
+  it("email_verify_required=true → response has the email_verify_sent field", async () => {
     mockGetAuthSetting.mockImplementation((_sql: unknown, key: string, def: string) => {
       if (key === "email_signup_enabled") return Promise.resolve("true");
       if (key === "email_verify_required") return Promise.resolve("true");
@@ -222,7 +222,7 @@ describe("POST /:database/auth/signup", () => {
     expect(body.message).toContain("verify your email");
   });
 
-  it("full_name ile signup → 200", async () => {
+  it("signup with full_name → 200", async () => {
     sqlFnRef.mockImplementation((strings: TemplateStringsArray) => {
       const q = strings[0] ?? "";
       if (q.includes("WHERE email =")) return Promise.resolve([]);

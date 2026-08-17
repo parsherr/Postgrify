@@ -1,18 +1,18 @@
 /**
- * API yanıt tipleri.
+ * API response types.
  */
 
 export interface Database {
   name: string;
-  /** PostgreSQL bigint → string olarak gelebilir, Number() ile parse et */
+  /** PostgreSQL bigint → may arrive as string; parse with Number() */
   size_bytes: number | string;
-  /** cross-DB sorgu kısıtı nedeniyle güvenilmez, 0 gelebilir */
+  /** Unreliable due to cross-DB query restrictions; may be 0 */
   table_count: number;
   }
 
 export interface TableInfo {
   name: string;
-  /** pg_class.reltuples: -1 = hiç ANALYZE edilmemiş, 0 = boş, >0 tahmin */
+  /** pg_class.reltuples: -1 = never ANALYZEd, 0 = empty, >0 = estimate */
   estimated_row_count: number;
   size: string;
 }

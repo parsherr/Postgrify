@@ -1,10 +1,10 @@
 /**
- * Magic Link akışı (şifresiz giriş):
+ * Magic link flow (passwordless login):
  *
- *   POST /:database/auth/magic-link         — link isteği, email gönder
- *   GET  /:database/auth/magic-link/verify  — token doğrula, session oluştur
+ *   POST /:database/auth/magic-link         — request a link, send email
+ *   GET  /:database/auth/magic-link/verify  — validate token, create session
  *
- * Kullanıcı yoksa otomatik kayıt yapılır (email_verified=true, şifresiz).
+ * If the user does not exist, they are automatically registered (email_verified=true, passwordless).
  */
 
 import type postgres from "postgres";
@@ -77,7 +77,7 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         });
       }
 
-      // Kullanıcı yoksa oluştur (email_verified=true, şifresiz)
+      // Create user if not found (email_verified=true, passwordless)
       let [user] = await sql`
         SELECT id, email, role, is_active
         FROM _postgrify_auth.users
@@ -87,8 +87,8 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
       if (!user) {
         const signupEnabled = await getAuthSetting(sql, "email_signup_enabled", "true");
         if (signupEnabled !== "true") {
-          // User enumeration koruması — yine de 200 dön
-          return reply.send({ ok: true, message: "Giriş linki email adresinize gönderildi." });
+          // User enumeration protection — return 200 regardless
+          return reply.send({ ok: true, message: "Sign-in link sent to your email address." });
         }
 
         [user] = await sql`
@@ -105,12 +105,12 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
       }
 
       if (!user.is_active) {
-        // User enumeration koruması
-        return reply.send({ ok: true, message: "Giriş linki email adresinize gönderildi." });
+        // User enumeration protection
+        return reply.send({ ok: true, message: "Sign-in link sent to your email address." });
       }
 
       const magicToken = crypto.randomBytes(32).toString("hex");
-      // Güvenlik: token hash'i sakla, raw token'ı değil.
+      // Security: store the token hash, not the raw token.
       const magicTokenHash = crypto.createHash("sha256").update(magicToken).digest("hex");
       const magicExp = new Date(Date.now() + (await magicLinkTtlMs(sql)));
 
@@ -135,7 +135,7 @@ export async function authMagicLinkRoute(server: FastifyInstance) {
         email: user.email as string,
       })).catch((err) => server.log.warn({ err }, "Failed to send magic link email"));
 
-      return reply.send({ ok: true, message: "Giriş linki email adresinize gönderildi." });
+      return reply.send({ ok: true, message: "Sign-in link sent to your email address." });
     })
   );
 
