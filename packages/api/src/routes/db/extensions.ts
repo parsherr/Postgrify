@@ -174,6 +174,20 @@ export async function extensionsRoute(server: FastifyInstance) {
       }
 
       const sql = server.poolManager.getPool(dbName);
+
+      // Check installed before DROP — IF EXISTS silently succeeds on missing extensions.
+      const [existing] = await sql`
+        SELECT installed_version
+        FROM pg_catalog.pg_available_extensions
+        WHERE name = ${ext} AND installed_version IS NOT NULL
+      `;
+      if (!existing) {
+        return reply.status(404).send({
+          error: `Extension "${ext}" is not installed`,
+          name: ext,
+        });
+      }
+
       try {
         await sql.unsafe(`DROP EXTENSION IF EXISTS "${ext}"`);
       } catch (e) {
