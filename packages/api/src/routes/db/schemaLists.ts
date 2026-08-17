@@ -14,6 +14,7 @@
 import type { FastifyInstance } from "fastify";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { scopeGuard } from "../../middleware/scopeGuard.js";
+import { assertIdentifier } from "../../utils/identifier.js";
 import { TTL } from "../../services/cacheService.js";
 
 export async function schemaListsRoute(server: FastifyInstance) {
@@ -52,6 +53,73 @@ export async function schemaListsRoute(server: FastifyInstance) {
 
       await server.cache.set(cacheKey, JSON.stringify(schemas), TTL.SCHEMA);
       return reply.send(schemas);
+    })
+  );
+
+  // ── E-80 POST /schemas ────────────────────────────────────────────────────
+  server.post(
+    "/:database/schemas",
+    {
+      preHandler: [scopeGuard("schema")],
+      schema: {
+        description:
+          "Create a PostgreSQL schema (E-80). Validates name; 409 on duplicate.",
+        tags: ["schema"],
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: { name: { type: "string" } },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              name:    { type: "string" },
+              created: { type: "boolean" },
+              owner:   { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    asyncHandler(async (req, reply) => {
+      const dbName = req.dbName!;
+      const { name } = req.body as { name: string };
+
+      try {
+        assertIdentifier(name, "schema");
+      } catch {
+        return reply.status(400).send({ error: "Invalid schema name" });
+      }
+
+      const sql = server.poolManager.getPool(dbName);
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA "${name}"`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/already exists/i.test(msg)) {
+          return reply.status(409).send({ error: `Schema "${name}" already exists` });
+        }
+        throw err;
+      }
+
+      // Invalidate schemas cache after create.
+      const cacheKey = server.cache.buildKey(dbName, "schemas");
+      await server.cache.del(cacheKey);
+
+      const [row] = await sql`
+        SELECT n.nspname AS name,
+               pg_catalog.pg_get_userbyid(n.nspowner) AS owner
+        FROM pg_catalog.pg_namespace n
+        WHERE n.nspname = ${name}
+      `;
+
+      return reply.status(201).send({
+        name: row ? String(row.name) : name,
+        created: true,
+        owner: row ? String(row.owner) : "",
+      });
     })
   );
 
